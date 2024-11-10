@@ -14,6 +14,8 @@
 #include "cluster/errc.h"
 #include "cluster/fwd.h"
 #include "config/property.h"
+#include "features/fwd.h"
+#include "kafka/data/rpc/fwd.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
 #include "model/record.h"
@@ -50,6 +52,8 @@ public:
       std::unique_ptr<cluster_members_cache>,
       ss::sharded<::rpc::connection_cache>*,
       ss::sharded<local_service>*,
+      ss::sharded<kafka::data::rpc::client>*,
+      ss::sharded<features::feature_table>*,
       config::binding<size_t>);
     client(client&&) = delete;
     client& operator=(client&&) = delete;
@@ -261,6 +265,8 @@ private:
     std::unique_ptr<topic_creator> _topic_creator;
     ss::sharded<::rpc::connection_cache>* _connections;
     ss::sharded<local_service>* _local_service;
+    ss::sharded<kafka::data::rpc::client>* _kafka_client;
+    ss::sharded<features::feature_table>* _feature_table;
     ss::abort_source _as;
     ss::gate _gate;
     mutex _wasm_binary_max_size_updater_mu{

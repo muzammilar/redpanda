@@ -15,6 +15,8 @@
 #include "cluster/errc.h"
 #include "cluster/types.h"
 #include "config/configuration.h"
+#include "features/feature_table.h"
+#include "kafka/data/rpc/client.h"
 #include "logger.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
@@ -187,6 +189,8 @@ client::client(
   std::unique_ptr<cluster_members_cache> m,
   ss::sharded<::rpc::connection_cache>* c,
   ss::sharded<local_service>* s,
+  ss::sharded<kafka::data::rpc::client>* k,
+  ss::sharded<features::feature_table>* ft,
   config::binding<size_t> b)
   : _self(self)
   , _cluster_members(std::move(m))
@@ -195,10 +199,17 @@ client::client(
   , _topic_creator(std::move(t))
   , _connections(c)
   , _local_service(s)
+  , _kafka_client(k)
+  , _feature_table(ft)
   , _max_wasm_binary_size(std::move(b)) {}
 
 ss::future<cluster::errc> client::produce(
   model::topic_partition tp, ss::chunked_fifo<model::record_batch> batches) {
+    if (_feature_table->local().is_active(features::feature::kafka_data_rpc)) {
+        co_return co_await _kafka_client->local().produce(
+          std::move(tp), std::move(batches));
+    }
+
     if (batches.empty()) {
         co_return cluster::errc::success;
     }

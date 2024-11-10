@@ -16,12 +16,14 @@ v_cc_library(
     service.cc
     deps.cc
   DEPS
-    generated_transform_rpc 
+    generated_transform_rpc
     v::cluster
+    v::features
     v::model
     v::rpc
     v::kafka_partition_proxy
     v::transform_stm
+    v::kd_rpc
     Seastar::seastar
 )
 
