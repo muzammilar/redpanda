@@ -151,6 +151,7 @@ void admin_server::register_debug_routes() {
           parse_int(
             "max_spins_per_scheduling_point",
             cfg.max_spins_per_scheduling_point);
+          parse_int("stack_depth", cfg.stack_depth);
           parse_int(
             "min_ms_per_scheduling_point", cfg.min_ms_per_scheduling_point);
           parse_int(

@@ -21,6 +21,9 @@ struct stress_config {
     // If set, "delay" variants should not be set.
     std::optional<int> min_spins_per_scheduling_point;
     std::optional<int> max_spins_per_scheduling_point;
+    // The (additional) stack depth the spin function should
+    // have, which is useful for stressing the CPU profiler.
+    std::optional<int> stack_depth;
 
     // Time in milliseconds to spin for between each scheduling point.
     // If set, "spins" variants should not be set.

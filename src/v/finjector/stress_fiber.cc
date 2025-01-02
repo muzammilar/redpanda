@@ -34,7 +34,7 @@ private:
 
     // Runs a single fiber that spins the given number of times per scheduling
     // point, until an abort is requested.
-    ss::future<> run_count_fiber(int min_count, int max_count);
+    ss::future<> run_count_fiber(int depth, int min_count, int max_count);
     ss::future<> run_delay_fiber(int min_ms, int max_ms);
 
     ss::gate _gate;
@@ -48,6 +48,7 @@ stress_payload::stress_payload(stress_config cfg) {
         for (size_t i = 0; i < cfg.num_fibers; i++) {
             ssx::spawn_with_gate(_gate, [cfg, this] {
                 return run_count_fiber(
+                  cfg.stack_depth.value_or(0),
                   *cfg.min_spins_per_scheduling_point,
                   *cfg.max_spins_per_scheduling_point);
             });
@@ -66,13 +67,11 @@ stress_payload::stress_payload(stress_config cfg) {
     }
 }
 
-ss::future<> stress_payload::run_count_fiber(int min_count, int max_count) {
-    while (!_as.abort_requested()) {
-        int spins_per_scheduling_point = min_count == max_count
-                                           ? min_count
-                                           : random_generators::get_int(
-                                               min_count, max_count);
-        co_await ss::maybe_yield();
+[[gnu::noinline]]
+static void spinner(int depth, int spins_per_scheduling_point) { // NOLINT
+    if (depth > 0) {
+        spinner(depth - 1, spins_per_scheduling_point);
+    } else {
         volatile int spins = 0;
         while (true) {
             if (spins == spins_per_scheduling_point) {
@@ -80,6 +79,19 @@ ss::future<> stress_payload::run_count_fiber(int min_count, int max_count) {
             }
             spins = spins + 1;
         }
+    }
+}
+
+ss::future<>
+// NOLINTNEXTLINE
+stress_payload::run_count_fiber(int depth, int min_count, int max_count) {
+    while (!_as.abort_requested()) {
+        int spins_per_scheduling_point = min_count == max_count
+                                           ? min_count
+                                           : random_generators::get_int(
+                                               min_count, max_count);
+        spinner(depth, spins_per_scheduling_point);
+        co_await ss::maybe_yield();
     }
 }
 
