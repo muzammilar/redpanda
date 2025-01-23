@@ -161,4 +161,5 @@ INSTANTIATE_TEST_SUITE_P(
     "message_proto3",
     "service_proto2",
     "service_proto3",
-    "extension_ranges"));
+    "extension_ranges",
+    "composite_extension"));
