@@ -31,18 +31,11 @@ public:
     scram_credential() noexcept = default;
 
     scram_credential(
-      bytes salt, bytes server_key, bytes stored_key, int iterations) noexcept
-      : _salt(std::move(salt))
-      , _server_key(std::move(server_key))
-      , _stored_key(std::move(stored_key))
-      , _iterations(iterations) {}
-
-    scram_credential(
       bytes salt,
       bytes server_key,
       bytes stored_key,
       int iterations,
-      acl_principal principal) noexcept
+      std::optional<acl_principal> principal = std::nullopt) noexcept
       : _salt(std::move(salt))
       , _server_key(std::move(server_key))
       , _stored_key(std::move(stored_key))
