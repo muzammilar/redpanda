@@ -71,6 +71,7 @@ v_cc_library(
     snapshot_json.cc
     struct_accessor.cc
     table_io.cc
+    table_metadata.cc
     table_metadata_json.cc
     table_requests_json.cc
     table_update_applier.cc
