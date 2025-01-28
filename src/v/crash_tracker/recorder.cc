@@ -36,8 +36,7 @@ recorder& get_recorder() {
     return inst;
 }
 
-ss::future<> recorder::start() {
-    // Ensure that the crash report directory exists
+ss::future<> recorder::ensure_crashdir_exists() const {
     auto crash_report_dir = config::node().crash_report_dir_path();
     if (!co_await ss::file_exists(crash_report_dir.string())) {
         vlog(
@@ -50,6 +49,10 @@ ss::future<> recorder::start() {
           "Successfully created crash report directory {}",
           crash_report_dir.string());
     }
+}
+
+ss::future<std::filesystem::path> recorder::generate_crashfile_name() const {
+    auto crash_report_dir = config::node().crash_report_dir_path();
 
     // Loop a few times to avoid (very unlikely) collisions in the filename
     std::optional<std::filesystem::path> crash_file_name{};
@@ -64,16 +67,16 @@ ss::future<> recorder::start() {
             continue;
         }
 
-        crash_file_name = try_name;
-        break;
-    }
-    if (!crash_file_name) {
-        // The anti-collision above should ensure that we never reach this
-        throw std::runtime_error(
-          "Failed to create a unique crash recorder file");
+        co_return try_name;
     }
 
-    co_await _writer.initialize(*crash_file_name);
+    // The anti-collision above should ensure that we never reach this
+    throw std::runtime_error("Failed to create a unique crash recorder file");
+}
+
+ss::future<> recorder::start() {
+    co_await ensure_crashdir_exists();
+    co_await _writer.initialize(co_await generate_crashfile_name());
 }
 
 namespace {

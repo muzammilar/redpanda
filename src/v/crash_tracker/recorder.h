@@ -44,6 +44,9 @@ private:
     recorder() = default;
     ~recorder() = default;
 
+    ss::future<> ensure_crashdir_exists() const;
+    ss::future<std::filesystem::path> generate_crashfile_name() const;
+
     prepared_writer _writer;
 
     friend recorder& get_recorder();
