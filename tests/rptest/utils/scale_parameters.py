@@ -57,7 +57,7 @@ class ScaleParameters:
         self.tiered_storage_enabled = tiered_storage_enabled
         self.partition_memory_reserve_percentage = partition_memory_reserve_percentage
 
-        node_count = len(self.redpanda.nodes)
+        self.node_count = node_count = len(self.redpanda.nodes)
 
         node_memory_mib = self.redpanda.get_node_memory_mb()
         self.node_cpus = self.redpanda.get_node_cpu_count()
