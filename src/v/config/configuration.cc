@@ -2453,6 +2453,17 @@ configuration::configuration()
       "and shouldn't be set in production.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       false)
+  , cloud_storage_enable_segment_uploads(
+      *this,
+      "cloud_storage_enable_segment_uploads",
+      "This property gates log segment upload in the Tiered-Storage subsystem. "
+      "It can be used to temporarily pause all segment uploads in the Redpanda "
+      "cluster. When the uploads are paused the "
+      "'cloud_storage_enable_remote_allow_gaps' cluster configuration or "
+      "'redpanda.remote.allowgaps' topic property determines how the local "
+      "retention should behave.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      true)
   , cloud_storage_enable_remote_allow_gaps(
       *this,
       "cloud_storage_enable_remote_allow_gaps",

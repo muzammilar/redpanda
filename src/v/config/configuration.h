@@ -475,6 +475,8 @@ struct configuration final : public config_store {
     property<std::chrono::milliseconds> cloud_storage_hydration_timeout_ms;
     property<bool> cloud_storage_disable_remote_labels_for_tests;
 
+    // Safe pause/resume functionality
+    property<bool> cloud_storage_enable_segment_uploads;
     property<bool> cloud_storage_enable_remote_allow_gaps;
 
     // Azure Blob Storage
