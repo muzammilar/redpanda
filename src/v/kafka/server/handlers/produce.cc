@@ -47,10 +47,10 @@
 #include <string_view>
 
 namespace kafka {
-
+namespace {
 static constexpr auto despam_interval = std::chrono::minutes(5);
 
-static void fill_response_with_errors(
+void fill_response_with_errors(
   produce_request::topic_cit topics_begin,
   produce_request::topic_cit topics_end,
   error_code error,
@@ -70,20 +70,6 @@ static void fill_response_with_errors(
     }
 }
 
-produce_response produce_request::make_error_response(error_code error) const {
-    produce_response response;
-    fill_response_with_errors(
-      data.topics.cbegin(), data.topics.cend(), error, response);
-    return response;
-}
-
-produce_response produce_request::make_full_disk_response() const {
-    auto resp = make_error_response(error_code::broker_not_available);
-    // TODO set a field in response to signal to quota manager to throttle the
-    // client
-    return resp;
-}
-
 struct topic_produce_stages {
     ss::future<> dispatched;
     ss::future<produce_response::topic> produced;
@@ -97,7 +83,7 @@ partition_produce_stages make_ready_stage(produce_response::partition p) {
     };
 }
 
-static raft::replicate_options
+raft::replicate_options
 acks_to_replicate_options(int16_t acks, std::chrono::milliseconds timeout) {
     switch (acks) {
     case -1:
@@ -111,7 +97,7 @@ acks_to_replicate_options(int16_t acks, std::chrono::milliseconds timeout) {
     };
 }
 
-static error_code map_produce_error_code(std::error_code ec) {
+error_code map_produce_error_code(std::error_code ec) {
     if (ec.category() == raft::error_category()) {
         switch (static_cast<raft::errc>(ec.value())) {
         case raft::errc::not_leader:
@@ -161,7 +147,7 @@ static error_code map_produce_error_code(std::error_code ec) {
  * Caller is expected to catch errors that may be thrown while the kafka
  * batch is being deserialized (see reader_from_kafka_batch).
  */
-static partition_produce_stages partition_append(
+partition_produce_stages partition_append(
   model::partition_id id,
   ss::lw_shared_ptr<replicated_partition> partition,
   model::batch_identity bid,
@@ -221,7 +207,7 @@ ss::future<produce_response::partition> finalize_request_with_error_code(
  * to the broker's time. returns the new timestamp to set as max_timestamp to
  * the batch, if present
  */
-static auto validate_batch_timestamps(
+auto validate_batch_timestamps(
   const model::ntp& ntp,
   const model::record_batch_header& header,
   model::timestamp_type timestamp_type,
@@ -297,7 +283,7 @@ static auto validate_batch_timestamps(
 /**
  * \brief handle writing to a single topic partition.
  */
-static partition_produce_stages produce_topic_partition(
+partition_produce_stages produce_topic_partition(
   produce_ctx& octx,
   produce_request::topic& topic,
   produce_request::partition& part) {
@@ -473,20 +459,10 @@ static partition_produce_stages produce_topic_partition(
       .produced = std::move(f),
     };
 }
-
-namespace testing {
-partition_produce_stages produce_single_partition(
-  produce_ctx& octx,
-  produce_request::topic& topic,
-  produce_request::partition& part) {
-    return produce_topic_partition(octx, topic, part);
-}
-} // namespace testing
-
 /**
  * \brief Dispatch and collect topic partition produce responses
  */
-static topic_produce_stages
+topic_produce_stages
 produce_topic(produce_ctx& octx, produce_request::topic& topic) {
     std::vector<ss::future<produce_response::partition>> partitions_produced;
     std::vector<ss::future<>> partitions_dispatched;
@@ -606,7 +582,7 @@ produce_topic(produce_ctx& octx, produce_request::topic& topic) {
 /**
  * \brief Dispatch and collect topic produce responses
  */
-static std::vector<topic_produce_stages> produce_topics(produce_ctx& octx) {
+std::vector<topic_produce_stages> produce_topics(produce_ctx& octx) {
     std::vector<topic_produce_stages> topics;
     topics.reserve(octx.request.data.topics.size());
 
@@ -616,7 +592,29 @@ static std::vector<topic_produce_stages> produce_topics(produce_ctx& octx) {
 
     return topics;
 }
+} // namespace
 
+produce_response produce_request::make_error_response(error_code error) const {
+    produce_response response;
+    fill_response_with_errors(
+      data.topics.cbegin(), data.topics.cend(), error, response);
+    return response;
+}
+
+produce_response produce_request::make_full_disk_response() const {
+    auto resp = make_error_response(error_code::broker_not_available);
+    // TODO set a field in response to signal to quota manager to throttle the
+    // client
+    return resp;
+}
+namespace testing {
+partition_produce_stages produce_single_partition(
+  produce_ctx& octx,
+  produce_request::topic& topic,
+  produce_request::partition& part) {
+    return produce_topic_partition(octx, topic, part);
+}
+} // namespace testing
 template<>
 process_result_stages
 produce_handler::handle(request_context ctx, ss::smp_service_group ssg) {
