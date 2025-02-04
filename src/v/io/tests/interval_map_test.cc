@@ -72,66 +72,71 @@ TEST(IntervalMap, InsertLeftAbut) {
     EXPECT_TRUE(res.second);
 }
 
-TEST(IntervalMap, InsertOverlapNoGap) {
+TEST(IntervalMap, InsertOverlapWithNoGapRejected) {
     imap map;
 
-    // [0, 10) [10, 20)
+    // [0, 10) [10, 20) [20, 21)
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
     EXPECT_TRUE(map.insert({10, 10}, 0).second);
+    EXPECT_TRUE(map.insert({20, 1}, 0).second);
 
-    // overlap left
+    // overlap first rejected
     for (unsigned int i = 0; i < 10; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(0));
         EXPECT_FALSE(res.second);
     }
 
-    // overlap right
+    // overlap second rejected
     for (unsigned int i = 10; i < 20; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(10));
         EXPECT_FALSE(res.second);
     }
 
+    // overlap third rejected
     auto res = map.insert({20, 1}, 0);
-    EXPECT_NE(res.first, map.find(0));
-    EXPECT_NE(res.first, map.find(10));
-    EXPECT_TRUE(res.second);
+    EXPECT_EQ(res.first, map.find(20));
+    EXPECT_FALSE(res.second);
 }
 
-TEST(IntervalMap, InsertOverlapWithGap) {
+TEST(IntervalMap, InsertWithSparseOverlaps) {
     imap map;
 
     // [0, 10) [20, 30)
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
     EXPECT_TRUE(map.insert({20, 10}, 0).second);
 
-    // overlap left
+    // overlap left rejected
     for (unsigned int i = 0; i < 10; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(0));
         EXPECT_FALSE(res.second);
     }
 
+    // intervals in between can be inserted
     for (unsigned int i = 10; i < 20; ++i) {
         auto res = map.insert({i, 1}, 0);
+        EXPECT_EQ(res.first, map.find(i));
         EXPECT_NE(res.first, map.find(0));
         EXPECT_NE(res.first, map.find(20));
         EXPECT_TRUE(res.second);
     }
 
-    // overlap right
+    // overlap right rejected
     for (unsigned int i = 20; i < 30; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(20));
         EXPECT_FALSE(res.second);
     }
 
-    auto res = map.insert({30, 1}, 0);
+    // intervals to the right can be inserted
+    const auto res = map.insert({30, 1}, 0);
+    EXPECT_EQ(res.first, map.find(30));
+    EXPECT_TRUE(res.second);
     for (int i = 0; i < 30; ++i) {
         EXPECT_NE(res.first, map.find(i));
     }
-    EXPECT_TRUE(res.second);
 }
 
 TEST(IntervalMap, FindEmpty) {
