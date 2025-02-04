@@ -2058,8 +2058,8 @@ consensus::do_append_entries(append_entries_request&& r) {
         auto it = r.batches().begin();
         for (; it != r.batches().end(); ++it) {
             model::offset last_batch_offset
-              = last_matched
-                + model::offset(it->header().last_offset_delta + 1);
+              = model::offset(it->header().last_offset_delta)
+                + model::next_offset(last_matched);
             if (
               last_batch_offset > last_log_offset
               || get_term(last_batch_offset) != it->term()) {
