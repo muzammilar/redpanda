@@ -2079,6 +2079,25 @@ consensus::do_append_entries(append_entries_request&& r) {
               last_matched,
               meta());
             adjusted_prev_log_index = last_matched;
+            // all batches match, we can skip the append and inform the leader
+            // about the last matching index
+            if (batches.empty()) {
+                vlog(
+                  _ctxlog.info,
+                  "all records in received append entries request are already "
+                  "present. "
+                  "Last matching offset: {}, current protocol state: {}",
+                  adjusted_prev_log_index,
+                  meta());
+
+                reply.last_dirty_log_index = adjusted_prev_log_index;
+                // limit the last flushed offset as the adjusted_prev_log_index
+                // may have not yet been flushed.
+                reply.last_flushed_log_index = std::min(
+                  adjusted_prev_log_index, _flushed_offset);
+                reply.result = reply_result::success;
+                co_return reply;
+            }
         }
         r.batches() = std::move(batches);
     }
