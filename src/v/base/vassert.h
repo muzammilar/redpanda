@@ -90,14 +90,13 @@ inline assert_log_holder g_assert_log_holder;
     do {                                                                       \
         /*The !(x) is not an error. see description above*/                    \
         if (unlikely(!(x))) {                                                  \
-            ::detail::g_assert_log.l.error(                                    \
+            ::detail::g_assert_log_holder.register_event(                      \
+              ss::current_backtrace(),                                         \
               "Assert failure: ({}:{}) '{}' " msg,                             \
               __FILE__,                                                        \
               __LINE__,                                                        \
               #x,                                                              \
               ##args);                                                         \
-            ::detail::g_assert_log.l.error(                                    \
-              "Backtrace below:\n{}", ss::current_backtrace());                \
             __builtin_trap();                                                  \
         }                                                                      \
     } while (0)
