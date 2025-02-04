@@ -163,4 +163,5 @@ INSTANTIATE_TEST_SUITE_P(
     "service_proto3",
     "extension_ranges",
     "composite_extension",
-    "nested_extension"));
+    "nested_extension",
+    "map_entry_hack"));
