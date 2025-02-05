@@ -746,7 +746,7 @@ ss::future<> raft_fixture::create_simple_group(size_t number_of_nodes) {
 
 ss::future<> raft_fixture::wait_for_committed_offset(
   model::offset offset, std::chrono::milliseconds timeout) {
-    RPTEST_REQUIRE_EVENTUALLY_CORO(timeout, [this, offset] {
+    return tests::cooperative_spin_wait_with_timeout(timeout, [this, offset] {
         return std::all_of(
           nodes().begin(), nodes().end(), [offset](auto& pair) {
               return pair.second->raft()->committed_offset() >= offset;
@@ -755,7 +755,7 @@ ss::future<> raft_fixture::wait_for_committed_offset(
 }
 ss::future<> raft_fixture::wait_for_visible_offset(
   model::offset offset, std::chrono::milliseconds timeout) {
-    RPTEST_REQUIRE_EVENTUALLY_CORO(timeout, [this, offset] {
+    return tests::cooperative_spin_wait_with_timeout(timeout, [this, offset] {
         return std::all_of(
           nodes().begin(), nodes().end(), [offset](auto& pair) {
               return pair.second->raft()->last_visible_index() >= offset;
