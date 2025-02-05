@@ -501,6 +501,16 @@ void admin_server::register_debug_routes() {
         -> ss::future<ss::json::json_return_type> {
           return get_node_uuid_handler();
       });
+
+    if constexpr (admin_server::is_store_message_enabled()) {
+        register_route_raw_async<superuser>(
+          ss::httpd::debug_json::put_ctracker_va,
+          [this](
+            std::unique_ptr<ss::http::request> req,
+            std::unique_ptr<ss::http::reply> res) {
+              return put_ctracker_va(std::move(req), std::move(res));
+          });
+    }
 }
 
 using admin::apply_validator;
