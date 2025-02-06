@@ -105,20 +105,30 @@ namespace {
 
 void record_backtrace(crash_description& cd) {
     size_t pos = 0;
-    ss::backtrace([&cd, &pos](ss::frame f) {
+    auto printer = [&pos, &cd](auto fmt, auto&&... args) {
         if (pos >= cd.stacktrace.capacity()) {
             return; // Prevent buffer overflow
         }
 
-        const bool first = pos == 0;
         auto result = fmt::format_to_n(
           cd.stacktrace.begin() + pos,
           cd.stacktrace.capacity() - pos,
-          "{}{:#x}",
-          first ? "" : " ",
-          f.addr);
+          fmt,
+          std::forward<decltype(args)...>(args)...);
+        pos = std::min(pos + result.size, cd.stacktrace.capacity());
+    };
 
-        pos += result.size;
+    ss::backtrace([&pos, &printer](ss::frame f) {
+        const bool first = pos == 0;
+        if (!first) {
+            printer(FMT_STRING(" "), " ");
+        }
+
+        if (!f.so->name.empty()) {
+            printer(FMT_STRING("{}+"), f.so->name.c_str());
+        }
+
+        printer(FMT_STRING("{:#x}"), f.addr);
     });
 }
 
