@@ -102,6 +102,7 @@
 #include "finjector/stress_fiber.h"
 #include "kafka/client/configuration.h"
 #include "kafka/server/consumer_group_lag_metrics_frontend.h"
+#include "kafka/server/consumer_group_lag_metrics_service.h"
 #include "kafka/server/coordinator_ntp_mapper.h"
 #include "kafka/server/group_manager.h"
 #include "kafka/server/group_router.h"
@@ -3083,6 +3084,11 @@ void application::start_runtime_services(
                   smp_service_groups.datalake_sg(),
                   &_datalake_coordinator_fe));
           }
+          runtime_services.push_back(
+            std::make_unique<kafka::consumer_group_lag_metrics_service>(
+              sched_groups.cluster_sg(),
+              smp_service_groups.cluster_smp_sg(),
+              std::ref(_consumer_group_lag_metrics_frontend)));
 
           s.add_services(std::move(runtime_services));
 
