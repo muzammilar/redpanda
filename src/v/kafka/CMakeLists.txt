@@ -1,6 +1,15 @@
 add_subdirectory(protocol)
 add_subdirectory(data)
 
+include(rpcgen)
+
+rpcgen(
+  TARGET consumer_lag_metrics_rpc
+  IN_FILE ${CMAKE_CURRENT_SOURCE_DIR}/server/consumer_group_lag_metrics_rpc.json
+  OUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/server/consumer_group_lag_metrics_rpc_service.h
+  INCLUDES ${CMAKE_BINARY_DIR}/src/v
+)
+
 set(handlers_srcs
   server/handlers/api_versions.cc
   server/handlers/metadata.cc
@@ -58,6 +67,7 @@ v_cc_library(
     server/logger.cc
     server/app.cc
  DEPS
+    consumer_lag_metrics_rpc
     Seastar::seastar
     v::bytes
     v::rpc
