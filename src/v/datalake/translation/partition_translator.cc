@@ -251,6 +251,9 @@ ss::future<> partition_translator::stop() {
 }
 
 kafka::offset partition_translator::min_offset_for_translation() const {
+    if (_partition->is_read_replica_mode_enabled()) {
+        return model::offset_cast(_partition_proxy->start_offset());
+    }
     return model::offset_cast(_partition_proxy->local_start_offset());
 }
 
