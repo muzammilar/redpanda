@@ -31,6 +31,12 @@ class MountUnmountIcebergTest(RedpandaTest, DataMigrationTestMixin):
     FAST_COMMIT_INTVL_S = 5
     SLOW_COMMIT_INTVL_S = 60
 
+    # Produce for as long as unmount takes until partitions get writes blocked.
+    # It may take a couple of minutes, so we limit messages count to avoid
+    # congestion in the verifier.
+    VERY_MANY_MESSAGES = 1000000
+    LOW_PRODUCTION_INTERVAL_MS = 1
+
     verifier_schema_avro = """
 {
     "type": "record",
@@ -73,14 +79,14 @@ class MountUnmountIcebergTest(RedpandaTest, DataMigrationTestMixin):
             redpanda=self.redpanda,
             include_query_engines=[QueryEngineType.SPARK])
 
-    def avro_stream_config(self, topic, subject, cnt=3000):
+    def avro_stream_config(self, topic, subject, cnt=3000, interval_ms=None):
         mapping = dict(
             ordinal="this",
             timestamp="timestamp_unix_milli()",
             verifier_string="uuid_v4()",
         )
         return counter_stream_config(self.redpanda, topic, subject, mapping,
-                                     cnt)
+                                     cnt, interval_ms)
 
     def setUp(self):
         self.dl.setUp()
@@ -102,12 +108,16 @@ class MountUnmountIcebergTest(RedpandaTest, DataMigrationTestMixin):
             config={"redpanda.iceberg.delete": "false"})
         connect = RedpandaConnectService(self.test_context, self.redpanda)
         connect.start()
-        verifier = DatalakeVerifier(self.redpanda, self.TOPIC_NAME,
-                                    self.dl.spark())
+        verifier = DatalakeVerifier(self.redpanda,
+                                    self.TOPIC_NAME,
+                                    self.dl.spark(),
+                                    max_buffered_msgs=50000)
 
         connect.start_stream(name="ducky_stream",
                              config=self.avro_stream_config(
-                                 self.TOPIC_NAME, "verifier_schema", 1000000))
+                                 self.TOPIC_NAME, "verifier_schema",
+                                 self.VERY_MANY_MESSAGES,
+                                 self.LOW_PRODUCTION_INTERVAL_MS))
         # todo make reasonable or just make sure something went through
         self.redpanda.set_cluster_config({
             "iceberg_catalog_commit_interval_ms":
@@ -127,8 +137,10 @@ class MountUnmountIcebergTest(RedpandaTest, DataMigrationTestMixin):
         # the topic goes read-only during this wait
         self.wait_for_migration_states(out_migration_id, ['executed'])
         connect.stop_stream("ducky_stream", should_finish=False)
-        time.sleep(1)  # just it case: let verifier consume remaining messages
-        verifier.go_offline()
+        # go_offline waits for consuming till migration blocking offset,
+        # consume thread waits for query thread as comparison buffer size is
+        # limited, and querying may lag due to translation lag
+        verifier.go_offline(600)
 
         self.admin.execute_data_migration_action(out_migration_id,
                                                  MigrationAction.finish)
@@ -147,15 +159,19 @@ class MountUnmountIcebergTest(RedpandaTest, DataMigrationTestMixin):
             iceberg_mode="value_schema_id_prefix")
         connect = RedpandaConnectService(self.test_context, self.redpanda)
         connect.start()
-        verifier = DatalakeVerifier(self.redpanda, self.TOPIC_NAME,
-                                    self.dl.spark())
+        verifier = DatalakeVerifier(self.redpanda,
+                                    self.TOPIC_NAME,
+                                    self.dl.spark(),
+                                    max_buffered_msgs=50000)
         self.redpanda.set_cluster_config({
             "iceberg_catalog_commit_interval_ms":
             self.SLOW_COMMIT_INTVL_S * 1000
         })
         connect.start_stream(name="ducky_stream",
                              config=self.avro_stream_config(
-                                 self.TOPIC_NAME, "verifier_schema", 100000))
+                                 self.TOPIC_NAME, "verifier_schema",
+                                 self.VERY_MANY_MESSAGES,
+                                 self.LOW_PRODUCTION_INTERVAL_MS))
         self.admin = Admin(self.redpanda)
         ns_topic = NamespacedTopic(self.TOPIC_NAME)
         self.logger.info(f"unmounting {self.TOPIC_NAME}")
