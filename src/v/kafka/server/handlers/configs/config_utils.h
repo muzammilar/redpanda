@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <type_traits>
 
 namespace kafka {
 template<typename T>
@@ -795,7 +796,9 @@ void parse_and_set_tristate(
     }
     // set property value
     if (op == config_resource_operation::set) {
-        auto parsed = boost::lexical_cast<int64_t>(*value);
+        using config_t
+          = std::conditional_t<std::is_floating_point_v<T>, T, int64_t>;
+        auto parsed = boost::lexical_cast<config_t>(*value);
         if (parsed <= 0) {
             property.value = tristate<T>{};
         } else {

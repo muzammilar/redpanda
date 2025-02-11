@@ -26,6 +26,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include <array>
+#include <type_traits>
 
 namespace kafka {
 
@@ -188,7 +189,9 @@ get_config_value(const config_map_t& config, std::string_view key) {
 template<typename T>
 tristate<T>
 get_tristate_value(const config_map_t& config, std::string_view key) {
-    auto v = get_config_value<int64_t>(config, key);
+    using config_t
+      = std::conditional_t<std::is_floating_point_v<T>, T, int64_t>;
+    auto v = get_config_value<config_t>(config, key);
     // no value set
     if (!v) {
         return tristate<T>(std::nullopt);
