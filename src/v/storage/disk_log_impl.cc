@@ -151,7 +151,7 @@ disk_log_impl::disk_log_impl(
         }
         if (s != _segs.back()) {
             auto seg_size_bytes = s->size_bytes();
-            if (!s->index().has_clean_compact_timestamp()) {
+            if (!s->has_clean_compact_timestamp()) {
                 add_dirty_segment_bytes(seg_size_bytes);
             }
             add_closed_segment_bytes(seg_size_bytes);
@@ -611,7 +611,7 @@ ss::future<bool> disk_log_impl::sliding_window_compact(
         }
 
         const auto removed_bytes = result.size_before - result.size_after;
-        if (!seg->index().has_clean_compact_timestamp()) {
+        if (!seg->has_clean_compact_timestamp()) {
             subtract_dirty_segment_bytes(removed_bytes);
         }
         subtract_closed_segment_bytes(removed_bytes);
@@ -627,7 +627,7 @@ ss::future<bool> disk_log_impl::sliding_window_compact(
     // Remove any of the segments that have already been cleanly compacted. They
     // would be no-ops to compact.
     while (!segs.empty()) {
-        if (segs.back()->index().has_clean_compact_timestamp()) {
+        if (segs.back()->has_clean_compact_timestamp()) {
             segs.pop_back();
         } else {
             break;
@@ -1326,7 +1326,7 @@ ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
           if (!s->may_have_compactible_records()) {
               return true;
           }
-          return s->index().has_clean_compact_timestamp();
+          return s->has_clean_compact_timestamp();
       });
 
     if (sliding_window_round_complete) {
@@ -1819,7 +1819,7 @@ ss::future<> disk_log_impl::new_segment(
                 if (!_segs.empty()) {
                     auto rolled_seg = _segs.back();
                     const auto closed_segment_size = rolled_seg->size_bytes();
-                    if (!rolled_seg->index().has_clean_compact_timestamp()) {
+                    if (!rolled_seg->has_clean_compact_timestamp()) {
                         add_dirty_segment_bytes(closed_segment_size);
                     }
                     add_closed_segment_bytes(closed_segment_size);
