@@ -62,7 +62,6 @@ struct field_summary_val {
 // Does not deduplicate new data files against files referenced by existing
 // manifests. This is left to the caller, if desired.
 //
-// TODO: currently throws for tables with multiple partition specs.
 // TODO: doesn't clean up any wasted (e.g. on error) manifest files.
 // TODO: shouldn't be too difficult to parallelize IO.
 class merge_append_action : public action {
@@ -97,7 +96,6 @@ private:
     struct table_snapshot_ctx {
         const uuid_t& commit_uuid;
         const schema& schema;
-        const partition_spec& pspec;
         const snapshot_id snap_id;
         const sequence_number seq_num;
     };
@@ -124,6 +122,7 @@ private:
     maybe_merge_mfiles_and_new_data(
       chunked_vector<manifest_file> to_merge,
       chunked_vector<file_to_append> new_data_files,
+      const partition_spec& pspec,
       const table_snapshot_ctx& ctx);
 
     // Takes the given list of manifest files and merges them with the optional
@@ -131,6 +130,7 @@ private:
     ss::future<checked<manifest_file, action::errc>> merge_mfiles(
       chunked_vector<manifest_file> to_merge,
       chunked_vector<manifest_entry> added_entries,
+      const partition_spec& pspec,
       const table_snapshot_ctx& ctx);
 
     // Takes the given manifest list and bin-packs them to reduce the number of

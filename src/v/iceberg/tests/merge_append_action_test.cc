@@ -502,12 +502,6 @@ TEST_F(MergeAppendActionTest, TestBadMetadata) {
         ASSERT_NO_FATAL_FAILURE(check_bad(std::move(t)));
     }
     {
-        // More than one partition spec.
-        auto t = create_table();
-        t.partition_specs.emplace_back(partition_spec{});
-        ASSERT_NO_FATAL_FAILURE(check_bad(std::move(t)));
-    }
-    {
         // Current schema is bogus.
         auto t = create_table();
         t.current_schema_id = schema::id_t{1234};
