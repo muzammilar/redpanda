@@ -77,6 +77,9 @@ public:
         return tx;
     }
 
+    // Release the resulting metadata object. Used for testing.
+    table_metadata release_metadata() && { return std::move(table_); }
+
 private:
     // Applies the given action to `table_`.
     ss::future<txn_outcome> apply(std::unique_ptr<action>);
