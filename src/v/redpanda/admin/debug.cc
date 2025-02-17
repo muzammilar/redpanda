@@ -20,6 +20,7 @@
 #include "cluster/types.h"
 #include "config/node_config.h"
 #include "container/lw_shared_container.h"
+#include "finjector/stress_fiber.h"
 #include "json/validator.h"
 #include "model/fundamental.h"
 #include "redpanda/admin/api-doc/debug.json.hh"
@@ -130,7 +131,7 @@ void admin_server::register_debug_routes() {
     register_route<user>(
       ss::httpd::debug_json::stress_fiber_start,
       [this](std::unique_ptr<ss::http::request> req) {
-          vlog(adminlog.info, "Requested stress fiber");
+          vlog(adminlog.info, "Requested stress fiber: {}", req->format_url());
           stress_config cfg;
           const auto parse_int =
             [&](const ss::sstring& param, std::optional<int>& val) {
@@ -207,10 +208,13 @@ void admin_server::register_debug_routes() {
               }
           }
           return _stress_fiber_manager
-            .invoke_on_all([cfg](auto& stress_mgr) {
+            .invoke_on_all([cfg](stress_fiber_manager& stress_mgr) {
                 auto ran = stress_mgr.start(cfg);
                 if (ran) {
-                    vlog(adminlog.info, "Started stress fiber...");
+                    vlog(
+                      adminlog.info,
+                      "Started stress fiber with config: {}",
+                      cfg);
                 } else {
                     vlog(adminlog.info, "Stress fiber already running...");
                 }

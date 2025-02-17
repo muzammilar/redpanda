@@ -14,6 +14,8 @@
 
 #include <seastar/core/future.hh>
 
+#include <fmt/format.h>
+
 #include <memory>
 
 struct stress_config {
@@ -31,6 +33,20 @@ struct stress_config {
     std::optional<int> max_ms_per_scheduling_point;
 
     size_t num_fibers;
+};
+
+template<>
+struct fmt::formatter<stress_config> : fmt::formatter<std::string_view> {
+    auto format(const stress_config& c, auto& ctx) const {
+        return fmt::format_to(
+          ctx.out(),
+          "min/max_spin: {}/{} min/max_ms: {}/{} stack_depth {}",
+          c.min_spins_per_scheduling_point,
+          c.max_spins_per_scheduling_point,
+          c.min_ms_per_scheduling_point,
+          c.max_ms_per_scheduling_point,
+          c.stack_depth);
+    }
 };
 
 class stress_payload;
