@@ -175,6 +175,7 @@ redpanda_cc_library(
         ":compatibility_utils",
         ":datatypes",
         ":partition",
+        ":values",
         "//src/v/base",
     ],
 )
