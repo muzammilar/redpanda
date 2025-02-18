@@ -259,9 +259,9 @@ public:
 
     size_t max_segment_size() const;
 
-    uint64_t dirty_segment_bytes() const final { return _dirty_segment_bytes; }
+    ssize_t dirty_segment_bytes() const final { return _dirty_segment_bytes; }
 
-    uint64_t closed_segment_bytes() const final { return _closed_segment_bytes; }
+    ssize_t closed_segment_bytes() const final { return _closed_segment_bytes; }
 
     // Returns the dirty ratio of the log.
     // The dirty ratio is the ratio of bytes in closed, dirty segments to the
@@ -465,8 +465,8 @@ private:
 
     size_t _reclaimable_size_bytes{0};
 
-    uint64_t _dirty_segment_bytes{0};
-    uint64_t _closed_segment_bytes{0};
+    ssize_t _dirty_segment_bytes{0};
+    ssize_t _closed_segment_bytes{0};
 
     // Update the number of bytes in dirty segments.
     //
@@ -479,8 +479,8 @@ private:
     // cleanly compacted, closed segments are evicted from the log, or when
     // bytes are removed by compaction. For that reason, one of the tags add_tag
     // or subtract_tag must be used.
-    void add_dirty_segment_bytes(uint64_t bytes);
-    void subtract_dirty_segment_bytes(uint64_t bytes);
+    void add_dirty_segment_bytes(ssize_t bytes);
+    void subtract_dirty_segment_bytes(ssize_t bytes);
 
     // Update the number of bytes in closed segments.
     //
@@ -488,8 +488,8 @@ private:
     // segment is rolled, and decreases when closed segments are evicted from
     // the log, or when bytes are removed by compaction. For that reason, one of
     // the tags add_tag or subtract_tag must be used.
-    void add_closed_segment_bytes(uint64_t bytes);
-    void subtract_closed_segment_bytes(uint64_t bytes);
+    void add_closed_segment_bytes(ssize_t bytes);
+    void subtract_closed_segment_bytes(ssize_t bytes);
 
     // Updates the number of closed & dirty bytes on segment roll (i.e when a
     // segment's appender is released) or when recovering existing segments from

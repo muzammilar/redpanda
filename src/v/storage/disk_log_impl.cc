@@ -4099,23 +4099,28 @@ double disk_log_impl::dirty_ratio() const {
                  / static_cast<double>(_closed_segment_bytes);
 }
 
-void disk_log_impl::add_dirty_segment_bytes(uint64_t bytes) {
+void disk_log_impl::add_dirty_segment_bytes(ssize_t bytes) {
     _dirty_segment_bytes += bytes;
     _probe->set_dirty_segment_bytes(_dirty_segment_bytes);
 }
 
-void disk_log_impl::add_closed_segment_bytes(uint64_t bytes) {
+void disk_log_impl::add_closed_segment_bytes(ssize_t bytes) {
     _closed_segment_bytes += bytes;
     _probe->set_closed_segment_bytes(_closed_segment_bytes);
 }
 
-void disk_log_impl::subtract_dirty_segment_bytes(uint64_t bytes) {
-    _dirty_segment_bytes -= std::min(bytes, _dirty_segment_bytes);
+void disk_log_impl::subtract_dirty_segment_bytes(ssize_t bytes) {
+    _dirty_segment_bytes -= bytes;
+    dassert(
+      _dirty_segment_bytes >= 0, "_dirty_segment_bytes must not be negative.");
     _probe->set_dirty_segment_bytes(_dirty_segment_bytes);
 }
 
-void disk_log_impl::subtract_closed_segment_bytes(uint64_t bytes) {
-    _closed_segment_bytes -= std::min(bytes, _closed_segment_bytes);
+void disk_log_impl::subtract_closed_segment_bytes(ssize_t bytes) {
+    _closed_segment_bytes -= bytes;
+    dassert(
+      _closed_segment_bytes >= 0,
+      "_closed_segment_bytes must not be negative.");
     _probe->set_closed_segment_bytes(_closed_segment_bytes);
 }
 
