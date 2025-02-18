@@ -3699,6 +3699,7 @@ configuration::configuration()
       false)
   , iceberg_enabled(
       *this,
+      true,
       "iceberg_enabled",
       "Enables the translation of topic data into Iceberg tables. Setting "
       "iceberg_enabled to true activates the feature at the cluster level, but "
