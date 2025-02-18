@@ -12,6 +12,9 @@
 #include "container/fragmented_vector.h"
 #include "kafka/client/transport.h"
 #include "kafka/protocol/schemata/produce_request.h"
+#include "model/compression.h"
+
+#include <optional>
 
 namespace tests {
 
@@ -80,14 +83,16 @@ public:
     ss::future<pid_to_offset_map_t> produce(
       model::topic topic_name,
       pid_to_kvs_map_t records_per_partition,
-      std::optional<model::timestamp> ts = std::nullopt);
+      std::optional<model::timestamp> ts = std::nullopt,
+      model::compression compression_type = model::compression::none);
 
     // Produces the given records to the given topic partition.
     ss::future<model::offset> produce_to_partition(
       model::topic topic_name,
       model::partition_id pid,
       std::vector<kv_t> records,
-      std::optional<model::timestamp> ts = std::nullopt);
+      std::optional<model::timestamp> ts = std::nullopt,
+      model::compression compression_type = model::compression::none);
 
 private:
     // Convert the given records-per-partition mapping to a set of per-partition
@@ -97,7 +102,8 @@ private:
     static chunked_vector<kafka::partition_produce_data>
     produce_partition_requests(
       const pid_to_kvs_map_t& records_per_partition,
-      std::optional<model::timestamp> ts);
+      std::optional<model::timestamp> ts,
+      model::compression compression_type);
 
     kafka::client::transport _transport;
 };
