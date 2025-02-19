@@ -39,7 +39,7 @@ public:
         counter_ref(cause)++;
     }
 
-    constexpr size_t& counter_ref(invalid_record_cause cause) {
+    size_t& counter_ref(invalid_record_cause cause) {
         switch (cause) {
         case invalid_record_cause::failed_kafka_schema_resolution:
             return _num_failed_kafka_schema_resolution;
