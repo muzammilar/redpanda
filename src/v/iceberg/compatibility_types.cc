@@ -49,6 +49,7 @@ operator+=(schema_transform_state& lhs, const schema_transform_state& rhs) {
     lhs.n_removed += rhs.n_removed;
     lhs.n_added += rhs.n_added;
     lhs.n_promoted += rhs.n_promoted;
+    lhs.n_removed_partition_fields += rhs.n_removed_partition_fields;
     return lhs;
 }
 

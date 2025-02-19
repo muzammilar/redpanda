@@ -80,7 +80,7 @@ void run_describe_transform_bench(const struct_type& source) {
     auto dest = source.copy();
 
     perf_tests::start_measuring_time();
-    auto res = annotate_schema_transform(source, dest);
+    auto res = annotate_schema_transform(source, dest, partition_spec{});
     perf_tests::stop_measuring_time();
 
     vassert(!res.has_error(), "Expected success");
@@ -88,11 +88,11 @@ void run_describe_transform_bench(const struct_type& source) {
 
 void run_apply_transform_bench(const struct_type& source) {
     auto dest = source.copy();
-    auto xform = annotate_schema_transform(source, dest);
+    auto xform = annotate_schema_transform(source, dest, partition_spec{});
     vassert(!xform.has_error(), "Expected success");
 
     perf_tests::start_measuring_time();
-    auto res = validate_schema_transform(dest, partition_spec{});
+    auto res = validate_schema_transform(xform, dest, partition_spec{});
     perf_tests::stop_measuring_time();
 
     vassert(!res.has_error(), "Expected success");

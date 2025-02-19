@@ -963,6 +963,37 @@ static const std::vector<struct_evolution_test_case> invalid_cases{
     .validate_err = schema_evolution_errc::partition_spec_conflict,
     .pspec = "(nested.date)",
   },
+  struct_evolution_test_case{
+    .description
+    = "dropping a field which appears in the partition spec is illegal",
+    .generator =
+      [](unique_id_generator& ids) {
+          struct_type s{};
+          s.fields.emplace_back(nested_field::create(
+            ids.get_one(), "foo", field_required::yes, int_type{}));
+          return s;
+      },
+    .update = [](struct_type& s) { s.fields.pop_back(); },
+    .validate_err = schema_evolution_errc::partition_spec_conflict,
+    .pspec = "(foo)",
+  },
+  struct_evolution_test_case{
+    .description
+    = "dropping the enclosing struct for a partition field also fails",
+    .generator =
+      [](unique_id_generator& ids) {
+          struct_type s{};
+          struct_type nested{};
+          nested.fields.emplace_back(nested_field::create(
+            ids.get_one(), "foo", field_required::yes, int_type{}));
+          s.fields.emplace_back(nested_field::create(
+            ids.get_one(), "nested", field_required::yes, std::move(nested)));
+          return s;
+      },
+    .update = [](struct_type& s) { s.fields.pop_back(); },
+    .validate_err = schema_evolution_errc::partition_spec_conflict,
+    .pspec = "(nested.foo)",
+  },
 };
 
 static constexpr auto valid_plus_errs = [](auto&& R) {
@@ -1031,7 +1062,7 @@ TEST_P(AnnotateStructTest, AnnotationWorksAndDetectsStructuralErrors) {
         // transforming self -> self returns no change
         auto c1 = type.copy();
         auto c2 = type.copy();
-        auto annotate_res = annotate_schema_transform(c1, c2);
+        auto annotate_res = annotate_schema_transform(c1, c2, partition_spec{});
         if (
           !annotate_err().has_error()
           || annotate_err().error() != schema_evolution_errc::ambiguous) {
@@ -1041,7 +1072,8 @@ TEST_P(AnnotateStructTest, AnnotationWorksAndDetectsStructuralErrors) {
     }
 
     // check that annotation works or errors as expected
-    auto annotate_res = annotate_schema_transform(original_schema_struct, type);
+    auto annotate_res = annotate_schema_transform(
+      original_schema_struct, type, gen_partition_spec(original_schema_struct));
 
     ASSERT_EQ(annotate_res.has_error(), annotate_err().has_error())
       << (annotate_res.has_error()
@@ -1094,24 +1126,32 @@ TEST_P(ValidateAnnotationTest, ValidateCatchesTypeErrors) {
 
     {
         // transforming self -> self returns no change
-        auto c1 = type.copy();
-        auto c2 = type.copy();
-        auto annotate_res = annotate_schema_transform(c1, c2);
+        auto c1 = original_schema_struct.copy();
+        auto c2 = original_schema_struct.copy();
+        auto annotate_res = annotate_schema_transform(
+          c1, c2, gen_partition_spec(c1));
         ASSERT_FALSE(annotate_res.has_error());
         auto validate_res = validate_schema_transform(
-          c2, gen_partition_spec(c1));
+          annotate_res, c2, gen_partition_spec(c1));
         ASSERT_FALSE(validate_res.has_error())
           << fmt::format("Unexpected error: {}", validate_res.error());
         EXPECT_EQ(validate_res.value().total(), 0);
     }
 
     // For this subset of cases we expect annotate to pass
-    auto annotate_res = annotate_schema_transform(original_schema_struct, type);
+    auto annotate_res = annotate_schema_transform(
+      original_schema_struct, type, gen_partition_spec(original_schema_struct));
     ASSERT_FALSE(annotate_res.has_error());
+    if (annotate_res.value().n_removed_partition_fields > 0) {
+        ASSERT_TRUE(validate_err().has_error());
+        EXPECT_EQ(
+          validate_err().error(),
+          schema_evolution_errc::partition_spec_conflict);
+    }
 
     // but validate may fail
     auto validate_res = validate_schema_transform(
-      type, gen_partition_spec(original_schema_struct));
+      annotate_res, type, gen_partition_spec(original_schema_struct));
     ASSERT_EQ(validate_res.has_error(), validate_err().has_error())
       << (validate_res.has_error()
             ? fmt::format("Unexpected error: {}", validate_res.error())

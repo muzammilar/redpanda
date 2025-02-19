@@ -68,6 +68,12 @@ struct schema_transform_state {
     size_t n_removed{0};
     size_t n_added{0};
     size_t n_promoted{0};
+    size_t n_removed_partition_fields{0};
+
+    // when we remove a field, it's always counted in n_removed, and _also_
+    // counted in n_removed_partition_fields iff it was a partition field.
+    // therefore, to avoid double counting, don't include
+    // n_removed_partition_fields in the total.
     size_t total() { return n_removed + n_added + n_promoted; }
 };
 
