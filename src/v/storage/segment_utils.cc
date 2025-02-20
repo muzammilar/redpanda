@@ -909,7 +909,7 @@ make_concatenated_segment(
             // If even one segment in the set does not have a
             // clean_compact_timestamp, we must not mark the new index as having
             // one.
-            if (!seg->index().has_clean_compact_timestamp()) {
+            if (!seg->has_clean_compact_timestamp()) {
                 return std::nullopt;
             }
 
@@ -1182,7 +1182,7 @@ ss::future<bool> mark_segment_as_finished_window_compaction(
 bool is_past_tombstone_delete_horizon(
   ss::lw_shared_ptr<segment> seg, const compaction_config& cfg) {
     if (
-      seg->index().has_clean_compact_timestamp()
+      seg->has_clean_compact_timestamp()
       && cfg.tombstone_retention_ms.has_value()) {
         auto tombstone_delete_horizon = model::timestamp(
           seg->index().clean_compact_timestamp()->value()
