@@ -38,31 +38,6 @@ static bool config_property_requested(
 }
 
 template<typename T>
-static void add_config(
-  describe_configs_result& result,
-  std::string_view name,
-  T value,
-  describe_configs_source source) {
-    result.configs.push_back(describe_configs_resource_result{
-      .name = ss::sstring(name),
-      .value = ssx::sformat("{}", value),
-      .config_source = source,
-    });
-}
-
-template<typename T>
-static void add_config_if_requested(
-  const config_key_t& configuration_keys,
-  describe_configs_result& result,
-  std::string_view name,
-  T value,
-  describe_configs_source source) {
-    if (config_property_requested(configuration_keys, name)) {
-        add_config(result, name, value, source);
-    }
-}
-
-template<typename T>
 ss::sstring describe_as_string(const T& t) {
     if constexpr (::detail::is_specialization_of_v<T, std::chrono::duration>) {
         return ssx::sformat("{}", t.count());
