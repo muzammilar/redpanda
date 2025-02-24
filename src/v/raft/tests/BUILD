@@ -367,7 +367,7 @@ redpanda_cc_btest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "leadership_test",
     timeout = "short",
     srcs = [
@@ -375,12 +375,12 @@ redpanda_cc_btest(
     ],
     tags = ["exclusive"],
     deps = [
+        ":raft_fixture",
         "//src/v/finjector",
         "//src/v/model",
         "//src/v/raft",
-        "//src/v/raft/tests:stm_raft_fixture",
         "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
+        "@googletest//:gtest",
         "@seastar//:testing",
     ],
 )

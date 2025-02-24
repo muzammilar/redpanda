@@ -16,10 +16,8 @@ set(srcs
     type_serialization_tests.cc
     term_assigning_reader_test.cc
     membership_test.cc
-    leadership_test.cc
     offset_monitor_test.cc
     mutex_buffer_test.cc
-
     configuration_manager_test.cc
     coordinated_recovery_throttle_test.cc
     heartbeats_test.cc
@@ -51,6 +49,7 @@ set(gsrcs
     snapshot_recovery_test.cc
     state_removal_test.cc
     group_configuration_tests.cc
+    leadership_test.cc
 )
 
 rp_test(
