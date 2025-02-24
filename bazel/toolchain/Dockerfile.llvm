@@ -76,6 +76,7 @@ cmake -G Ninja -DLLVM_TARGETS_TO_BUILD='AArch64;X86' \\
   -DLLVM_PARALLEL_COMPILE_JOBS=${MAX_COMPILER_JOBS} \\
   -DLLVM_PARALLEL_LINK_JOBS=${MAX_LINKER_JOBS} \\
   -DLLVM_ENABLE_LIBCXX=ON \\
+  -DLLVM_STATIC_LINK_CXX_STDLIB=ON \\
   -DLLVM_ENABLE_LTO=On \\
   "\$@"
 
@@ -112,8 +113,9 @@ RUN /opt/build.sh \
   -DLLVM_BUILD_INSTRUMENTED=IR \
   -DLLVM_PROFILE_DATA_DIR=/tmp/clang-pgo-data/ \
   -DLLVM_ENABLE_PROJECTS="clang;lld;bolt" \
-  -DCMAKE_C_FLAGS="-Xclang -mllvm -Xclang -vp-counters-per-site=6" \
-  -DCMAKE_CXX_FLAGS="-Xclang -mllvm -Xclang -vp-counters-per-site=6" \
+  -DLLVM_VP_COUNTERS_PER_SITE=6 \
+  -DLLVM_BUILD_LLVM_DYLIB=ON \
+  -DLLVM_LINK_LLVM_DYLIB=ON \
   -DLLVM_BUILD_RUNTIME=No \
   -DLLVM_ENABLE_LTO=${LTO_MODE}
 
@@ -157,6 +159,8 @@ RUN llvm-profdata-${SYSTEM_CLANG_VERSION} merge -output=/tmp/profdata.prof /tmp/
 RUN /opt/build.sh \
   -DCMAKE_INSTALL_PREFIX=/opt/stage-2 \
   -DLLVM_ENABLE_LTO=${LTO_MODE} \
+  -DLLVM_BUILD_LLVM_DYLIB=ON \
+  -DLLVM_LINK_LLVM_DYLIB=ON \
   -DLLVM_PROFDATA_FILE=/tmp/profdata.prof
 
 WORKDIR /opt/stage-2
