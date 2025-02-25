@@ -8,7 +8,6 @@
 # by the Apache License, Version 2.0
 
 from ducktape.services.service import Service
-from ducktape.cluster.cluster import ClusterNode
 from rptest.context import cloud_storage
 
 from typing import Optional, Any
@@ -48,8 +47,8 @@ class CatalogService(Service):
                  ctx,
                  cloud_storage_bucket: str,
                  warehouse_name: str = DEFAULT_WAREHOUSE_NAME,
-                 node: ClusterNode | None = None):
-        super(CatalogService, self).__init__(ctx, num_nodes=0 if node else 1)
+                 **kwargs):
+        super(CatalogService, self).__init__(ctx, **kwargs)
         self.dedicated_nodes = ctx.globals.get("dedicated_nodes", False)
         self.credentials = cloud_storage.Credentials.from_context(ctx)
 

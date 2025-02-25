@@ -71,10 +71,11 @@ class IcebergRESTCatalog(CatalogService):
                  ctx,
                  cloud_storage_bucket: str,
                  warehouse_name: str = CatalogService.DEFAULT_WAREHOUSE_NAME,
-                 filesystem_wrapper_mode: bool = False,
-                 node: ClusterNode | None = None):
-        super(IcebergRESTCatalog, self).__init__(ctx, cloud_storage_bucket,
-                                                 warehouse_name, node)
+                 filesystem_wrapper_mode: bool = False):
+        super(IcebergRESTCatalog, self).__init__(ctx,
+                                                 cloud_storage_bucket,
+                                                 warehouse_name,
+                                                 num_nodes=1)
 
         self.set_filesystem_wrapper_mode(filesystem_wrapper_mode)
         # This REST server can operate in two modes.

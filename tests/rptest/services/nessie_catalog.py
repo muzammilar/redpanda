@@ -60,10 +60,11 @@ class NessieCatalog(CatalogService):
     def __init__(self,
                  ctx,
                  cloud_storage_bucket: str,
-                 warehouse_name: str = CatalogService.DEFAULT_WAREHOUSE_NAME,
-                 node: ClusterNode | None = None):
-        super(NessieCatalog, self).__init__(ctx, cloud_storage_bucket,
-                                            warehouse_name, node)
+                 warehouse_name: str = CatalogService.DEFAULT_WAREHOUSE_NAME):
+        super(NessieCatalog, self).__init__(ctx,
+                                            cloud_storage_bucket,
+                                            warehouse_name,
+                                            num_nodes=1)
 
         self._ctx = ctx
         self._current_reference = "main"
