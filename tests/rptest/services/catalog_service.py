@@ -68,6 +68,17 @@ class CatalogService(abc.ABC, Service):
         assert self._catalog_url, "URL not available because service is not started"
         return self._catalog_url
 
+    @property
+    def vendor_api_url(self) -> str:
+        """
+        Some services (e.g. Nessie) may expose a vendor-specific API endpoint
+        that is distinct from the Iceberg REST API which can then be leveraged
+        by custom clients (e.g. Spark extensions).
+        """
+        raise NotImplementedError(
+            f"Vendor API URL not implemented for catalog type: {self.catalog_type}"
+        )
+
     def compute_warehouse_path(self):
         """
         Provides the physical location of the Iceberg warehouse in storage.

@@ -74,9 +74,9 @@ class NessieCatalog(CatalogService):
     _iceberg_url: Optional[str] = None
 
     @property
-    def iceberg_url(self) -> str:
-        assert self._iceberg_url, "URL not available because service is not started"
-        return self._iceberg_url
+    def vendor_api_url(self) -> str:
+        assert self._catalog_url, "URL not available because service is not started"
+        return self._catalog_url
 
     def catalog_name(self) -> str:
         return self.catalog_type().value
