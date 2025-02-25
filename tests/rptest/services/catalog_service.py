@@ -36,6 +36,8 @@ def catalog_type_to_config_string(catalog_type: CatalogType) -> str:
     elif catalog_type == CatalogType.NESSIE:
         return 'nessie'
 
+    raise ValueError(f"Unsupported catalog type: {catalog_type}")
+
 
 class CatalogService(Service):
     # Expected to be available after initialization of derived class.
