@@ -93,6 +93,8 @@ public:
 
     virtual ~data_source() = default;
 
+    virtual void close() noexcept = 0;
+
     virtual const model::ntp& ntp() const = 0;
 
     virtual model::revision_id topic_revision() const = 0;

@@ -10,6 +10,7 @@
 
 #include "datalake/translation/deps.h"
 
+#include "cluster/notification.h"
 #include "cluster/partition.h"
 #include "datalake/coordinator/frontend.h"
 #include "datalake/local_parquet_file_writer.h"
@@ -22,6 +23,23 @@
 #include "kafka/utils/txn_reader.h"
 
 namespace datalake::translation {
+
+namespace {
+ss::future<cluster::errc> wait_stm_translated(
+  ss::shared_ptr<translation_stm> stm,
+  model::offset o,
+  model::timeout_clock::time_point deadline,
+  std::optional<std::reference_wrapper<ss::abort_source>> as) {
+    try {
+        co_await stm->wait_translated(model::prev_offset(o), deadline, as);
+    } catch (const ss::abort_requested_exception&) {
+        co_return cluster::errc::shutting_down;
+    } catch (const ss::timed_out_error&) {
+        co_return cluster::errc::timeout;
+    }
+    co_return cluster::errc::success;
+}
+} // namespace
 
 static constexpr auto poll_duration = 2s;
 
@@ -147,7 +165,13 @@ public:
       : _partition(std::move(partition))
       , _stm(_partition->raft()->stm_manager()->get<translation_stm>())
       , _partition_proxy(std::make_unique<kafka::partition_proxy>(
-          kafka::make_partition_proxy(_partition))) {}
+          kafka::make_partition_proxy(_partition)))
+      , _partition_flush_subscription(_partition->register_flush_hook(
+          std::bind_front(&wait_stm_translated, _stm))) {}
+
+    void close() noexcept final {
+        _partition->unregister_flush_hook(_partition_flush_subscription);
+    }
 
     const model::ntp& ntp() const final { return _partition->ntp(); }
 
@@ -266,6 +290,7 @@ private:
     ss::lw_shared_ptr<cluster::partition> _partition;
     ss::shared_ptr<translation_stm> _stm;
     std::unique_ptr<kafka::partition_proxy> _partition_proxy;
+    cluster::partition_flush_hook_id _partition_flush_subscription;
 };
 
 std::unique_ptr<data_source> data_source::make_default_data_source(

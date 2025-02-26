@@ -17,9 +17,6 @@
 
 namespace datalake::translation {
 
-// Misc todos:
-// Port flush hook needed by migration
-
 namespace {
 using namespace std::chrono_literals;
 // A simple utility to conditionally retry with backoff on failures.
@@ -310,6 +307,7 @@ ss::future<> partition_translator::close() noexcept {
     if (_inflight_translation_state) {
         _inflight_translation_state->as.request_abort();
     }
+    _data_source->close();
     co_await _gate.close();
     vlog(_logger.debug, "stopped partition translator in term {}", _term);
 }
