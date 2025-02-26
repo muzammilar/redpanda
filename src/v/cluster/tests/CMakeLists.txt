@@ -53,6 +53,7 @@ set(srcs
     id_allocator_stm_test.cc
     tm_stm_tests.cc
     data_migration_table_test.cc
+    manual_log_deletion_test.cc
     )
 
 foreach(cluster_test_src ${srcs})
@@ -74,7 +75,6 @@ rp_test(
 endforeach()
 
 set(srcs
-        manual_log_deletion_test.cc
         cluster_tests.cc
         configuration_change_test.cc
         autocreate_test.cc
