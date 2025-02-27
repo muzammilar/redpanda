@@ -200,7 +200,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_module_dependencies": {
       "general": {
-        "bzlTransitiveDigest": "7yHEvqkGjICm+74vrxJH44/bjB/C66ZXUPSLBwrvXZQ=",
+        "bzlTransitiveDigest": "BTwSxx/LbTaYB8+WCrZwj0CyvhMbjQhm43vjRM15rng=",
         "usagesDigest": "8eEn6X1e7HKkx2OPWUwQBOEnT9TIkMhEcXbu/wRjGno=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -381,7 +381,6 @@
               "strip_prefix": "seastar-534c1a88bccacd2bcd8a35a062e929001ecda279",
               "url": "https://github.com/redpanda-data/seastar/archive/534c1a88bccacd2bcd8a35a062e929001ecda279.tar.gz",
               "patches": [
-                "@@//bazel/thirdparty:seastar-fortify-source.patch",
                 "@@//bazel/thirdparty:seastar-remove-libnuma.patch"
               ],
               "patch_args": [
