@@ -3963,7 +3963,7 @@ configuration::configuration()
       *this,
       "iceberg_target_lag_ms",
       "Default value for the redpanda.iceberg.target.lag.ms topic property, "
-      "which controls how often data an Iceberg table is refreshed with new "
+      "which controls how often data in an Iceberg table is refreshed with new "
       "data from the corresponding Redpanda topic. Redpanda attempts to commit "
       "all the data produced to the topic within the lag target in a best "
       "effort fashion, subject to resource availability.",
