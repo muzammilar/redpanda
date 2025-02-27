@@ -102,7 +102,6 @@ redpanda_test_cc_library(
 redpanda_test_cc_library(
     name = "stm_raft_fixture",
     hdrs = [
-        "raft_group_fixture.h",
     ],
     include_prefix = "raft/tests",
     visibility = ["//visibility:public"],
@@ -528,7 +527,6 @@ redpanda_cc_gtest(
 redpanda_test_cc_library(
     name = "stm_test_fixture",
     hdrs = [
-        "raft_group_fixture.h",
         "stm_test_fixture.h",
     ],
     include_prefix = "raft/tests",

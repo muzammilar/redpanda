@@ -13,7 +13,6 @@
 #include "model/record_batch_reader.h"
 #include "raft/tests/raft_fixture.h"
 #include "raft/tests/raft_fixture_retry_policy.h"
-#include "raft/tests/raft_group_fixture.h"
 #include "raft/types.h"
 #include "random/generators.h"
 #include "storage/record_batch_builder.h"
@@ -576,12 +575,12 @@ TEST_F_CORO(raft_fixture, test_delayed_snapshot_request) {
           .then([&](result<replicate_result> result) {
               if (result) {
                   vlog(
-                    tstlog.info,
+                    logger().info,
                     "replication result last offset: {}",
                     result.value().last_offset);
               } else {
                   vlog(
-                    tstlog.info,
+                    logger().info,
                     "replication error: {}",
                     result.error().message());
               }
@@ -684,7 +683,7 @@ TEST_F_CORO(raft_fixture, test_delayed_snapshot_request) {
       std::move(request),
       rpc::client_opts(10s));
     ASSERT_TRUE_CORO(reply.has_value());
-    vlog(tstlog.info, "snapshot reply from follower: {}", reply.value());
+    vlog(logger().info, "snapshot reply from follower: {}", reply.value());
 
     // the snapshot contains a configuration with one node which is older than
     // the current one the follower has. latest configuration MUST remain
@@ -720,7 +719,7 @@ TEST_F_CORO(raft_fixture, test_delayed_snapshot_request) {
       rpc::client_opts(10s));
 
     ASSERT_TRUE_CORO(leader_reply.has_value());
-    vlog(tstlog.info, "snapshot reply from leader: {}", leader_reply.value());
+    vlog(logger().info, "snapshot reply from leader: {}", leader_reply.value());
     co_await tests::cooperative_spin_wait_with_timeout(10s, [&] {
         return nodes().begin()->second->raft()->term() > term_snapshot;
     });
@@ -740,12 +739,12 @@ TEST_F_CORO(raft_fixture, leadership_transfer_delay) {
           .then([&](result<replicate_result> result) {
               if (result) {
                   vlog(
-                    tstlog.info,
+                    logger().info,
                     "replication result last offset: {}",
                     result.value().last_offset);
               } else {
                   vlog(
-                    tstlog.info,
+                    logger().info,
                     "replication error: {}",
                     result.error().message());
               }
@@ -792,7 +791,7 @@ TEST_F_CORO(raft_fixture, leadership_transfer_delay) {
     auto transfer_time = new_leader_reported_ev->timestamp
                          - events.begin()->timestamp;
     vlog(
-      tstlog.info,
+      logger().info,
       "leadership_transfer - new leader reported after: {} ms",
       (transfer_time) / 1ms);
     events.clear();
@@ -820,7 +819,7 @@ TEST_F_CORO(raft_fixture, leadership_transfer_delay) {
     auto election_time = leader_reported_after_reconfiguration->timestamp
                          - events.begin()->timestamp;
     vlog(
-      tstlog.info,
+      logger().info,
       "reconfiguration - new leader reported after: {} ms",
       (election_time) / 1ms);
 
