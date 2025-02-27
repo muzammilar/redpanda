@@ -49,6 +49,7 @@ RPC_TEMPLATE = """
 #include <seastar/core/sleep.hh>
 #include <seastar/core/scheduling.hh>
 
+#include <array>
 #include <functional>
 #include <chrono>
 #include <tuple>
@@ -68,16 +69,8 @@ public:
     {{service_name}}_service_base(ss::scheduling_group sc, ss::smp_service_group ssg)
        : _sc(sc), _ssg(ssg) {}
 
-    {{service_name}}_service_base({{service_name}}_service_base&& o) noexcept
-      : _sc(std::move(o._sc)), _ssg(std::move(o._ssg)), _methods(std::move(o._methods)) {}
-
-    {{service_name}}_service_base& operator=({{service_name}}_service_base&& o) noexcept {
-       if(this != &o){
-          this->~{{service_name}}_service_base();
-          new (this) {{service_name}}_service_base(std::move(o));
-       }
-       return *this;
-    }
+    {{service_name}}_service_base({{service_name}}_service_base&& o) noexcept = delete;
+    {{service_name}}_service_base& operator=({{service_name}}_service_base&& o) noexcept = delete;
 
     virtual ~{{service_name}}_service_base() noexcept = default;
 
