@@ -25,6 +25,20 @@ import (
 	"go.uber.org/zap"
 )
 
+type healthResponse struct {
+	ClusterUUID               *string  `json:"cluster_uuid,omitempty" yaml:"cluster_uuid,omitempty"`
+	IsHealthy                 bool     `json:"is_healthy" yaml:"is_healthy"`
+	UnhealthyReasons          []string `json:"unhealthy_reasons" yaml:"unhealthy_reasons"`
+	ControllerID              int      `json:"controller_id" yaml:"controller_id"`
+	AllNodes                  []int    `json:"all_nodes" yaml:"all_nodes"`
+	NodesDown                 []int    `json:"nodes_down" yaml:"nodes_down"`
+	NodesInRecoveryMode       []int    `json:"nodes_in_recovery_mode" yaml:"nodes_in_recovery_mode"`
+	LeaderlessPartitions      []string `json:"leaderless_partitions" yaml:"leaderless_partitions"`
+	LeaderlessCount           *int     `json:"leaderless_count,omitempty" yaml:"leaderless_count,omitempty"`
+	UnderReplicatedCount      *int     `json:"under_replicated_count,omitempty" yaml:"under_replicated_count,omitempty"`
+	UnderReplicatedPartitions []string `json:"under_replicated_partitions" yaml:"under_replicated_partitions"`
+}
+
 func newHealthOverviewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	var watch, exit bool
 	cmd := &cobra.Command{
@@ -54,6 +68,13 @@ Get cluster health information and exit when the cluster is healthy:
 `,
 		Args: cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, _ []string) {
+			f := p.Formatter
+			if f.Kind != "text" && f.Kind != "help" && (watch || exit) {
+				out.Die("format type %q cannot be used along with --watch or --exit-when-healthy", f.Kind)
+			}
+			if h, ok := f.Help(healthResponse{}); ok {
+				out.Exit(h)
+			}
 			p, err := p.LoadVirtualProfile(fs)
 			out.MaybeDie(err, "rpk unable to load config: %v", err)
 			config.CheckExitCloudAdmin(p)
@@ -78,7 +99,13 @@ Get cluster health information and exit when the cluster is healthy:
 				out.MaybeDie(err, "unable to request cluster health: %v", err)
 				exit10 = !ret.IsHealthy
 				if !reflect.DeepEqual(ret, lastOverview) {
-					printHealthOverview(&ret, clusterUUID)
+					hr := buildHealthResponses(&ret, clusterUUID)
+					if isText, _, s, err := f.Format(hr); !isText {
+						out.MaybeDie(err, "unable to print in the required format %q: %v", f.Kind, err)
+						fmt.Println(s)
+					} else {
+						printHealthOverview(hr)
+					}
 				}
 				lastOverview = ret
 				if !watch || exit && lastOverview.IsHealthy {
@@ -95,46 +122,69 @@ Get cluster health information and exit when the cluster is healthy:
 	}
 	p.InstallAdminFlags(cmd)
 	p.InstallSASLFlags(cmd)
+	p.InstallFormatFlag(cmd)
 
-	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Blocks and writes out all cluster health changes")
-	cmd.Flags().BoolVarP(&exit, "exit-when-healthy", "e", false, "Exits when the cluster is back in a healthy state")
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Blocks and writes out all cluster health changes. Only available for --format=text")
+	cmd.Flags().BoolVarP(&exit, "exit-when-healthy", "e", false, "Exits when the cluster is back in a healthy state. Only available for --format=text")
 	return cmd
 }
 
-func printHealthOverview(hov *rpadmin.ClusterHealthOverview, clusterUUID *string) {
-	types.Sort(hov)
+func buildHealthResponses(hov *rpadmin.ClusterHealthOverview, clusterUUID *string) healthResponse {
+	// This is needed as NodesInRecoveryMode can be nil, and the json formatter
+	// will print "null" instead of an empty array.
+	nodesInRecoveryMode := hov.NodesInRecoveryMode
+	if len(nodesInRecoveryMode) == 0 {
+		nodesInRecoveryMode = []int{}
+	}
+	return healthResponse{
+		ClusterUUID:               clusterUUID,
+		IsHealthy:                 hov.IsHealthy,
+		UnhealthyReasons:          hov.UnhealthyReasons,
+		ControllerID:              hov.ControllerID,
+		AllNodes:                  hov.AllNodes,
+		NodesDown:                 hov.NodesDown,
+		NodesInRecoveryMode:       nodesInRecoveryMode,
+		LeaderlessPartitions:      hov.LeaderlessPartitions,
+		LeaderlessCount:           hov.LeaderlessCount,
+		UnderReplicatedCount:      hov.UnderReplicatedCount,
+		UnderReplicatedPartitions: hov.UnderReplicatedPartitions,
+	}
+}
+
+func printHealthOverview(hr healthResponse) {
+	types.Sort(hr)
 	out.Section("CLUSTER HEALTH OVERVIEW")
 
 	// leaderless partitions and under-replicated counts are available starting
 	// v23.3.
 	lp := "Leaderless partitions:"
 	urp := "Under-replicated partitions:"
-	if hov.LeaderlessCount != nil {
-		lp = fmt.Sprintf("Leaderless partitions (%v):", *hov.LeaderlessCount)
-		if *hov.LeaderlessCount > len(hov.LeaderlessPartitions) {
-			hov.LeaderlessPartitions = append(hov.LeaderlessPartitions, "...truncated")
+	if hr.LeaderlessCount != nil {
+		lp = fmt.Sprintf("Leaderless partitions (%v):", *hr.LeaderlessCount)
+		if *hr.LeaderlessCount > len(hr.LeaderlessPartitions) {
+			hr.LeaderlessPartitions = append(hr.LeaderlessPartitions, "...truncated")
 		}
 	}
-	if hov.UnderReplicatedCount != nil {
-		urp = fmt.Sprintf("Under-replicated partitions (%v):", *hov.UnderReplicatedCount)
-		if *hov.UnderReplicatedCount > len(hov.UnderReplicatedPartitions) {
-			hov.UnderReplicatedPartitions = append(hov.UnderReplicatedPartitions, "...truncated")
+	if hr.UnderReplicatedCount != nil {
+		urp = fmt.Sprintf("Under-replicated partitions (%v):", *hr.UnderReplicatedCount)
+		if *hr.UnderReplicatedCount > len(hr.UnderReplicatedPartitions) {
+			hr.UnderReplicatedPartitions = append(hr.UnderReplicatedPartitions, "...truncated")
 		}
 	}
 
 	tw := out.NewTable()
 	defer tw.Flush()
-	tw.Print("Healthy:", hov.IsHealthy)
-	tw.Print("Unhealthy reasons:", hov.UnhealthyReasons)
-	tw.Print("Controller ID:", hov.ControllerID)
-	tw.Print("All nodes:", hov.AllNodes)
-	tw.Print("Nodes down:", hov.NodesDown)
-	if hov.NodesInRecoveryMode != nil {
-		tw.Print("Nodes in recovery mode:", hov.NodesInRecoveryMode)
+	tw.Print("Healthy:", hr.IsHealthy)
+	tw.Print("Unhealthy reasons:", hr.UnhealthyReasons)
+	tw.Print("Controller ID:", hr.ControllerID)
+	tw.Print("All nodes:", hr.AllNodes)
+	tw.Print("Nodes down:", hr.NodesDown)
+	if hr.NodesInRecoveryMode != nil {
+		tw.Print("Nodes in recovery mode:", hr.NodesInRecoveryMode)
 	}
-	tw.Print(lp, hov.LeaderlessPartitions)
-	tw.Print(urp, hov.UnderReplicatedPartitions)
-	if clusterUUID != nil {
-		tw.Print("Cluster UUID:", *clusterUUID)
+	tw.Print(lp, hr.LeaderlessPartitions)
+	tw.Print(urp, hr.UnderReplicatedPartitions)
+	if hr.ClusterUUID != nil {
+		tw.Print("Cluster UUID:", *hr.ClusterUUID)
 	}
 }
