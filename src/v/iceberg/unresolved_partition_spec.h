@@ -24,6 +24,8 @@ struct unresolved_partition_spec {
         transform transform;
         ss::sstring name;
 
+        void autogenerate_name();
+
         friend bool operator==(const field&, const field&) = default;
         friend std::ostream& operator<<(std::ostream&, const field&);
     };
