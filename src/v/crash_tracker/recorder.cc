@@ -385,6 +385,8 @@ recorder::get_recorded_crashes(
 
 ss::future<> recorder::stop() { co_await _writer.release(); }
 
+void recorder::reset() { _writer.reset(); }
+
 void recorder::oom_writer::operator()(std::string_view msg) noexcept {
     auto result = fmt::format_to_n(
       _oom_msg_pos,

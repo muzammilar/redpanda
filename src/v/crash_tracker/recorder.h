@@ -50,6 +50,9 @@ public:
 
     ss::future<> start();
     ss::future<> stop();
+    /// _ONLY_ to be used during testing, will reset the underlying writer and
+    /// prepare it for `start()`
+    void reset();
 
     /// Async-signal safe
     void record_crash_sighandler(recorded_signo signo);
