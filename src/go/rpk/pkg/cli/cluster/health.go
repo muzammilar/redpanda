@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/twmb/types"
+	"go.uber.org/zap"
 )
 
 func newHealthOverviewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
@@ -28,15 +29,25 @@ func newHealthOverviewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Queries cluster for health overview",
-		Long: `Queries health overview.
+		Long: `Queries cluster for health overview.
 
 Health overview is created based on the health reports collected periodically
 from all nodes in the cluster. A cluster is considered healthy when the
 following conditions are met:
 
-* all cluster nodes are responding
-* all partitions have leaders
-* the cluster controller is present
+  * All cluster nodes are responding
+  * All partitions have leaders
+  * The cluster controller is present
+`,
+		Example: `
+Basic usage, get cluster health information:
+  rpk cluster health
+
+Get cluster health information and watch for changes:
+  rpk cluster health --watch
+
+Get cluster health information and exit when the cluster is healthy:
+  rpk cluster health --exit-when-healthy
 `,
 		Args: cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, _ []string) {
@@ -47,6 +58,13 @@ following conditions are met:
 			cl, err := adminapi.NewClient(cmd.Context(), fs, p)
 			out.MaybeDie(err, "unable to initialize admin client: %v", err)
 
+			resp, err := cl.ClusterUUID(cmd.Context())
+			var clusterUUID *string
+			if err != nil {
+				zap.L().Sugar().Warnf("unable to get cluster UUID for the cluster health report: %v; skipping collection and checking cluster health", err)
+			} else {
+				clusterUUID = &resp.UUID
+			}
 			// --exit-when-healthy only makes sense with --watch, so we enable
 			// watch if --exit-when-healthy is provided.
 			watch = exit || watch
@@ -55,7 +73,7 @@ following conditions are met:
 				ret, err := cl.GetHealthOverview(cmd.Context())
 				out.MaybeDie(err, "unable to request cluster health: %v", err)
 				if !reflect.DeepEqual(ret, lastOverview) {
-					printHealthOverview(&ret)
+					printHealthOverview(&ret, clusterUUID)
 				}
 				lastOverview = ret
 				if !watch || exit && lastOverview.IsHealthy {
@@ -73,7 +91,7 @@ following conditions are met:
 	return cmd
 }
 
-func printHealthOverview(hov *rpadmin.ClusterHealthOverview) {
+func printHealthOverview(hov *rpadmin.ClusterHealthOverview, clusterUUID *string) {
 	types.Sort(hov)
 	out.Section("CLUSTER HEALTH OVERVIEW")
 
@@ -106,4 +124,7 @@ func printHealthOverview(hov *rpadmin.ClusterHealthOverview) {
 	}
 	tw.Print(lp, hov.LeaderlessPartitions)
 	tw.Print(urp, hov.UnderReplicatedPartitions)
+	if clusterUUID != nil {
+		tw.Print("Cluster UUID:", *clusterUUID)
+	}
 }
