@@ -184,13 +184,24 @@ ss::future<> partition_translator::translate_until_stopped() {
         // is NOT synchronized with outstanding commit operations. Therefore
         // if we reach this point before the most recent batch of files has
         // been committed, the commit lag metric will be out of sync at least
-        // until `wait_for_data_to_translate` wakes up.
+        // until 'wait_for_data' returns and we re-enter the loop.
         _data_source->update_commit_lag(last_committed_offset);
         _data_source->update_translation_lag(last_translated_offset);
 
         // Wait until some data is ready to be translated.
-        auto begin_offset = co_await _data_source->wait_for_data_to_translate(
-          last_translated_offset, _as);
+        auto maybe_begin_offset
+          = co_await _data_source->wait_for_data_to_translate(
+            last_translated_offset, _as);
+
+        // if wait_for_data timed out (i.e. all trnaslatable records have
+        // been translated already), reenter the loop. this gives us an
+        // opportunity to reconcile outstanding coordinator state, which is
+        // helpful for keeping lag metrics up-to-date.
+        if (!maybe_begin_offset.has_value()) {
+            continue;
+        }
+
+        auto begin_offset = maybe_begin_offset.value();
 
         // Notify the scheduler that there is some data to translate
         _scheduler->notify_ready(id);

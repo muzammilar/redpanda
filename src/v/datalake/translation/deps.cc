@@ -41,8 +41,6 @@ ss::future<cluster::errc> wait_stm_translated(
 }
 } // namespace
 
-static constexpr auto poll_duration = 2s;
-
 ss::future<> noop_mem_tracker::maybe_reserve_memory(size_t, ss::abort_source&) {
     return ss::make_ready_future<>();
 }
@@ -178,13 +176,19 @@ public:
 
     model::term_id term() const final { return _partition->term(); }
 
-    ss::future<kafka::offset> wait_for_data_to_translate(
+    ss::future<std::optional<kafka::offset>> wait_for_data_to_translate(
       std::optional<kafka::offset> last_translated_offset,
       ss::abort_source& as) final {
         // todo: add logic to wait for enough data to translate.
         // currently we just break even if a single batch of data is available
+        constexpr auto poll_duration = 2s;
+        constexpr auto poll_limit = (poll_duration * 15) - 1s;
+        const auto deadline = ss::lowres_clock::now() + poll_limit;
         while (!has_more_data_to_translate(last_translated_offset)) {
             co_await ss::sleep_abortable(poll_duration, as);
+            if (ss::lowres_clock::now() >= deadline) {
+                co_return std::nullopt;
+            }
         }
         update_translation_target();
         auto read_begin_offset = min_offset_for_translation();

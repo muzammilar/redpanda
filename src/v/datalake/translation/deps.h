@@ -107,9 +107,10 @@ public:
      * exceeding last_translated_offset.
      *
      * Returns the next offset for translation, either
-     * min_offset_for_translation or next(last_translated_offset) if one exists.
+     * min_offset_for_translation, next(last_translated_offset) if one exists,
+     * or nullopt if there is no data to translate.
      */
-    virtual ss::future<kafka::offset> wait_for_data_to_translate(
+    virtual ss::future<std::optional<kafka::offset>> wait_for_data_to_translate(
       std::optional<kafka::offset> last_translated_offset, ss::abort_source&)
       = 0;
 
