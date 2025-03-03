@@ -124,7 +124,8 @@ class JavaCompressionTest(EndToEndTest):
         """
         self.start_redpanda(num_nodes=1)
         self.topic_spec = TopicSpec(replication_factor=1,
-                                    cleanup_policy=TopicSpec.CLEANUP_COMPACT)
+                                    cleanup_policy=TopicSpec.CLEANUP_COMPACT,
+                                    min_cleanable_dirty_ratio=0.0)
         self.client().create_topic(self.topic_spec)
 
         expected_num_segments = 4
@@ -189,6 +190,17 @@ class JavaCompressionTest(EndToEndTest):
         self.produce_until_segment_count(
             expected_num_segments, compression_type=compression_type.value)
         self.wait_for_compacted_segments(expected_num_segments)
+
+        # The min_cleanable_dirty_ratio cluster config was not in the original
+        # version of redpanda installed above, it was added in v25.1.0.
+        # Patch its value here to ensure that every snappy batch will be
+        # re-written by compaction. Also push compaction to happen quite rapidly.
+        self.redpanda._admin.patch_cluster_config(
+            upsert={
+                "min_cleanable_dirty_ratio": 0.0,
+                "log_compaction_interval_ms": 500
+            })
+
 
         # In the case of `snappy`, every single batch should have been decompressed
         # and recompressed using the new big-endian fix. Expect to see consuming
