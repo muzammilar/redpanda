@@ -276,6 +276,8 @@ private:
     ssx::semaphore _housekeeping_sem{0, "log_manager::housekeeping"};
 
     bool _gc_triggered{false};
+    ssx::semaphore _gc_sem{0, "log_manager::gc"};
+
     disk_space_alert _disk_space_alert{disk_space_alert::ok};
 
     std::optional<batch_cache_index> create_cache(with_cache);

@@ -188,6 +188,7 @@ ss::future<> log_manager::start() {
 ss::future<> log_manager::stop() {
     _abort_source.request_abort();
     _housekeeping_sem.broken();
+    _gc_sem.broken();
 
     co_await _gate.close();
     co_await ss::coroutine::parallel_for_each(
