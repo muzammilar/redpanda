@@ -158,11 +158,11 @@ private:
     void abort_current_refresh();
 
     ss::future<errc> walk_local_and_remote_reports(
-      health_monitor_backend_details::partition_leader_status_handler auto&&
+      health_monitor_backend_details::partition_leader_status_handler auto
         local_leader_handler,
-      health_monitor_backend_details::partition_leader_status_handler auto&&
+      health_monitor_backend_details::partition_leader_status_handler auto
         remote_leader_handler,
-      health_monitor_backend_details::partition_handler auto&&
+      health_monitor_backend_details::partition_handler auto
         unclaimed_partition_handler);
 
     // read-only access to _reports

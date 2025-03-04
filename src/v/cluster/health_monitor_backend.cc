@@ -433,9 +433,9 @@ void record_risks_in_report(
 } // namespace
 
 ss::future<errc> health_monitor_backend::walk_local_and_remote_reports(
-  partition_leader_status_handler auto&& local_leader_handler,
-  partition_leader_status_handler auto&& remote_leader_handler,
-  partition_handler auto&& unclaimed_partition_handler) {
+  partition_leader_status_handler auto local_leader_handler,
+  partition_leader_status_handler auto remote_leader_handler,
+  partition_handler auto unclaimed_partition_handler) {
     ssx::async_counter counter;
     chunked_hash_map<
       model::topic_namespace,
