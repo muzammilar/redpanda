@@ -168,7 +168,7 @@ ss::future<> partition_translator::translate_until_stopped() {
           kafka::prev_offset(_data_source->min_offset_for_translation()));
 
         auto reset_error
-          = co_await _data_source->update_highest_translated_offset(
+          = co_await _data_source->replicate_highest_translated_offset(
             last_translated_offset, _term, wait_timeout, _as);
 
         if (reset_error) {
@@ -271,8 +271,9 @@ ss::future<> partition_translator::translate_until_stopped() {
               checkpoint_result);
         }
 
-        reset_error = co_await _data_source->update_highest_translated_offset(
-          last_translated_offset, _term, wait_timeout, _as);
+        reset_error
+          = co_await _data_source->replicate_highest_translated_offset(
+            last_translated_offset, _term, wait_timeout, _as);
         if (reset_error) {
             vlog(
               _logger.warn,

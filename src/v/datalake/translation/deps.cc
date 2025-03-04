@@ -241,7 +241,7 @@ public:
         return kafka::prev_offset(model::offset_cast(lso.value()));
     }
 
-    ss::future<std::error_code> update_highest_translated_offset(
+    ss::future<std::error_code> replicate_highest_translated_offset(
       kafka::offset new_offset,
       model::term_id term,
       model::timeout_clock::duration timeout,
