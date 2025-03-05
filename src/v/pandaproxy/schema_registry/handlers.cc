@@ -305,7 +305,7 @@ get_schemas_ids_id(server::request_t rq, server::reply_t rp) {
     rq.req.reset();
 
     // With deferred schema validation, there might be a schema that
-    // had invalid references. These might have already been posted, soft
+    // had invalid references. These might have already been posted, so
     // we need to sync
     co_await rq.service().writer().read_sync();
 
