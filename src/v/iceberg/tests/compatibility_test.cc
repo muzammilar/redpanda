@@ -178,8 +178,10 @@ std::vector<field_test_case> generate_test_cases() {
     test_data.emplace_back(int_type{}, long_type{}, type_promoted::yes);
     test_data.emplace_back(int_type{}, boolean_type{}, compat_errc::mismatch);
 
+    // TODO(iceberg): date -> timestamp is v3-only. When/if we support v3, we'll
+    // want to reinstate this promotion.
     test_data.emplace_back(
-      date_type{}, timestamp_type{}, type_promoted::changes_partition);
+      date_type{}, timestamp_type{}, compat_errc::mismatch);
     test_data.emplace_back(date_type{}, long_type{}, compat_errc::mismatch);
 
     test_data.emplace_back(float_type{}, double_type{}, type_promoted::yes);
@@ -373,13 +375,12 @@ static const std::vector<struct_evolution_test_case> valid_cases{
             ids.get_one(),
             "qux",
             field_required::yes,
-            list_type::create(
-              ids.get_one(), field_required::yes, date_type{})));
+            list_type::create(ids.get_one(), field_required::yes, int_type{})));
           return s;
       },
     .update =
       [](struct_type& s) {
-          get<list_type>(s.fields[0]).element_field->type = timestamp_type{};
+          get<list_type>(s.fields[0]).element_field->type = long_type{};
       },
     .validator =
       [](const struct_type& src, const struct_type& dst) {
@@ -751,8 +752,7 @@ static const std::vector<struct_evolution_test_case> invalid_cases{
             ids.get_one(),
             "qux",
             field_required::yes,
-            list_type::create(
-              ids.get_one(), field_required::yes, date_type{})));
+            list_type::create(ids.get_one(), field_required::yes, int_type{})));
           return s;
       },
     .update =
@@ -943,8 +943,9 @@ static const std::vector<struct_evolution_test_case> invalid_cases{
     .validate_err = schema_evolution_errc::new_required_field,
   },
   struct_evolution_test_case{
-    .description = "promoting from date -> timestamp is fine as long as that "
-                   "field does not appear in the partition spec",
+    .description
+    = "promoting from date -> timestamp is is illegal in Iceberg v2. it is "
+      "allowed in v3, unless the field doesn't appears in the partition  spec",
     .generator =
       [](unique_id_generator& ids) {
           struct_type s{};
@@ -960,7 +961,7 @@ static const std::vector<struct_evolution_test_case> invalid_cases{
           std::get<struct_type>(s.fields.back()->type).fields.back()->type
             = timestamp_type{};
       },
-    .validate_err = schema_evolution_errc::partition_spec_conflict,
+    .validate_err = schema_evolution_errc::type_mismatch,
     .pspec = "(nested.date)",
   },
   struct_evolution_test_case{
