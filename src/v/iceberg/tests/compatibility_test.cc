@@ -1219,3 +1219,72 @@ TEST_P(StructEvoCompatibilityTest, CanCheckEquivalence) {
     EXPECT_FALSE(schemas_equivalent(original, next));
     EXPECT_FALSE(schemas_equivalent(next, original));
 }
+
+TEST(ValuePromotionTest, PrimitiveValuePromotion) {
+    // trivial promotions should leave the value intact
+    std::vector<std::pair<primitive_value, primitive_type>> trivial;
+    trivial.emplace_back(boolean_value{true}, boolean_type{});
+    trivial.emplace_back(int_value{42}, int_type{});
+    trivial.emplace_back(long_value{42}, long_type{});
+    trivial.emplace_back(float_value{1.5}, float_type{});
+    trivial.emplace_back(double_value{1.5}, double_type{});
+    trivial.emplace_back(
+      decimal_value{42}, decimal_type{.precision = 10, .scale = 2});
+    trivial.emplace_back(date_value{123}, date_type{});
+    trivial.emplace_back(time_value{1234}, time_type{});
+    trivial.emplace_back(timestamp_value{31536000000023ul}, timestamp_type{});
+    trivial.emplace_back(
+      timestamptz_value{31536000000023ul}, timestamptz_type{});
+    trivial.emplace_back(
+      string_value{bytes_to_iobuf(bytes::from_string("foobar"))},
+      string_type{});
+    trivial.emplace_back(uuid_value{uuid_t::create()}, uuid_type{});
+    trivial.emplace_back(
+      fixed_value{bytes_to_iobuf(bytes{1, 2, 3, 4, 5, 6, 7, 8, 255})},
+      fixed_type{.length = 9});
+    trivial.emplace_back(
+      binary_value{bytes_to_iobuf(bytes{1, 2, 3, 4, 5, 6, 7, 8, 255})},
+      binary_type{});
+
+    for (const auto& [val, type] : trivial) {
+        ASSERT_EQ(promote_primitive_value_type(make_copy(val), type), val);
+    }
+
+    // non-trivial promotions
+    ASSERT_EQ(
+      promote_primitive_value_type(int_value{42}, long_type{}), long_value{42});
+    ASSERT_EQ(
+      promote_primitive_value_type(float_value{1.5}, double_type{}),
+      double_value{1.5});
+
+    // test some forbidden promotions
+    std::vector<std::pair<primitive_value, primitive_type>> forbidden;
+    forbidden.emplace_back(boolean_value{true}, int_type{});
+    forbidden.emplace_back(int_value{42}, double_type{});
+    forbidden.emplace_back(long_value{42}, int_type{});
+    forbidden.emplace_back(float_value{1.5}, int_type{});
+    forbidden.emplace_back(double_value{1.5}, float_type{});
+    forbidden.emplace_back(date_value{123}, timestamptz_type{});
+    forbidden.emplace_back(time_value{1234}, timestamptz_type{});
+    forbidden.emplace_back(decimal_value{42}, int_type{});
+    forbidden.emplace_back(
+      timestamp_value{31536000000023ul}, timestamptz_type{});
+    forbidden.emplace_back(
+      timestamptz_value{31536000000023ul}, timestamp_type{});
+    forbidden.emplace_back(
+      string_value{bytes_to_iobuf(bytes::from_string("foobar"))},
+      binary_type{});
+    forbidden.emplace_back(uuid_value{uuid_t::create()}, binary_type{});
+    forbidden.emplace_back(
+      fixed_value{bytes_to_iobuf(bytes{1, 2, 3, 4, 5, 6, 7, 8, 255})},
+      binary_type{});
+    forbidden.emplace_back(
+      binary_value{bytes_to_iobuf(bytes::from_string("foobar"))},
+      string_type{});
+
+    for (const auto& [val, type] : forbidden) {
+        ASSERT_THROW(
+          promote_primitive_value_type(make_copy(val), type), std::logic_error)
+          << "value: " << val << ", type: " << type;
+    }
+}
