@@ -39,7 +39,10 @@ struct primitive_type_promotion_policy_visitor {
 
     type_check_result operator()(
       const iceberg::date_type&, const iceberg::timestamp_type&) const {
-        return type_promoted::changes_partition;
+        // TODO(iceberg): This is a v3-only type promotion that can affect
+        // partitioning. When we introduce v3 support, we should reinstante this
+        // promotion with the type_promoted::changes_partition result. return
+        return compat_errc::mismatch;
     }
 
     type_check_result
