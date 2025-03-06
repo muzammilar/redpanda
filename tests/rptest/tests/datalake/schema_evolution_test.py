@@ -558,6 +558,8 @@ class SchemaEvolutionE2ETests(RedpandaTest):
             }).set_compatibility(subject_name=f"{self.topic_name}-value",
                                  level=compat_level)
             yield dl
+            # make sure nothing we did trashed our ability to read the whole table
+            self.select(dl, query_engine, cols=['*'])
 
     @cluster(num_nodes=3)
     @matrix(
