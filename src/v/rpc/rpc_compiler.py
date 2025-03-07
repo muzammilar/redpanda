@@ -13,6 +13,7 @@ import sys
 import os
 import logging
 import json
+from typing import Any
 
 # 3rd party
 from jinja2 import Template
@@ -221,12 +222,12 @@ private:
 """
 
 
-def _read_file(name):
+def _read_file(name: str):
     with open(name, 'r') as f:
         return json.load(f)
 
 
-def _enrich_methods(service):
+def _enrich_methods(service: Any):
     logger.info(service)
 
     service["id"] = zlib.crc32(
@@ -244,7 +245,7 @@ def _enrich_methods(service):
     return service
 
 
-def _codegen(service, out):
+def _codegen(service: Any, out: str):
     logger.info(service)
     tpl = Template(RPC_TEMPLATE)
     with open(out, 'w') as f:
