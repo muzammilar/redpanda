@@ -113,8 +113,8 @@ func createTarball(cfg pkgConfig, w io.Writer) error {
 		"rp_util":       cfg.RPUtil,
 		"rpk":           cfg.RPKBinary,
 		"iotune":        cfg.IOTune,
-		"hwloc_calc":    cfg.HWLocCalc,
-		"hwloc_distrib": cfg.HWLocDistrib,
+		"hwloc-calc":    cfg.HWLocCalc,
+		"hwloc-distrib": cfg.HWLocDistrib,
 		"openssl":       cfg.OpenSSL,
 	} {
 		if binary != nil {
@@ -207,8 +207,8 @@ func createPackageDir(cfg pkgConfig, output string) error {
 		"rp_util":       cfg.RPUtil,
 		"rpk":           cfg.RPKBinary,
 		"iotune":        cfg.IOTune,
-		"hwloc_calc":    cfg.HWLocCalc,
-		"hwloc_distrib": cfg.HWLocDistrib,
+		"hwloc-calc":    cfg.HWLocCalc,
+		"hwloc-distrib": cfg.HWLocDistrib,
 		"openssl":       cfg.OpenSSL,
 	} {
 		if binary == nil {
