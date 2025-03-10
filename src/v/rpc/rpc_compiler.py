@@ -58,8 +58,8 @@ RPC_TEMPLATE = """
 
 namespace {{namespace}} {
 
-template<typename Codec>
-class {{service_name}}_service_base : public ::rpc::service {
+class {{service_name}}_service : public ::rpc::service {
+    using Codec = ::rpc::default_message_codec;
 public:
     class failure_probes;
 
@@ -67,13 +67,13 @@ public:
     static constexpr ::rpc::method_info {{method.name}}_method = {"{{service_name}}::{{method.name}}", {{method.id}}};
     {%- endfor %}
 
-    {{service_name}}_service_base(ss::scheduling_group sc, ss::smp_service_group ssg)
+    {{service_name}}_service(ss::scheduling_group sc, ss::smp_service_group ssg)
        : _sc(sc), _ssg(ssg) {}
 
-    {{service_name}}_service_base({{service_name}}_service_base&& o) noexcept = delete;
-    {{service_name}}_service_base& operator=({{service_name}}_service_base&& o) noexcept = delete;
+    {{service_name}}_service({{service_name}}_service&& o) noexcept = delete;
+    {{service_name}}_service& operator=({{service_name}}_service&& o) noexcept = delete;
 
-    virtual ~{{service_name}}_service_base() noexcept = default;
+    virtual ~{{service_name}}_service() noexcept = default;
 
     void setup_metrics() final {
         namespace sm = ss::metrics;
@@ -140,8 +140,6 @@ private:
     metrics::internal_metric_groups _metrics;
 };
 
-using {{service_name}}_service = {{service_name}}_service_base<::rpc::default_message_codec>;
-
 class {{service_name}}_client_protocol {
 public:
     explicit {{service_name}}_client_protocol(ss::lw_shared_ptr<::rpc::transport> t)
@@ -162,8 +160,7 @@ private:
     ss::lw_shared_ptr<::rpc::transport> _transport;
 };
 
-template<typename Codec>
-class {{service_name}}_service_base<Codec>::failure_probes final : public finjector::probe {
+class {{service_name}}_service::failure_probes final : public finjector::probe {
 public:
     using type = finjector::probe::bitmap_type;
 

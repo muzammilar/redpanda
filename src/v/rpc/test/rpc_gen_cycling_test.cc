@@ -41,10 +41,9 @@
 using namespace std::chrono_literals; // NOLINT
 
 // Test services
-template<typename Codec>
-struct movistar final : cycling::team_movistar_service_base<Codec> {
+struct movistar final : cycling::team_movistar_service {
     movistar(ss::scheduling_group& sc, ss::smp_service_group& ssg)
-      : cycling::team_movistar_service_base<Codec>(sc, ssg) {}
+      : cycling::team_movistar_service(sc, ssg) {}
     ss::future<cycling::mount_tamalpais>
     ibis_hakka(cycling::san_francisco, rpc::streaming_context&) final {
         return ss::make_ready_future<cycling::mount_tamalpais>(
