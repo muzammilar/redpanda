@@ -165,13 +165,13 @@ private:
 template<typename Codec>
 class {{service_name}}_service_base<Codec>::failure_probes final : public finjector::probe {
 public:
-    using type = uint32_t;
+    using type = finjector::probe::bitmap_type;
 
     static constexpr std::string_view name() { return "{{service_name}}_service::failure_probes"; }
 
-    enum class methods: type {
+    enum class methods : type {
     {%- for method in methods %}
-        {{method.name}} = 1 << {{loop.index}}{{ "," if not loop.last }}
+        {{method.name}} = 1ULL << {{loop.index}}{{ "," if not loop.last }}
     {%- endfor %}
     };
     type point_to_bit(std::string_view point) const final {

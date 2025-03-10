@@ -57,10 +57,9 @@ struct movistar final : cycling::team_movistar_service_base<Codec> {
     }
 };
 
-template<typename Codec>
-struct echo_impl final : echo::echo_service_base<Codec> {
+struct echo_impl final : echo::echo_service {
     echo_impl(ss::scheduling_group& sc, ss::smp_service_group& ssg)
-      : echo::echo_service_base<Codec>(sc, ssg) {}
+      : echo::echo_service(sc, ssg) {}
     ss::future<echo::echo_resp>
     prefix_echo(echo::echo_req req, rpc::streaming_context&) final {
         return ss::make_ready_future<echo::echo_resp>(
@@ -107,10 +106,9 @@ struct echo_impl final : echo::echo_service_base<Codec> {
     uint64_t cnt = 0;
 };
 
-template<typename Codec>
-struct echo_v2_impl final : echo_v2::echo_service_base<Codec> {
+struct echo_v2_impl final : echo_v2::echo_service {
     echo_v2_impl(ss::scheduling_group& sc, ss::smp_service_group& ssg)
-      : echo_v2::echo_service_base<Codec>(sc, ssg) {}
+      : echo_v2::echo_service(sc, ssg) {}
 
     ss::future<echo_v2::echo_resp>
     echo(echo_v2::echo_req req, rpc::streaming_context&) final {
@@ -125,9 +123,9 @@ public:
       : rpc_simple_integration_fixture(redpanda_rpc_port) {}
 
     void register_services() {
-        register_service<movistar<rpc::default_message_codec>>();
-        register_service<echo_impl<rpc::default_message_codec>>();
-        register_service<echo_v2_impl<rpc::default_message_codec>>();
+        register_service<movistar>();
+        register_service<echo_impl>();
+        register_service<echo_v2_impl>();
     }
 
     static constexpr uint16_t redpanda_rpc_port = 32147;
@@ -921,8 +919,8 @@ public:
       : rpc_fixture_swappable_proto(redpanda_rpc_port) {}
 
     void register_services() {
-        register_service<movistar<rpc::default_message_codec>>();
-        register_service<echo_impl<rpc::default_message_codec>>();
+        register_service<movistar>();
+        register_service<echo_impl>();
     }
 
     static constexpr uint16_t redpanda_rpc_port = 32147;
@@ -970,8 +968,7 @@ FIXTURE_TEST(rpc_add_service, rpc_sharded_fixture) {
     server()
       .invoke_on_all([this](rpc::rpc_server& s) {
           std::vector<std::unique_ptr<rpc::service>> service;
-          service.emplace_back(
-            std::make_unique<echo_impl<rpc::default_message_codec>>(_sg, _ssg));
+          service.emplace_back(std::make_unique<echo_impl>(_sg, _ssg));
           s.add_services(std::move(service));
       })
       .get();
@@ -1115,9 +1112,7 @@ FIXTURE_TEST(rpc_mt_add_service, rpc_sharded_fixture) {
           server()
             .invoke_on_all([this](rpc::rpc_server& s) {
                 std::vector<std::unique_ptr<rpc::service>> service;
-                service.emplace_back(
-                  std::make_unique<echo_impl<rpc::default_message_codec>>(
-                    _sg, _ssg));
+                service.emplace_back(std::make_unique<echo_impl>(_sg, _ssg));
                 s.add_services(std::move(service));
             })
             .get();
@@ -1142,9 +1137,7 @@ FIXTURE_TEST(rpc_mt_add_service, rpc_sharded_fixture) {
           server()
             .invoke_on_all([this](rpc::rpc_server& s) {
                 std::vector<std::unique_ptr<rpc::service>> service;
-                service.emplace_back(
-                  std::make_unique<movistar<rpc::default_message_codec>>(
-                    _sg, _ssg));
+                service.emplace_back(std::make_unique<movistar>(_sg, _ssg));
                 s.add_services(std::move(service));
             })
             .get();
