@@ -31,6 +31,9 @@ ARG LLVM_VERSION=18
 # Clone LLVM project (includes Clang, clang-tidy, clangd, and BOLT)
 RUN git clone --depth 1 --branch release/${LLVM_VERSION}.x https://github.com/llvm/llvm-project.git
 
+# LTO builds take a bunch of RAM, limit them to a low number by default
+ARG MAX_LINK_JOBS=4
+
 COPY <<EOF /llvm.cmake
 set(CMAKE_BUILD_TYPE Release CACHE STRING "")
 set(LLVM_TARGETS_TO_BUILD Native CACHE STRING "")
@@ -58,6 +61,8 @@ set(LIBCXX_CXX_ABI libcxxabi CACHE STRING "")
 # in clang-18 this appears to be on by default, but we don't use libunwind
 set(LIBCXXABI_USE_LLVM_UNWINDER OFF CACHE BOOL "")
 set(LLVM_INSTALL_TOOLCHAIN_ONLY ON CACHE BOOL "")
+set(LLVM_ENABLE_LTO On CACHE STRING "")
+set(LLVM_PARALLEL_LINK_JOBS ${MAX_LINK_JOBS} CACHE STRING "")
 EOF
 
 # Create build directory
