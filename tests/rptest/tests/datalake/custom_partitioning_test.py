@@ -117,6 +117,7 @@ class DatalakeCustomPartitioningTest(RedpandaTest):
                              extra_rp_conf={
                                  "iceberg_enabled": True,
                                  "iceberg_catalog_commit_interval_ms": 5000,
+                                 "iceberg_target_lag_ms": 5000,
                              },
                              schema_registry_config=SchemaRegistryConfig(),
                              *args,
@@ -135,6 +136,26 @@ class DatalakeCustomPartitioningTest(RedpandaTest):
             'key.serializer': StringSerializer('utf_8'),
             'value.serializer': value_serializer,
         })
+
+    def produce(self, dl, producer, topic_name, msg_count, already_produced=0):
+        # Have all records share the same timestamp, so that they are
+        # guaranteed to end up in the same hour partition.
+        timestamp = time.time()
+        for i in range(msg_count):
+            ev_type = random.choice(["type_A", "type_B"])
+            record = {
+                "event_type": ev_type,
+                "number": already_produced + i,
+                "timestamp_us": int(timestamp * 1000000),
+            }
+            producer.produce(
+                topic=topic_name,
+                # key to ensure that all partitions get some records
+                key=str(uuid4()),
+                value=record)
+        producer.flush()
+        dl.wait_for_translation(topic_name,
+                                msg_count=already_produced + msg_count)
 
     def describe_partitioning(self, dl, topic_name):
         table_name = f"redpanda.{topic_name}"
@@ -173,24 +194,7 @@ class DatalakeCustomPartitioningTest(RedpandaTest):
                 })
 
             producer = self.create_producer()
-
-            # Have all records share the same timestamp, so that they are
-            # guaranteed to end up in the same hour partition.
-            timestamp = time.time()
-            for i in range(msg_count):
-                ev_type = random.choice(["type_A", "type_B"])
-                record = {
-                    "event_type": ev_type,
-                    "number": i,
-                    "timestamp_us": int(timestamp * 1000000),
-                }
-                producer.produce(
-                    topic=topic_name,
-                    # key to ensure that all partitions get some records
-                    key=str(uuid4()),
-                    value=record)
-            producer.flush()
-            dl.wait_for_translation(topic_name, msg_count=msg_count)
+            self.produce(dl, producer, topic_name, msg_count)
 
             # Check that created table has the correct partition spec.
 
@@ -251,24 +255,9 @@ class DatalakeCustomPartitioningTest(RedpandaTest):
 
             def produce():
                 nonlocal already_produced
-                # Have all records share the same timestamp, so that they are
-                # guaranteed to end up in the same hour partition.
-                timestamp = time.time()
-                for i in range(msg_count):
-                    ev_type = random.choice(["type_A", "type_B"])
-                    record = {
-                        "event_type": ev_type,
-                        "number": already_produced + i,
-                        "timestamp_us": int(timestamp * 1000000),
-                    }
-                    producer.produce(
-                        topic=topic_name,
-                        # key to ensure that all partitions get some records
-                        key=str(uuid4()),
-                        value=record)
-                producer.flush()
+                self.produce(dl, producer, topic_name, msg_count,
+                             already_produced)
                 already_produced += msg_count
-                dl.wait_for_translation(topic_name, msg_count=already_produced)
 
             produce()
 
@@ -328,5 +317,85 @@ class DatalakeCustomPartitioningTest(RedpandaTest):
                 ('# Partition Information', '', ''),
                 ('# col_name', 'data_type', 'comment'),
                 ('event_type', 'string', None),
+            ]
+            assert describe_partitioning == expected_partitioning
+
+    @cluster(num_nodes=6)
+    @matrix(cloud_storage_type=supported_storage_types(),
+            catalog_type=supported_catalog_types())
+    def test_sticky_default(self, cloud_storage_type, catalog_type):
+        with DatalakeServices(self.test_context,
+                              redpanda=self.redpanda,
+                              catalog_type=catalog_type,
+                              include_query_engines=[QueryEngineType.SPARK
+                                                     ]) as dl:
+
+            self.redpanda.set_cluster_config(
+                {"iceberg_default_partition_spec": "()"})
+
+            # Create an iceberg topic and produce
+            # some data.
+
+            topic_name = "foo"
+            msg_count = 1000
+            partitions = 5
+            dl.create_iceberg_enabled_topic(
+                topic_name,
+                partitions=partitions,
+                iceberg_mode="value_schema_id_prefix")
+
+            producer = self.create_producer()
+
+            already_produced = 0
+
+            def produce(topic):
+                nonlocal already_produced
+                self.produce(dl, producer, topic, msg_count, already_produced)
+                already_produced += msg_count
+
+            produce(topic_name)
+
+            # partition spec should reflect the original value
+            describe_partitioning = self.describe_partitioning(dl, topic_name)
+            assert describe_partitioning == []
+
+            self.logger.info("altering default partition spec...")
+            self.redpanda.set_cluster_config({
+                "iceberg_default_partition_spec":
+                "(hour(redpanda.timestamp))"
+            })
+
+            produce(topic_name)
+
+            # partition spec should reflect the original value
+            describe_partitioning = self.describe_partitioning(dl, topic_name)
+            assert describe_partitioning == []
+
+            # create another topic, but don't enable iceberg just yet.
+            another_topic = "bar"
+            rpk = RpkTool(self.redpanda)
+            rpk.create_topic(topic=another_topic,
+                             partitions=partitions,
+                             replicas=3)
+
+            self.redpanda.set_cluster_config({
+                "iceberg_default_partition_spec":
+                "(day(redpanda.timestamp))"
+            })
+            rpk.alter_topic_config(another_topic, "redpanda.iceberg.mode",
+                                   "value_schema_id_prefix")
+
+            self.redpanda.set_cluster_config(
+                {"iceberg_default_partition_spec": "()"})
+
+            already_produced = 0
+            produce(another_topic)
+
+            # partition spec should reflect the value at the time iceberg was enabled
+            describe_partitioning = self.describe_partitioning(
+                dl, another_topic)
+            expected_partitioning = [
+                ('# Partitioning', '', ''),
+                ('Part 0', 'days(redpanda.timestamp)', ''),
             ]
             assert describe_partitioning == expected_partitioning
