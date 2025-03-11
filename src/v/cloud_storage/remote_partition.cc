@@ -1318,11 +1318,14 @@ struct finalize_data {
     model::offset insync_offset;
 };
 
-ss::future<> finalize_background(
+/// This function runs as a detached background fiber, so has no shutdown
+/// logic of its own: our remote operations will be shut down when the
+/// `remote` object is shut down.
+///
+/// Precondition: the caller must ensure that api object is valid for the
+/// duration of this function. I.e. hold a gate.
+ss::future<> finalize_in_background(
   remote& api, finalize_data data, remote_path_provider path_provider) {
-    // This function runs as a detached background fiber, so has no shutdown
-    // logic of its own: our remote operations will be shut down when the
-    // `remote` object is shut down.
     ss::abort_source& as = api.as();
 
     retry_chain_node local_rtc(as, finalize_timeout, finalize_backoff);
@@ -1429,7 +1432,7 @@ void remote_partition::finalize() {
       [&api = _api,
        data = std::move(data),
        pp = _manifest_view->path_provider().copy()]() mutable -> ss::future<> {
-          return finalize_background(api, std::move(data), pp.copy());
+          return finalize_in_background(api, std::move(data), pp.copy());
       });
 }
 
