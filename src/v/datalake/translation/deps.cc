@@ -52,26 +52,29 @@ ss::future<> writer_reservations_impl::maybe_reserve_memory(
     while (_available_memory < bytes) {
         auto reservation = co_await _reservations_tracker.reserve_memory(as);
         _available_memory += reservation.count();
-        _total_reserved_memory += reservation.count();
-        _reservations.push_back(std::move(reservation));
+        if (_reservations.count()) {
+            _reservations.adopt(std::move(reservation));
+        } else {
+            _reservations = std::move(reservation);
+        }
     }
     _available_memory -= bytes;
     co_return;
 }
 
 void writer_reservations_impl::update_current_memory_usage(size_t used_bytes) {
+    auto total_reserved = _reservations.count();
     vassert(
-      used_bytes <= _total_reserved_memory,
+      used_bytes <= total_reserved,
       "Used more bytes {} than reserved {}",
       used_bytes,
-      _total_reserved_memory);
-    _available_memory = _total_reserved_memory - used_bytes;
+      total_reserved);
+    _available_memory = total_reserved - used_bytes;
 }
 
 void writer_reservations_impl::release() {
     _available_memory = 0;
-    _total_reserved_memory = 0;
-    _reservations.clear();
+    _reservations.release();
 }
 
 // Creates or alters the table by delegating to the coordinator.

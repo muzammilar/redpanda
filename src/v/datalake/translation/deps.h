@@ -46,9 +46,8 @@ public:
 
 private:
     size_t _available_memory{0};
-    size_t _total_reserved_memory{0};
     scheduling::reservations_tracker& _reservations_tracker;
-    chunked_vector<ssx::semaphore_units> _reservations;
+    ssx::semaphore_units _reservations;
 };
 
 class coordinator_api {
