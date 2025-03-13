@@ -68,6 +68,14 @@ void writer_reservations_impl::release() {
     _reservations.return_all();
 }
 
+size_t writer_reservations_impl::current_usage() const {
+    return _current_used_bytes;
+}
+
+size_t writer_reservations_impl::total_reserved() const {
+    return _reservations.count();
+}
+
 // Creates or alters the table by delegating to the coordinator.
 class coordinator_table_creator final : public table_creator {
 public:

@@ -44,6 +44,9 @@ public:
     update_current_memory_usage(size_t, ss::abort_source&) override;
     void release() override;
 
+    size_t current_usage() const;
+    size_t total_reserved() const;
+
 private:
     size_t _current_used_bytes{0};
     scheduling::reservations_tracker& _reservations_tracker;
