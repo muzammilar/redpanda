@@ -40,7 +40,10 @@ namespace datalake {
 namespace {
 
 static std::unique_ptr<type_resolver> make_type_resolver(
-  const model::iceberg_mode& mode, schema::registry& sr, schema_cache& cache) {
+  const model::iceberg_mode& mode,
+  model::topic_view topic_name,
+  schema::registry& sr,
+  schema_cache& cache) {
     switch (mode.kind()) {
     case model::iceberg_mode::variant::disabled:
         vassert(
@@ -51,7 +54,14 @@ static std::unique_ptr<type_resolver> make_type_resolver(
     case model::iceberg_mode::variant::value_schema_id_prefix:
         return std::make_unique<record_schema_resolver>(sr, cache);
     case model::iceberg_mode::variant::latest_protobuf_value:
-        vassert(false, "TODO");
+        static constexpr auto cache_duration = 5min;
+        return std::make_unique<latest_protobuf_schema_resolver>(
+          sr,
+          topic_name,
+          mode.protobuf_full_name(),
+          std::chrono::duration_cast<ss::lowres_clock::duration>(
+            cache_duration),
+          cache);
     }
 }
 
@@ -325,7 +335,7 @@ datalake_manager::handle_translator_state_change(const model::ntp& ntp) {
 
     auto mode = topic_cfg->properties.iceberg_mode;
     auto type_resolver = make_type_resolver(
-      mode, *_schema_registry, *_schema_cache);
+      mode, ntp.tp.topic, *_schema_registry, *_schema_cache);
     auto record_translator = make_record_translator(mode);
     auto table_creator = translation::make_default_table_creator(
       _coordinator_frontend->local());
