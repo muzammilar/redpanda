@@ -40,29 +40,32 @@ namespace datalake {
 namespace {
 
 static std::unique_ptr<type_resolver> make_type_resolver(
-  model::iceberg_mode mode, schema::registry& sr, schema_cache& cache) {
-    switch (mode) {
-    case model::iceberg_mode::disabled:
+  const model::iceberg_mode& mode, schema::registry& sr, schema_cache& cache) {
+    switch (mode.kind()) {
+    case model::iceberg_mode::variant::disabled:
         vassert(
           false,
           "Cannot make record translator when iceberg is disabled, logic bug.");
-    case model::iceberg_mode::key_value:
+    case model::iceberg_mode::variant::key_value:
         return std::make_unique<binary_type_resolver>();
-    case model::iceberg_mode::value_schema_id_prefix:
+    case model::iceberg_mode::variant::value_schema_id_prefix:
         return std::make_unique<record_schema_resolver>(sr, cache);
+    case model::iceberg_mode::variant::latest_protobuf_value:
+        vassert(false, "TODO");
     }
 }
 
 static std::unique_ptr<record_translator>
-make_record_translator(model::iceberg_mode mode) {
-    switch (mode) {
-    case model::iceberg_mode::disabled:
+make_record_translator(const model::iceberg_mode& mode) {
+    switch (mode.kind()) {
+    case model::iceberg_mode::variant::disabled:
         vassert(
           false,
           "Cannot make record translator when iceberg is disabled, logic bug.");
-    case model::iceberg_mode::key_value:
+    case model::iceberg_mode::variant::key_value:
         return std::make_unique<key_value_translator>();
-    case model::iceberg_mode::value_schema_id_prefix:
+    case model::iceberg_mode::variant::value_schema_id_prefix:
+    case model::iceberg_mode::variant::latest_protobuf_value:
         return std::make_unique<structured_data_translator>();
     }
 }

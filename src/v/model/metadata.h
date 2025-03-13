@@ -31,6 +31,7 @@
 #include <boost/functional/hash.hpp>
 
 #include <compare>
+#include <cstddef>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -589,19 +590,98 @@ std::ostream& operator<<(std::ostream&, recovery_validation_mode);
 std::istream& operator>>(std::istream&, recovery_validation_mode&);
 
 // Iceberg enablement options for a topic
-enum class iceberg_mode : uint8_t {
-    // Iceberg is disabled
-    disabled = 0,
-    // Iceberg translation interprets record key and value as binary
-    // types and uses default Iceberg table schema.
-    key_value = 1,
-    // Iceberg translation interprets the record value using the schema
-    // id embedded in value. Kafka serializers embed a magic byte as the
-    // first byte of the value to indicate the presence of a schema id
-    // which is then resolved with the schema registry. The value bytes
-    // are then interepted using the schema and the resulting columns are
-    // mapped to appropriate iceberg types and corresponding table columns.
-    value_schema_id_prefix = 2
+class iceberg_mode {
+public:
+    iceberg_mode() = default;
+
+    enum class variant : uint8_t {
+        // Iceberg is disabled
+        disabled = 0,
+        // Iceberg translation interprets record key and value as binary
+        // types and uses default Iceberg table schema.
+        key_value = 1,
+        // Iceberg translation interprets the record value using the schema
+        // id embedded in value. Kafka serializers embed a magic byte as the
+        // first byte of the value to indicate the presence of a schema id
+        // which is then resolved with the schema registry. The value bytes
+        // are then interepted using the schema and the resulting columns are
+        // mapped to appropriate iceberg types and corresponding table columns.
+        value_schema_id_prefix = 2,
+        // Iceberg translation always uses the latest protobuf schema found in
+        // the topic's subject in schema registry using the name `<topic>-value`
+        // which is also known as the TopicNameStrategy in schema registry
+        // terms. The latest version is fetched at runtime, then the specified
+        // message within the file descriptor is used to decode the message
+        // value.
+        latest_protobuf_value = 3,
+    };
+    static iceberg_mode disabled;
+
+    static iceberg_mode key_value;
+
+    static iceberg_mode value_schema_id_prefix;
+
+    // Creates a new iceberg mode with the latest protobuf value kind and the
+    // protobuf full name.
+    static iceberg_mode
+    latest_protobuf_value(std::string_view protobuf_full_name) {
+        return {latest_protobuf_value_t{}, protobuf_full_name};
+    }
+
+    // Returns the kind of iceberg mode is being used.
+    variant kind() const noexcept {
+        return static_cast<variant>(_impl.index());
+    }
+
+    // Returns the protobuf message's full name.
+    //
+    // Throws is variant() != variant::latest_protobuf_value
+    const ss::sstring& protobuf_full_name() const {
+        return std::get<latest_protobuf_value_impl>(_impl).message_full_name;
+    }
+
+    bool operator==(const iceberg_mode&) const = default;
+
+    friend void write(iobuf& out, const iceberg_mode& m);
+
+    friend void read_nested(
+      iobuf_parser& in, iceberg_mode& m, const std::size_t bytes_left_limit);
+
+private:
+    template<variant v>
+    static iceberg_mode make() noexcept {
+        iceberg_mode m;
+        m._impl = decltype(m._impl){
+          std::in_place_index<static_cast<size_t>(v)>};
+        return m;
+    }
+
+    struct latest_protobuf_value_t {};
+    iceberg_mode(latest_protobuf_value_t, std::string_view protobuf_full_name)
+      : _impl(
+          std::in_place_type<latest_protobuf_value_impl>,
+          ss::sstring(protobuf_full_name)) {}
+
+    struct disabled_impl {
+        bool operator==(const disabled_impl&) const = default;
+    };
+    struct key_value_impl {
+        bool operator==(const key_value_impl&) const = default;
+    };
+    struct value_schema_id_prefix_impl {
+        bool operator==(const value_schema_id_prefix_impl&) const = default;
+    };
+    struct latest_protobuf_value_impl {
+        ss::sstring message_full_name;
+        bool operator==(const latest_protobuf_value_impl&) const = default;
+    };
+
+    std::variant<
+      disabled_impl,
+      key_value_impl,
+      value_schema_id_prefix_impl,
+      latest_protobuf_value_impl>
+      _impl;
 };
 
 std::ostream& operator<<(std::ostream&, const iceberg_mode&);

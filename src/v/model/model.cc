@@ -16,7 +16,10 @@
 #include "model/record_batch_types.h"
 #include "model/timestamp.h"
 #include "model/validation.h"
+#include "serde/rw/enum.h"
 #include "serde/rw/rw.h"
+#include "serde/rw/sstring.h"
+#include "serde/serde_exception.h"
 #include "strings/string_switch.h"
 #include "utils/to_string.h"
 
@@ -582,27 +585,76 @@ std::istream& operator>>(std::istream& is, recovery_validation_mode& vm) {
     return is;
 }
 
+iceberg_mode iceberg_mode::disabled
+  = iceberg_mode::make<iceberg_mode::variant::disabled>();
+iceberg_mode iceberg_mode::key_value
+  = iceberg_mode::make<iceberg_mode::variant::key_value>();
+iceberg_mode iceberg_mode::value_schema_id_prefix
+  = iceberg_mode::make<iceberg_mode::variant::value_schema_id_prefix>();
+
+void write(iobuf& out, const iceberg_mode& m) {
+    using serde::write;
+    write(out, m.kind());
+    if (m.kind() == iceberg_mode::variant::latest_protobuf_value) {
+        write(out, m.protobuf_full_name());
+    }
+}
+
+void read_nested(
+  iobuf_parser& in, iceberg_mode& m, const std::size_t bytes_left_limit) {
+    using serde::read_nested;
+    iceberg_mode::variant v = iceberg_mode::variant::disabled;
+    read_nested(in, v, bytes_left_limit);
+    switch (v) {
+    case iceberg_mode::variant::disabled:
+        m = iceberg_mode::disabled;
+        return;
+    case iceberg_mode::variant::key_value:
+        m = iceberg_mode::key_value;
+        return;
+    case iceberg_mode::variant::value_schema_id_prefix:
+        m = iceberg_mode::value_schema_id_prefix;
+        return;
+    case iceberg_mode::variant::latest_protobuf_value:
+        ss::sstring s;
+        read_nested(in, s, bytes_left_limit);
+        m = iceberg_mode::latest_protobuf_value(s);
+        return;
+    }
+    throw serde::serde_exception(
+      fmt::format("unknown iceberg_mode variant: {}", std::to_underlying(v)));
+}
+
 std::ostream& operator<<(std::ostream& os, const iceberg_mode& mode) {
-    switch (mode) {
-    case iceberg_mode::disabled:
+    switch (mode.kind()) {
+    case iceberg_mode::variant::disabled:
         return os << "disabled";
-    case iceberg_mode::key_value:
+    case iceberg_mode::variant::key_value:
         return os << "key_value";
-    case iceberg_mode::value_schema_id_prefix:
+    case iceberg_mode::variant::value_schema_id_prefix:
         return os << "value_schema_id_prefix";
+    case iceberg_mode::variant::latest_protobuf_value:
+        return os << "latest_protobuf_value:" << mode.protobuf_full_name();
     }
 }
 
 std::istream& operator>>(std::istream& is, iceberg_mode& mode) {
-    using enum iceberg_mode;
     ss::sstring s;
     is >> s;
-    try {
-        mode = string_switch<iceberg_mode>(s)
-                 .match("disabled", disabled)
-                 .match("key_value", key_value)
-                 .match("value_schema_id_prefix", value_schema_id_prefix);
-    } catch (const std::runtime_error&) {
+    if (s == "disabled") {
+        mode = iceberg_mode::disabled;
+    } else if (s == "key_value") {
+        mode = iceberg_mode::key_value;
+    } else if (s == "value_schema_id_prefix") {
+        mode = iceberg_mode::value_schema_id_prefix;
+    } else if (s.starts_with("latest_protobuf_value:")) {
+        s = s.substr(std::strlen("latest_protobuf_value:"));
+        if (s.empty()) {
+            is.setstate(std::ios::failbit);
+        } else {
+            mode = iceberg_mode::latest_protobuf_value(s);
+        }
+    } else {
         is.setstate(std::ios::failbit);
     }
     return is;
