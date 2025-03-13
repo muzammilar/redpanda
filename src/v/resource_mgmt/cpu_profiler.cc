@@ -11,8 +11,8 @@
 
 #include "resource_mgmt/cpu_profiler.h"
 
+#include "container/chunked_hash_map.h"
 #include "resource_mgmt/logger.h"
-#include "ssx/sformat.h"
 
 #include <seastar/core/future.hh>
 #include <seastar/core/internal/cpu_profiler.hh>
@@ -94,18 +94,24 @@ ss::future<std::vector<cpu_profiler::shard_samples>> cpu_profiler::results(
 
 cpu_profiler::shard_samples cpu_profiler::shard_results(
   std::optional<ss::lowres_clock::time_point> filter_before) const {
-    size_t dropped_samples = 0;
-    absl::node_hash_map<ss::simple_backtrace, size_t> backtraces;
+    size_t dropped_samples = 0, total_samples = 0;
+    chunked_hash_map<ss::simple_backtrace, size_t> backtraces;
     for (auto& results_buffer : _results_buffers) {
         if (filter_before && results_buffer.polled_time < *filter_before) {
             continue;
         }
 
         dropped_samples += results_buffer.dropped_samples;
+        total_samples += results_buffer.samples.size();
         for (auto& result : results_buffer.samples) {
             backtraces[result.user_backtrace]++;
         }
     }
+
+    resourceslog.trace(
+      "shard_results returning {} total, {} unique results",
+      total_samples,
+      backtraces.size());
 
     std::vector<sample> results{};
     results.reserve(backtraces.size());
