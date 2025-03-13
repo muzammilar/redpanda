@@ -9,6 +9,7 @@ redpanda_cc_btest(
     deps = [
         "//src/v/config",
         "//src/v/resource_mgmt:cpu_profiler",
+        "//src/v/resource_mgmt:cpu_scheduling",
         "//src/v/test_utils:seastar_boost",
         "@boost//:test",
         "@seastar",
