@@ -241,7 +241,7 @@ class DatalakeServices():
     def wait_for_translation(self,
                              topic,
                              msg_count,
-                             timeout=60,
+                             timeout=30,
                              backoff_sec=5,
                              table_override=None):
         table_name = topic
