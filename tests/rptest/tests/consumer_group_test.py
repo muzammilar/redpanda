@@ -1030,37 +1030,41 @@ class ConsumerGroupTest(RedpandaTest):
             tp.offset for consumer in consumers
             for tp in (consumer.committed(consumer.assignment()) or []))
 
-        metrics = get_group_metrics_from_nodes()
-        committed_metrics = metrics_committed(metrics)
-        committed_sum = sum(committed_metrics)
-        committed_len = len(committed_metrics)
-        hwm_metrics = metrics_hwm(metrics)
-        hwm_sum = sum(hwm_metrics)
-        hwm_len = len(hwm_metrics)
-        lag_sum = metrics_lag_sum(metrics)
-        lag_max = metrics_lag_max(metrics)
+        def check_metrics():
+            metrics = get_group_metrics_from_nodes()
+            committed_metrics = metrics_committed(metrics)
+            committed_sum = sum(committed_metrics)
+            committed_len = len(committed_metrics)
+            hwm_metrics = metrics_hwm(metrics)
+            hwm_sum = sum(hwm_metrics)
+            hwm_len = len(hwm_metrics)
+            lag_sum = metrics_lag_sum(metrics)
+            lag_max = metrics_lag_max(metrics)
 
-        self.logger.debug(f"Expected HWM sum: {expected_hwm_sum}")
-        self.logger.debug(f"Expected committed sum: {expected_committed_sum}")
-        self.logger.debug(f"Metrics HWM sum: {hwm_sum}")
-        self.logger.debug(f"Metrics committed sum: {committed_sum}")
-        self.logger.debug(
-            f"Expected lag: {expected_hwm_sum - expected_committed_sum}")
-        self.logger.debug(f"Calculated lag: {hwm_sum - committed_sum}")
-        self.logger.debug(f"Metrics lag sum: {lag_sum}")
-        self.logger.debug(f"Metrics lag max: {lag_max}")
+            self.logger.debug(f"Expected HWM sum: {expected_hwm_sum}")
+            self.logger.debug(
+                f"Expected committed sum: {expected_committed_sum}")
+            self.logger.debug(f"Metrics HWM sum: {hwm_sum}")
+            self.logger.debug(f"Metrics committed sum: {committed_sum}")
+            self.logger.debug(
+                f"Expected lag: {expected_hwm_sum - expected_committed_sum}")
+            self.logger.debug(f"Calculated lag: {hwm_sum - committed_sum}")
+            self.logger.debug(f"Metrics lag sum: {lag_sum}")
+            self.logger.debug(f"Metrics lag max: {lag_max}")
 
-        assert expected_hwm_len == committed_len, f"Expected {expected_hwm_len}, got {committed_len}. Not all partitions were consumed, tweak the produce and consume counts"
-        assert expected_hwm_len == hwm_len, f"Expected {expected_hwm_len}, got {hwm_len}. Not all partitions were consumed, tweak the produce and consume counts"
+            assert expected_hwm_len == committed_len, f"Expected {expected_hwm_len}, got {committed_len}. Not all partitions were consumed, tweak the produce and consume counts"
+            assert expected_hwm_len == hwm_len, f"Expected {expected_hwm_len}, got {hwm_len}. Not all partitions were consumed, tweak the produce and consume counts"
 
-        # Check redpanda_kafka_max_offset
-        assert expected_hwm_sum == hwm_sum, f"Expected {expected_hwm_sum}, got {hwm_sum}"
-        #Check redpanda_kafka_consumer_group_committed_offset
-        assert expected_committed_sum == committed_sum, f"Expected {expected_committed_sum}, got {committed_sum}"
-        # Check redpanda_kafka_consumer_group_lag_sum
-        assert hwm_sum - committed_sum == lag_sum, f"Expected {hwm_sum - committed_sum}, got {lag_sum}"
-        # Check redpanda_kafka_consumer_group_lag_max
-        assert expected_lag_max == lag_max, f"Expected {expected_lag_max}, got {lag_max}"
+            # Check redpanda_kafka_max_offset
+            assert expected_hwm_sum == hwm_sum, f"Expected {expected_hwm_sum}, got {hwm_sum}"
+            #Check redpanda_kafka_consumer_group_committed_offset
+            assert expected_committed_sum == committed_sum, f"Expected {expected_committed_sum}, got {committed_sum}"
+            # Check redpanda_kafka_consumer_group_lag_sum
+            assert hwm_sum - committed_sum == lag_sum, f"Expected {hwm_sum - committed_sum}, got {lag_sum}"
+            # Check redpanda_kafka_consumer_group_lag_max
+            assert expected_lag_max == lag_max, f"Expected {expected_lag_max}, got {lag_max}"
+
+        check_metrics()
 
         for consumer in consumers:
             consumer.close()
