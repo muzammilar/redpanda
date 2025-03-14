@@ -423,7 +423,6 @@ redpanda_cc_library(
         "//src/v/base",
         "//src/v/iceberg:datatypes",
         "//src/v/utils:chunked_kv_cache",
-        "//src/v/utils:mutex",
         "@seastar",
     ],
 )

@@ -15,7 +15,6 @@
 #include "metrics/metrics.h"
 #include "pandaproxy/schema_registry/types.h"
 #include "utils/chunked_kv_cache.h"
-#include "utils/mutex.h"
 
 #include <seastar/core/future.hh>
 
@@ -213,7 +212,6 @@ private:
         ss::lowres_clock::time_point evict_deadline;
     };
     mutable std::optional<cached_schema> latest_cached_schema_;
-    mutable mutex mu_{"latest_protobuf_schema_resolver"};
 };
 
 } // namespace datalake

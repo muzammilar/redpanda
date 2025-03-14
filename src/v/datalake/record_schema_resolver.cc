@@ -379,10 +379,6 @@ checked<pb_descriptor_lookup_result, type_resolver::errc> lookup_descriptor(
 ss::future<checked<type_and_buf, type_resolver::errc>>
 latest_protobuf_schema_resolver::resolve_buf_type(
   std::optional<iobuf> b) const {
-    // Prevent multiple fibers from resolving the protobuf. Since the subject
-    // is fixed there would be no harm in letting them race either, but it seems
-    // better to not waste work.
-    auto _ = co_await mu_.get_units();
     if (
       latest_cached_schema_
       && latest_cached_schema_->evict_deadline > ss::lowres_clock::now()) {
