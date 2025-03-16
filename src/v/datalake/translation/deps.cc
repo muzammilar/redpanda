@@ -405,8 +405,7 @@ public:
       , _probe(std::move(probe))
       , _invalid_record_action(compute_invalid_record_action())
       , _cp_enabled(translation_task::custom_partitioning_enabled{
-          _features.is_active(features::feature::datalake_iceberg_ga)})
-      , _target_lag(compute_target_lag()) {}
+          _features.is_active(features::feature::datalake_iceberg_ga)}) {}
 
     ss::future<> translate_now(
       model::record_batch_reader reader, ss::abort_source& as) final {
@@ -437,19 +436,27 @@ public:
     void reconcile_properties() final {
         auto old_invalid_action = _invalid_record_action;
         auto old_cp_enabled = _cp_enabled;
-        auto old_target_lag = _target_lag;
 
+        // target lag changes will be picked dynamically and does not
+        // need a state reset.
         _invalid_record_action = compute_invalid_record_action();
         _cp_enabled = translation_task::custom_partitioning_enabled{
           _features.is_active(features::feature::datalake_iceberg_ga)};
-        _target_lag = compute_target_lag();
 
-        if (_in_progress_translation) {
+        auto properties_updated = old_invalid_action != _invalid_record_action
+                                  || old_cp_enabled != _cp_enabled;
+        if (properties_updated) {
+            vlog(
+              datalake_log.info,
+              "[{}] properties updated, new properties: invalid record action: "
+              "{}, custom_partition_enabled: {}",
+              _ntp,
+              _invalid_record_action,
+              _cp_enabled);
+        }
+        if (_in_progress_translation && properties_updated) {
             // discard any state so far
-            _discard_translated_state = old_invalid_action
-                                          != _invalid_record_action
-                                        || old_cp_enabled != _cp_enabled
-                                        || old_target_lag != _target_lag;
+            _discard_translated_state = properties_updated;
         }
     }
 
@@ -566,7 +573,6 @@ private:
     ss::lw_shared_ptr<translation_probe> _probe;
     model::iceberg_invalid_record_action _invalid_record_action;
     translation_task::custom_partitioning_enabled _cp_enabled;
-    scheduling::clock::duration _target_lag;
 
     std::optional<translation_task> _in_progress_translation;
     bool _discard_translated_state{false};
