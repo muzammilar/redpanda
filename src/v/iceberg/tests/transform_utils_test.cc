@@ -8,16 +8,20 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "bytes/random.h"
 #include "iceberg/transform.h"
 #include "iceberg/transform_utils.h"
 #include "iceberg/values.h"
 #include "model/timestamp.h"
+#include "random/generators.h"
 
 #include <absl/numeric/int128.h>
 #include <fmt/chrono.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <limits>
+#include <ranges>
 #include <utility>
 #include <variant>
 
@@ -435,4 +439,72 @@ TEST(TestTransformApplication, NumericTruncateTransform) {
     // underflow
     test(
       decimal_value{min_signed_128 + 1}, 5, decimal_value{max_signed_128 - 1});
+}
+
+TEST(TestTransformApplication, BinaryTruncateTransform) {
+    for (int runs = 0; runs < 10; ++runs) {
+        int input_len = random_generators::get_int(100);
+        auto random_bytes = std::string(input_len, 0);
+        for (int i = 0; i < input_len; ++i) {
+            random_bytes[i] = random_generators::get_int(
+              std::numeric_limits<uint8_t>::max());
+        }
+        auto split = random_generators::split_as_iobuf(
+          random_bytes, random_generators::get_int(10));
+
+        uint32_t truncate_len = random_generators::get_int(input_len + 3);
+
+        std::string expected_truncated_str = random_bytes.substr(
+          0, truncate_len);
+        iobuf expected_truncated_iobuf;
+        expected_truncated_iobuf.append(
+          expected_truncated_str.data(), expected_truncated_str.size());
+        primitive_value expected{
+          std::in_place_type<binary_value>,
+          std::move(expected_truncated_iobuf)};
+
+        auto actual_truncated = apply_transform(
+          binary_value{std::move(split)},
+          truncate_transform{.length = truncate_len});
+
+        ASSERT_TRUE(std::holds_alternative<primitive_value>(actual_truncated));
+        ASSERT_EQ(std::get<primitive_value>(actual_truncated), expected);
+    }
+}
+
+TEST(TestTransformApplication, TextTruncateTransform) {
+    const std::vector<const std::string> available_symbols{
+      "\x01", "\t", "\n", "\r", " ", "A", "a", "@", "香", "😊", "⋀", "Ы"};
+
+    for (int runs = 0; runs < 10; ++runs) {
+        int input_len = random_generators::get_int(10);
+        std::vector<std::string_view> chosen_symbols;
+        chosen_symbols.reserve(input_len);
+        for (int i = 0; i < input_len; ++i) {
+            chosen_symbols.push_back(
+              random_generators::random_choice(available_symbols));
+        }
+        std::string str{std::from_range, chosen_symbols | std::views::join};
+        auto split = random_generators::split_as_iobuf(
+          str, random_generators::get_int(5));
+
+        uint32_t truncate_len = random_generators::get_int(input_len + 3);
+
+        std::string expected_truncated_str{
+          std::from_range,
+          chosen_symbols | std::views::take(truncate_len) | std::views::join};
+        iobuf expected_truncated_iobuf;
+        expected_truncated_iobuf.append(
+          expected_truncated_str.data(), expected_truncated_str.size());
+        primitive_value expected{
+          std::in_place_type<string_value>,
+          std::move(expected_truncated_iobuf)};
+
+        auto actual_truncated = apply_transform(
+          string_value{std::move(split)},
+          truncate_transform{.length = truncate_len});
+
+        ASSERT_TRUE(std::holds_alternative<primitive_value>(actual_truncated));
+        ASSERT_EQ(std::get<primitive_value>(actual_truncated), expected);
+    }
 }

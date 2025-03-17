@@ -480,10 +480,12 @@ redpanda_cc_gtest(
         "transform_utils_test.cc",
     ],
     deps = [
+        "//src/v/bytes:random",
         "//src/v/iceberg:transform",
         "//src/v/iceberg:transform_utils",
         "//src/v/iceberg:values",
         "//src/v/model",
+        "//src/v/random:generators",
         "//src/v/test_utils:gtest",
         "@abseil-cpp//absl/numeric:int128",
         "@fmt",
