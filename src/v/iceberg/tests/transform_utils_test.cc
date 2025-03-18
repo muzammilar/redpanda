@@ -48,7 +48,8 @@ TEST(TestTransforms, TestHourlyTransform) {
     auto start_time = std::chrono::system_clock::now();
 
     auto start_transformed = apply_transform(
-      make_timestamp_val(start_time), hour_transform{});
+                               make_timestamp_val(start_time), hour_transform{})
+                               .value();
 
     ASSERT_TRUE(std::holds_alternative<primitive_value>(start_transformed));
     ASSERT_TRUE(std::holds_alternative<int_value>(
@@ -63,8 +64,8 @@ TEST(TestTransforms, TestHourlyTransform) {
         .count());
 
     auto plus_1hr = start_time + 1h;
-    auto plus_1hr_transformed = apply_transform(
-      make_timestamp_val(plus_1hr), hour_transform{});
+    auto plus_1hr_transformed
+      = apply_transform(make_timestamp_val(plus_1hr), hour_transform{}).value();
     ASSERT_NE(start_transformed, plus_1hr_transformed);
     ASSERT_TRUE(std::holds_alternative<primitive_value>(plus_1hr_transformed));
     ASSERT_TRUE(std::holds_alternative<int_value>(
@@ -74,8 +75,9 @@ TEST(TestTransforms, TestHourlyTransform) {
     ASSERT_EQ(start_val.val + 1, plus_1hr_val.val);
 
     auto minus_1hr = start_time - 1h;
-    auto minus_1hr_transformed = apply_transform(
-      make_timestamp_val(minus_1hr), hour_transform{});
+    auto minus_1hr_transformed
+      = apply_transform(make_timestamp_val(minus_1hr), hour_transform{})
+          .value();
     ASSERT_NE(start_transformed, minus_1hr_transformed);
     ASSERT_TRUE(std::holds_alternative<primitive_value>(minus_1hr_transformed));
     ASSERT_TRUE(std::holds_alternative<int_value>(
@@ -164,7 +166,8 @@ TEST_P(TestTimeTransforms, TestConversion) {
     auto test_case = GetParam();
 
     auto transformed = apply_transform(
-      make_timestamp_val(test_case.time_shift), test_case.tr);
+                         make_timestamp_val(test_case.time_shift), test_case.tr)
+                         .value();
     ASSERT_TRUE(std::holds_alternative<primitive_value>(transformed));
     ASSERT_TRUE(std::holds_alternative<int_value>(
       std::get<primitive_value>(transformed)));
@@ -178,7 +181,8 @@ TEST_P(TestDateTransforms, TestConversion) {
     auto test_case = GetParam();
 
     auto transformed = apply_transform(
-      make_date_val(test_case.time_shift), test_case.tr);
+                         make_date_val(test_case.time_shift), test_case.tr)
+                         .value();
     ASSERT_TRUE(std::holds_alternative<primitive_value>(transformed));
     ASSERT_TRUE(std::holds_alternative<int_value>(
       std::get<primitive_value>(transformed)));
@@ -233,7 +237,7 @@ TEST(TestTransformApplication, IdentityTransform) {
     primitive_test_values test_values;
 
     auto test_transform = [](const value& val) {
-        auto transformed = apply_transform(val, identity_transform{});
+        auto transformed = apply_transform(val, identity_transform{}).value();
         ASSERT_EQ(val, transformed);
     };
 
@@ -257,8 +261,8 @@ TEST(TestTransformApplication, BucketTransform) {
     primitive_test_values test_values;
     auto test_transform =
       [](const value& val, uint32_t buckets, int32_t expected) {
-          auto transformed = apply_transform(
-            val, bucket_transform{.n = buckets});
+          auto transformed
+            = apply_transform(val, bucket_transform{.n = buckets}).value();
           ASSERT_TRUE(std::holds_alternative<primitive_value>(transformed));
           const auto& p_val = std::get<primitive_value>(transformed);
           ASSERT_TRUE(std::holds_alternative<int_value>(p_val));
@@ -354,7 +358,9 @@ TEST(TestTransformApplication, NumericTruncateTransform) {
           value input_wrapped{
             std::in_place_type<primitive_value>, std::move(input)};
           auto transformed = apply_transform(
-            std::move(input_wrapped), truncate_transform{.length = length});
+                               std::move(input_wrapped),
+                               truncate_transform{.length = length})
+                               .value();
           ASSERT_TRUE(std::holds_alternative<primitive_value>(transformed));
           ASSERT_EQ(std::get<primitive_value>(transformed), expected);
       };
@@ -514,8 +520,9 @@ TEST(TestTransformApplication, BinaryTruncateTransform) {
           std::move(expected_truncated_iobuf)};
 
         auto actual_truncated = apply_transform(
-          binary_value{std::move(split)},
-          truncate_transform{.length = truncate_len});
+                                  binary_value{std::move(split)},
+                                  truncate_transform{.length = truncate_len})
+                                  .value();
 
         ASSERT_TRUE(std::holds_alternative<primitive_value>(actual_truncated));
         ASSERT_EQ(std::get<primitive_value>(actual_truncated), expected);
@@ -551,8 +558,9 @@ TEST(TestTransformApplication, TextTruncateTransform) {
           std::move(expected_truncated_iobuf)};
 
         auto actual_truncated = apply_transform(
-          string_value{std::move(split)},
-          truncate_transform{.length = truncate_len});
+                                  string_value{std::move(split)},
+                                  truncate_transform{.length = truncate_len})
+                                  .value();
 
         ASSERT_TRUE(std::holds_alternative<primitive_value>(actual_truncated));
         ASSERT_EQ(std::get<primitive_value>(actual_truncated), expected);
