@@ -287,6 +287,22 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
             writer_iter = iter;
         }
 
+        auto& writer = writer_iter->second;
+        auto add_data_result = co_await writer->add_data(
+          std::move(record_data_res.value()), estimated_size, as);
+
+        if (add_data_result != writer_error::ok) {
+            vlog(
+              _log.warn,
+              "Error adding data to writer for record {}: {}",
+              offset,
+              add_data_result);
+            _error = add_data_result;
+            // If a write fails, the writer is left in an indeterminate state,
+            // we cannot continue in this case.
+            co_return ss::stop_iteration::yes;
+        }
+
         // TODO: we want to ensure we're using an offset translating reader so
         // that these will be Kafka offsets, not Raft offsets.
         if (!_result.has_value()) {
@@ -294,24 +310,7 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
               .start_offset = offset,
             };
         }
-
         _result.value().last_offset = offset;
-
-        auto& writer = writer_iter->second;
-        auto write_result = co_await writer->add_data(
-          std::move(record_data_res.value()), estimated_size, as);
-
-        if (write_result != writer_error::ok) {
-            vlog(
-              _log.warn,
-              "Error adding data to writer for record {}: {}",
-              offset,
-              write_result);
-            _error = write_result;
-            // If a write fails, the writer is left in an indeterminate state,
-            // we cannot continue in this case.
-            co_return ss::stop_iteration::yes;
-        }
     }
     co_return ss::stop_iteration::no;
 }
@@ -332,10 +331,6 @@ ss::future<writer_error> record_multiplexer::flush_writers() {
 
 ss::future<result<record_multiplexer::write_result, writer_error>>
 record_multiplexer::finish() && {
-    if (!_result) {
-        // no batches were processed.
-        co_return writer_error::no_data;
-    }
     auto writers = std::move(_writers);
     for (auto& [id, writer] : writers) {
         auto res = co_await std::move(*writer).finish();
@@ -343,16 +338,20 @@ record_multiplexer::finish() && {
             _error = res.error();
             continue;
         }
-        auto& files = res.value();
-        std::move(
-          files.begin(), files.end(), std::back_inserter(_result->data_files));
+        if (_result) {
+            auto& files = res.value();
+            std::move(
+              files.begin(),
+              files.end(),
+              std::back_inserter(_result->data_files));
+        }
     }
     if (_invalid_record_writer) {
         auto writer = std::move(_invalid_record_writer);
         auto res = co_await std::move(*writer).finish();
         if (res.has_error()) {
             _error = res.error();
-        } else {
+        } else if (_result) {
             auto& files = res.value();
             std::move(
               files.begin(),
@@ -362,6 +361,10 @@ record_multiplexer::finish() && {
     }
     if (_error && !is_recoverable_error(_error.value())) {
         co_return *_error;
+    }
+    if (!_result) {
+        // no batches were processed.
+        co_return writer_error::no_data;
     }
     co_return std::move(*_result);
 }
