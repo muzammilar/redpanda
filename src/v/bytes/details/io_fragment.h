@@ -370,7 +370,7 @@ private:
 #endif
 };
 
-inline void __attribute__((noinline)) dispose_io_fragment(io_fragment* f) {
+inline void dispose_io_fragment(io_fragment* f) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wfree-nonheap-object"
     delete f; // NOLINT
