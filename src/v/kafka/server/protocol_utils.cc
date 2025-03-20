@@ -63,7 +63,7 @@ parse_v1_header(ss::input_stream<char>& src) {
     buf = co_await src.read_exactly(client_id_size);
 
     if (src.eof()) {
-        throw std::runtime_error(fmt::format(
+        throw malformed_header_exception(fmt::format(
           "Unexpected EOF for client ID, client_id_size: {}, header: {}",
           client_id_size,
           header));
