@@ -23,8 +23,10 @@
 
 namespace cluster::self_test {
 
-cloudcheck::cloudcheck(ss::sharded<cloud_storage::remote>& cloud_storage_api)
-  : _rtc(_as)
+cloudcheck::cloudcheck(
+  model::node_id self, ss::sharded<cloud_storage::remote>& cloud_storage_api)
+  : _self(self)
+  , _rtc(_as)
   , _cloud_storage_api(cloud_storage_api) {}
 
 ss::future<> cloudcheck::start() { return ss::make_ready_future<>(); }
@@ -108,8 +110,6 @@ ss::future<std::vector<self_test_result>> cloudcheck::run_benchmarks() {
     const auto bucket = cloud_storage_clients::bucket_name{
       cloud_storage::configuration::get_bucket_config()().value()};
 
-    const auto self_test_prefix = cloud_storage_clients::object_key{
-      "self-test/"};
 
     const auto uuid = cloud_storage_clients::object_key{
       ss::sstring{uuid_t::create()}};

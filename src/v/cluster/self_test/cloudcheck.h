@@ -16,6 +16,7 @@
 #include "cloud_storage/types.h"
 #include "cluster/self_test/metrics.h"
 #include "cluster/self_test_rpc_types.h"
+#include "model/fundamental.h"
 #include "utils/retry_chain_node.h"
 
 #include <seastar/core/abort_source.hh>
@@ -35,7 +36,9 @@ public:
 
 class cloudcheck {
 public:
-    cloudcheck(ss::sharded<cloud_storage::remote>& cloud_storage_api);
+    cloudcheck(
+      model::node_id self,
+      ss::sharded<cloud_storage::remote>& cloud_storage_api);
 
     /// Initialize the benchmark
     ss::future<> start();
@@ -145,13 +148,14 @@ private:
 private:
     static constexpr size_t num_default_objects = 5;
     bool _cancelled{false};
+    model::node_id _self;
     ss::abort_source _as;
     ss::gate _gate;
     retry_chain_node _rtc;
     cloudcheck_opts _opts;
 
     const cloud_storage_clients::object_key self_test_prefix
-      = cloud_storage_clients::object_key{"self-test/"};
+      = cloud_storage_clients::object_key{fmt::format("self-test-{}/", _self)};
 
 private:
     ss::sharded<cloud_storage::remote>& _cloud_storage_api;
