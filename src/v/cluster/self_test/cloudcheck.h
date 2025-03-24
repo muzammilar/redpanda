@@ -77,6 +77,9 @@ private:
       iobuf& payload,
       retry_chain_node& rtc);
 
+    ss::future<>
+    clear_self_test_folder(cloud_storage_clients::bucket_name bucket);
+
     // Wrapper around verify_tests for timing purposes, regardless of test
     // failure or success.
     template<

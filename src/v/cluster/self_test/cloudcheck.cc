@@ -92,6 +92,31 @@ cloudcheck::run(cloudcheck_opts opts) {
       _opts.sg, [this]() mutable { return run_benchmarks(); });
 }
 
+ss::future<>
+cloudcheck::clear_self_test_folder(cloud_storage_clients::bucket_name bucket) {
+    auto rtc = retry_chain_node(_opts.timeout, _opts.backoff, &_rtc);
+    const cloud_storage::remote::list_result object_list
+      = co_await _cloud_storage_api.local().list_objects(
+        bucket, rtc, self_test_prefix);
+
+    if (object_list && !object_list.value().contents.empty()) {
+        std::vector<cloud_storage_clients::object_key> objects_to_delete;
+        objects_to_delete.reserve(object_list.value().contents.size());
+        for (auto& object : object_list.value().contents) {
+            objects_to_delete.push_back(
+              cloud_storage_clients::object_key{std::move(object.key)});
+        }
+
+        std::ignore = co_await _cloud_storage_api.local().delete_objects(
+          bucket, objects_to_delete, rtc);
+    }
+
+    // Also delete the self_test_prefix- this will no-op for cloud providers
+    // that lack the concept of a "folder".
+    std::ignore = co_await _cloud_storage_api.local().delete_object(
+      bucket, self_test_prefix, rtc);
+}
+
 template<typename Test, typename... Args, typename R>
 R cloudcheck::do_run_test(Test test, Args&&... args) {
     const auto start = ss::lowres_system_clock::now();
@@ -110,6 +135,7 @@ ss::future<std::vector<self_test_result>> cloudcheck::run_benchmarks() {
     const auto bucket = cloud_storage_clients::bucket_name{
       cloud_storage::configuration::get_bucket_config()().value()};
 
+    co_await clear_self_test_folder(bucket);
 
     const auto uuid = cloud_storage_clients::object_key{
       ss::sstring{uuid_t::create()}};
@@ -208,6 +234,8 @@ ss::future<std::vector<self_test_result>> cloudcheck::run_benchmarks() {
     auto deletes_test_result = co_await do_run_test(
       &cloudcheck::verify_deletes, bucket, num_default_objects);
     results.push_back(std::move(deletes_test_result.test_result));
+
+    co_await clear_self_test_folder(bucket);
 
     co_return results;
 }
