@@ -39,10 +39,9 @@ void datalake_throttle_manager::merge_producer_maps(
     }
 }
 
-datalake_throttle_manager::backlog_status
-datalake_throttle_manager::backlog_status::operator+(
-  const datalake_throttle_manager::backlog_status& o) const {
-    return datalake_throttle_manager::backlog_status{
+datalake_throttle_manager::status datalake_throttle_manager::status::operator+(
+  const datalake_throttle_manager::status& o) const {
+    return datalake_throttle_manager::status{
       .overdue_translation_partition_count
       = overdue_translation_partition_count
         + o.overdue_translation_partition_count,
@@ -50,13 +49,13 @@ datalake_throttle_manager::backlog_status::operator+(
                                         + o.partitions_translation_blocked};
 }
 
-bool datalake_throttle_manager::backlog_status::has_no_issues() const {
+bool datalake_throttle_manager::status::has_no_issues() const {
     return overdue_translation_partition_count == 0
            && partitions_translation_blocked == 0;
 }
 
-std::ostream& operator<<(
-  std::ostream& o, const datalake_throttle_manager::backlog_status& s) {
+std::ostream&
+operator<<(std::ostream& o, const datalake_throttle_manager::status& s) {
     fmt::print(
       o,
       "{{overdue_translation_partition_count: {}, "
@@ -112,10 +111,8 @@ ss::future<> datalake_throttle_manager::gc_and_update_global_producers_map() {
       [](datalake_throttle_manager& instance) {
           return instance._shard_status_provider();
       },
-      backlog_status{},
-      [](backlog_status acc, backlog_status shard_status) {
-          return acc + shard_status;
-      });
+      status{},
+      [](status acc, status shard_status) { return acc + shard_status; });
     if (_translation_status.has_no_issues()) {
         _last_no_issues_timestamp = clock_type::now();
     }

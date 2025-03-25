@@ -37,9 +37,8 @@ struct IcebergThrottlingManagerTest : ::testing::Test {
         shard_state.stop().get();
     }
 
-    ss::future<kafka::datalake_throttle_manager::backlog_status>
-    sample_backlog() {
-        co_return kafka::datalake_throttle_manager::backlog_status{
+    ss::future<kafka::datalake_throttle_manager::status> sample_backlog() {
+        co_return kafka::datalake_throttle_manager::status{
           .overdue_translation_partition_count
           = shard_state.local().not_keeping_up,
           .partitions_translation_blocked
