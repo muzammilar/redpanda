@@ -43,14 +43,15 @@ datalake_throttle_manager::backlog_status
 datalake_throttle_manager::backlog_status::operator+(
   const datalake_throttle_manager::backlog_status& o) const {
     return datalake_throttle_manager::backlog_status{
-      .partitions_backlog_limit_breached
-      = partitions_backlog_limit_breached + o.partitions_backlog_limit_breached,
+      .overdue_translation_partition_count
+      = overdue_translation_partition_count
+        + o.overdue_translation_partition_count,
       .partitions_translation_blocked = partitions_translation_blocked
                                         + o.partitions_translation_blocked};
 }
 
 bool datalake_throttle_manager::backlog_status::has_no_issues() const {
-    return partitions_backlog_limit_breached == 0
+    return overdue_translation_partition_count == 0
            && partitions_translation_blocked == 0;
 }
 
@@ -58,9 +59,9 @@ std::ostream& operator<<(
   std::ostream& o, const datalake_throttle_manager::backlog_status& s) {
     fmt::print(
       o,
-      "{{partitions_backlog_limit_breached: {}, "
+      "{{overdue_translation_partition_count: {}, "
       "partitions_translation_blocked: {}}}",
-      s.partitions_backlog_limit_breached,
+      s.overdue_translation_partition_count,
       s.partitions_translation_blocked);
     return o;
 }
@@ -202,7 +203,7 @@ datalake_throttle_manager::calculate_throttle() const {
     // translation state, the longer the time the more we throttle. The
     // throttle is set to max after 5 minutes
 
-    if (_translation_status.partitions_backlog_limit_breached > 0) {
+    if (_translation_status.overdue_translation_partition_count > 0) {
         auto time_in_degraded_state
           = std::chrono::duration_cast<std::chrono::milliseconds>(
             ss::lowres_clock::now() - _last_no_issues_timestamp);

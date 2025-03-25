@@ -35,7 +35,7 @@ class datalake_throttle_manager
   : public ss::peering_sharded_service<datalake_throttle_manager> {
 public:
     struct backlog_status {
-        size_t partitions_backlog_limit_breached{0};
+        size_t overdue_translation_partition_count{0};
         size_t partitions_translation_blocked{0};
 
         bool has_no_issues() const;
