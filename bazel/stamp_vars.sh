@@ -24,7 +24,12 @@ set -eo pipefail
 # not start with "STABLE_" are part of the volatile set, which will be used
 # but do not invalidate stamped targets.
 
-git_tag=$(git describe --always --abbrev=0 --match='v*')
+# In CI Bazel can sometimes be run from the vtools repo, so we need to ensure
+# that we're in the correct redpanda git repo.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_DIR="${SCRIPT_DIR}/.."
+
+git_tag=$(git -C "$WORKSPACE_DIR" describe --always --abbrev=0 --match='v*')
 echo "STABLE_GIT_LATEST_TAG ${git_tag}"
 
 # For CI builds we don't want to use the commit hash as that prevents caching of binaries,
@@ -36,11 +41,11 @@ if [[ $1 != "full" ]]; then
   exit 0
 fi
 
-git_rev=$(git rev-parse HEAD)
+git_rev=$(git -C "$WORKSPACE_DIR" rev-parse HEAD)
 echo "STABLE_GIT_COMMIT ${git_rev}"
 
 # Check whether there are any uncommitted changes
-if git diff-index --quiet HEAD --; then
+if git -C "$WORKSPACE_DIR" diff-index --quiet HEAD --; then
   echo "STABLE_GIT_TREE_DIRTY "
 else
   echo "STABLE_GIT_TREE_DIRTY -dirty"
