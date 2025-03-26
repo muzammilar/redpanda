@@ -8,11 +8,13 @@
  * the Business Source License, use of this software will be governed
  * by the Apache License, Version 2.0
  */
+#include "bytes/details/io_fragment.h"
 #include "bytes/iobuf.h"
 #include "random/generators.h"
 
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 
 namespace tests {
 
@@ -46,7 +48,9 @@ iobuf fragmented_iobuf(std::string_view str, int n_fragments) {
     iobuf res;
     auto cur = str.begin();
     for (auto fragment_len : fragment_lengths) {
-        res.append(ss::temporary_buffer<char>(cur, fragment_len));
+        // force add a new fragment
+        res.append(std::make_unique<details::io_fragment>(
+          ss::temporary_buffer<char>(cur, fragment_len)));
         cur += fragment_len;
     }
     return res;
