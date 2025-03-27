@@ -422,6 +422,12 @@ size_t transformed_data::memory_usage() const {
     return sizeof(*this) + _data.size_bytes();
 }
 
+size_t transformed_data::estimated_serialized_size() const {
+    // size, timestamp, and offset
+    size_t variant_max_size = vint::max_length * 3;
+    return sizeof(record_attributes) + variant_max_size + _data.size_bytes();
+}
+
 transformed_data transformed_data::copy() const {
     return transformed_data(_data.copy());
 }
