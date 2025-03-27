@@ -88,19 +88,13 @@ struct control_character_present_exception
 };
 
 struct default_control_character_thrower {
-    explicit default_control_character_thrower(
-      std::string_view unsanitized_string)
-      : sanitized_string(replace_control_chars_in_string(unsanitized_string)) {}
     virtual ~default_control_character_thrower() = default;
     [[noreturn]] [[gnu::cold]] virtual void conversion_error() {
         throw control_character_present_exception(
-          "String contains control character: " + sanitized_string);
+          "String contains control character");
     }
 
-    const std::string& get_sanitized_string() const { return sanitized_string; }
-
 private:
-    std::string sanitized_string;
 };
 
 inline bool contains_control_character(std::string_view v) {
@@ -117,7 +111,7 @@ void validate_no_control(std::string_view s, ExceptionThrower auto thrower) {
 }
 
 inline void validate_no_control(std::string_view s) {
-    validate_no_control(s, default_control_character_thrower{s});
+    validate_no_control(s, default_control_character_thrower{});
 }
 
 template<typename Thrower>
