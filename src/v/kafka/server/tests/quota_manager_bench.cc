@@ -50,12 +50,14 @@ ss::future<> send_requests(quota_manager& qm, size_t count, bool use_unique) {
         // Have a mixed workload of produce and fetch to highlight any cache
         // contention on produce/fetch token buckets for the same client id
         if (ss::this_shard_id() % 2 == 0) {
-            co_await qm.record_fetch_tp(client_id, 1);
-            auto delay = co_await qm.throttle_fetch_tp(client_id);
+            co_await qm.record_fetch_tp(
+              client_id, 1, quota_manager::clock::now());
+            auto delay = co_await qm.throttle_fetch_tp(
+              client_id, quota_manager::clock::now());
             perf_tests::do_not_optimize(delay);
         } else {
             auto delay = co_await qm.record_produce_tp_and_throttle(
-              client_id, 1);
+              client_id, 1, quota_manager::clock::now());
             perf_tests::do_not_optimize(delay);
         }
         co_await maybe_yield();
