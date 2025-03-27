@@ -465,8 +465,7 @@ bool processor::is_running() const {
 }
 
 int64_t processor::current_lag() const {
-    return *std::max_element(
-      _last_reported_lag.begin(), _last_reported_lag.end());
+    return *std::ranges::max_element(_last_reported_lag);
 }
 
 size_t transformed_output::memory_usage() const {
