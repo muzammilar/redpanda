@@ -25,6 +25,7 @@ import argparse
 import signal
 import os
 import shutil
+import time
 import aioboto3
 
 BOOTSTRAP_YAML = ".bootstrap.yaml"
@@ -183,14 +184,21 @@ async def ensure_bucket_exists(cfg: RedpandaConfig):
         aws_secret_access_key=cfg.cloud_storage_secret_key)
     print("Preparing cloud storage")
     async with client as s3:
+        timeout_sec = 5
+        start = time.time()
         while True:
-            buckets = await s3.list_buckets()
-            for bucket in buckets["Buckets"]:
-                if bucket["Name"] == cfg.cloud_storage_bucket:
-                    print("Bucket exists, proceeding to start redpanda")
-                    return
-            print("Bucket not found, creating...")
-            await s3.create_bucket(Bucket=cfg.cloud_storage_bucket)
+            try:
+                buckets = await s3.list_buckets()
+                for bucket in buckets["Buckets"]:
+                    if bucket["Name"] == cfg.cloud_storage_bucket:
+                        print("Bucket exists, proceeding to start redpanda")
+                        return
+                print("Bucket not found, creating...")
+                await s3.create_bucket(Bucket=cfg.cloud_storage_bucket)
+            except Exception as e:
+                if (time.time() - start) >= timeout_sec:
+                    raise e
+                await asyncio.sleep(1)
 
 
 async def main():
