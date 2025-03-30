@@ -182,6 +182,22 @@ public:
      * scheduling_notifications::notify_done when done.
      */
     virtual void stop_translation() = 0;
+
+    /**
+     * Request that the translator finish and upload its data. This is distinct
+     * from `stop_translation` in that it can be called on a translator no
+     * matter what stat it is in (e.g. running, waiting, idle). The translator
+     * is free to clear the request after taking action.
+     */
+    virtual void set_finish_translation() {}
+
+    /**
+     * Return true if the translator is still in the progress of satisfying the
+     * latest request made via a call to `finish_translation`. This method
+     * should return true immediately after a call to `finish_translation`, and
+     * then eventually return false.
+     */
+    virtual bool get_finish_translation() { return false; }
 };
 
 std::ostream& operator<<(std::ostream&, const translator&);

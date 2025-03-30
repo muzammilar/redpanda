@@ -397,13 +397,25 @@ ss::future<> partition_translator::translate_until_stopped() {
         // case the next iteration should see some jitter.
         auto scoped_set_jitter = ss::defer(
           [&needs_jitter] { needs_jitter = true; });
+        // Clear the flag as it is a one-shot request, and since
+        // translate_until_stopped can be restarted, for example if this
+        // workloop throws.
+        auto clear_finish_request = ss::defer(
+          [this] { _finish_translation_requested = false; });
 
         auto offsets = co_await fetch_translation_offsets(rcn);
-        if (!offsets) {
+        // this test of the finish translation request flag works here because
+        // we are executing in a polling loop.
+        auto finish_now = _finish_translation_requested
+                            ? finish_immediately::yes
+                            : finish_immediately::no;
+        if (finish_now) {
+            vlog(_logger.debug, "Requested for immediate finish");
+        }
+        if (!offsets && !finish_now) {
             continue;
         }
-        auto finish_now = finish_immediately::no;
-        if (offsets->next_translation_begin_offset) {
+        if (offsets->next_translation_begin_offset && !finish_now) {
             // new data is available to translate
             auto translate_f = co_await ss::coroutine::as_future(
               run_one_translation_iteration(
@@ -520,4 +532,13 @@ void partition_translator::stop_translation() {
     _inflight_translation_state->as.request_abort_ex(
       translator_out_of_memory_error{});
 }
+
+void partition_translator::set_finish_translation() {
+    _finish_translation_requested = true;
+}
+
+bool partition_translator::get_finish_translation() {
+    return _finish_translation_requested;
+}
+
 } // namespace datalake::translation
