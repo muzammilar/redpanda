@@ -278,10 +278,18 @@ partition_translator::run_one_translation_iteration(
     } catch (const translator_out_of_memory_error&) {
         // We just swallow the exception because the underlying result state
         // is still safe to be flushed.
-        vlog(
-          _logger.warn,
-          "Translation exceeded memory budget, result will be flushed "
-          "immediately");
+        if (_finish_translation_requested) {
+            vlog(_logger.debug, "Translation requested to finish immediately");
+        } else {
+            // `translator_out_of_memory_error is pulling double duty for
+            // preemption requests and out-of-memory requests. until stop
+            // translation is more expressive, we silence the out-of-memory
+            // warning if a finish translation request was also made.
+            vlog(
+              _logger.warn,
+              "Translation exceeded memory budget, result will be flushed "
+              "immediately");
+        }
         // We force a finish immediately to make forward progress and avoid
         // cases where the translator is stuck in this memory exhaustion loop.
         result = finish_immediately::yes;
@@ -411,7 +419,9 @@ ss::future<> partition_translator::translate_until_stopped() {
           [&needs_jitter] { needs_jitter = true; });
         // Clear the flag as it is a one-shot request, and since
         // translate_until_stopped can be restarted, for example if this
-        // workloop throws.
+        // workloop throws. This avoids clearing the flag before running
+        // run_one_translation_iteration which uses the flag to silence the
+        // out-of-memory warning message.
         auto clear_finish_request = ss::defer(
           [this] { _finish_translation_requested = false; });
 
