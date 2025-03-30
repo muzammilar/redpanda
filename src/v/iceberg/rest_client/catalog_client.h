@@ -202,7 +202,7 @@ private:
     // the request with optional payload, and takes care of retrying according
     // to policy
     ss::future<expected<iobuf>> perform_request(
-      retry_chain_node& rtc,
+      retry_chain_node& parent_rtc,
       http::request_builder request_builder,
       const ss::sstring& host,
       client_probe::endpoint endpoint,

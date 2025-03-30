@@ -271,7 +271,7 @@ ss::future<expected<std::monostate>> catalog_client::maybe_add_bearer_auth(
 }
 
 ss::future<expected<iobuf>> catalog_client::perform_request(
-  retry_chain_node& rtc,
+  retry_chain_node& parent_rtc,
   http::request_builder request_builder,
   const ss::sstring& host,
   client_probe::endpoint endpoint,
@@ -279,7 +279,7 @@ ss::future<expected<iobuf>> catalog_client::perform_request(
     if (payload.has_value()) {
         request_builder.with_content_length(payload.value().size_bytes());
     }
-
+    retry_chain_node rtc(&parent_rtc);
     std::vector<http_call_error> retriable_errors{};
 
     while (true) {
