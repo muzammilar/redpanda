@@ -55,6 +55,19 @@ avro_schema_str = """
 }
 """
 
+avro_schema_with_map_str = """
+{
+    "type": "record",
+    "namespace": "com.redpanda.examples.avro",
+    "name": "ClickEvent",
+    "fields": [
+        {"name": "number", "type": "long"},
+        {"name": "timestamp_us", "type": {"type": "long", "logicalType": "timestamp-micros"}},
+        {"name": "kv", "type": {"type": "map", "values": "long"}}
+    ]
+}
+"""
+
 AVRO_SCHEMA_TEST_CASES = {
     "basic":
     AvroSchema(
@@ -73,6 +86,30 @@ AVRO_SCHEMA_TEST_CASES = {
           'struct<partition:int,offset:bigint,timestamp:timestamp_ntz,headers:array<struct<key:binary,value:binary>>,key:binary>',
           None), ('number', 'bigint', None),
          ('timestamp_us', 'timestamp_ntz', None), ('', '', ''),
+         ('# Partitioning', '', ''),
+         ('Part 0', 'hours(redpanda.timestamp)', '')]),
+    "with_map":
+    AvroSchema(
+        schema_str=avro_schema_with_map_str,
+        record_generator=lambda t: {
+            "number": int(t),
+            "timestamp_us": int(t * 1000000),
+            "kv": {
+                str(t): int(t)
+            }
+        },
+        expected_trino=
+        [('redpanda',
+          'row(partition integer, offset bigint, timestamp timestamp(6), headers array(row(key varbinary, value varbinary)), key varbinary)',
+          '', ''), ('number', 'bigint', '', ''),
+         ('timestamp_us', 'timestamp(6)', '', ''),
+         ('kv', 'map(varchar, bigint)', '', '')],
+        expected_spark=
+        [('redpanda',
+          'struct<partition:int,offset:bigint,timestamp:timestamp_ntz,headers:array<struct<key:binary,value:binary>>,key:binary>',
+          None), ('number', 'bigint', None),
+         ('timestamp_us', 'timestamp_ntz', None),
+         ('kv', 'map<string,bigint>', None), ('', '', ''),
          ('# Partitioning', '', ''),
          ('Part 0', 'hours(redpanda.timestamp)', '')]),
 }
