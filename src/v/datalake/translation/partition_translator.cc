@@ -74,17 +74,13 @@ partition_translator::partition_translator(
   std::unique_ptr<data_source> data_source,
   std::unique_ptr<translation_context> translation_ctx,
   std::unique_ptr<translation_lag_tracker> lag_tracker,
-  jitter_t jitter,
-  std::chrono::milliseconds retry_max_timeout,
-  std::chrono::milliseconds retry_initial_backoff)
+  jitter_t jitter)
   : _sg(sg)
   , _coordinator(std::move(coordinator))
   , _data_source(std::move(data_source))
   , _translation_ctx(std::move(translation_ctx))
   , _lag_tracking(std::move(lag_tracker))
   , _jitter{std::move(jitter)}
-  , _retry_max_timeout(retry_max_timeout)
-  , _retry_initial_backoff(retry_initial_backoff)
   , _term(_data_source->term())
   , _logger(
       datalake_log, fmt::format("{}-term-{}", _data_source->ntp(), _term)) {}
