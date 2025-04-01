@@ -175,6 +175,9 @@ datalake_throttle_manager::maybe_throttle_producer(
       });
     // record throttle for exposing a metric
     _total_throttle += throttle_ms.count();
+    if (throttle_ms > 0ms) {
+        _throttled_requests++;
+    }
     co_return throttle_ms;
 }
 
@@ -238,6 +241,10 @@ void datalake_throttle_manager::setup_metrics() {
           [this] { return _total_throttle; },
           sm::description(
             "Total datalake producer throttle time in milliseconds")),
+        sm::make_counter(
+          "throttled_requests",
+          [this] { return _throttled_requests; },
+          sm::description("Number of requests throttled")),
       });
 }
 

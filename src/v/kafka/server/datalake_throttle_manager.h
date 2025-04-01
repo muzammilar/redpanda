@@ -106,6 +106,7 @@ private:
     producers_map_t _shard_local_producers;
     ss::timer<clock_type> _update_timer;
     size_t _total_throttle{0};
+    size_t _throttled_requests{0};
     metrics::internal_metric_groups _metrics;
     ss::gate _gate;
 };
