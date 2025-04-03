@@ -24,6 +24,7 @@ from ducktape.mark import matrix
 
 import rptest.tests.datalake.schemas.linear_pb2 as linear_pb2
 
+import operator
 import string
 import random
 
@@ -151,4 +152,5 @@ class DatalakeOMBTest(RedpandaTest):
             dl.wait_for_translation(
                 topic_name,
                 msg_count=(0.1 * benchmark.benchmark_time()) *
-                (producer_rate_bytes_s // payload_size))
+                (producer_rate_bytes_s // payload_size),
+                op=operator.gt)
