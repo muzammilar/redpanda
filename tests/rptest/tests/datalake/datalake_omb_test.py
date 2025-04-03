@@ -11,6 +11,7 @@ from rptest.tests.redpanda_test import RedpandaTest
 from rptest.services.cluster import cluster
 from rptest.tests.datalake.datalake_services import DatalakeServices
 from rptest.tests.datalake.utils import supported_storage_types
+from rptest.tests.datalake.query_engine_base import QueryEngineType
 from rptest.services.redpanda import PandaproxyConfig, SchemaRegistryConfig, SISettings
 from rptest.services.openmessaging_benchmark import OpenMessagingBenchmark, LocalPayloadDirectory
 from rptest.services.openmessaging_benchmark_configs import \
@@ -66,7 +67,7 @@ class DatalakeOMBTest(RedpandaTest):
 
         return msg
 
-    @cluster(num_nodes=7)
+    @cluster(num_nodes=8)
     @matrix(cloud_storage_type=supported_storage_types())
     def basic_workload_linear_20_test(self, cloud_storage_type):
         topic_name = "atestingtopic"
@@ -79,7 +80,7 @@ class DatalakeOMBTest(RedpandaTest):
 
         with DatalakeServices(self._ctx,
                               redpanda=self.redpanda,
-                              include_query_engines=[],
+                              include_query_engines=[QueryEngineType.SPARK],
                               catalog_type=filesystem_catalog_type()) as dl:
             dl.create_iceberg_enabled_topic(
                 name=topic_name,
