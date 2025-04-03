@@ -273,7 +273,8 @@ class DatalakeServices():
                     (e.engine_name(), e.count_table("redpanda", table_name)),
                     self.query_engines))
             self.redpanda.logger.debug(
-                f"Current counts for {table_name}: {counts}")
+                f"Current counts for {table_name}: {counts}, want {op=} {msg_count}"
+            )
             return all([op(c, msg_count) for _, c in counts.items()])
 
         wait_until(
