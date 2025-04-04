@@ -629,6 +629,11 @@ soft_deleted_schemas = {
         "schema": schema_proto_def,
         "type": "PROTOBUF",
     },
+    "json": {
+        "subject": "schema_json",
+        "schema": json_number_schema_def,
+        "type": "JSON",
+    }
 }
 dependent_schemas = {
     "proto": {
@@ -644,7 +649,22 @@ dependent_schemas = {
         "type":
         "PROTOBUF",
         "id":
-        2,
+        3,
+    },
+    "json": {
+        "subject":
+        "schema_json_dependee_schema",
+        "schema":
+        json_number_schema_def,
+        "references": [{
+            "name": "schema_json.json",
+            "subject": "schema_json",
+            "version": 1
+        }],
+        "type":
+        "JSON",
+        "id":
+        4,
     },
 }
 
@@ -3381,7 +3401,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
 
         #Test setup. Insert and soft-delete schemas to be referencedby
 
-        for name in ["proto"]:
+        for name in ["proto", "json"]:
             schema = soft_deleted_schemas[name]
             result_raw = self._post_subjects_subject_versions(
                 subject=schema["subject"],
@@ -3400,7 +3420,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                     f"Request content: {result_raw.content}"
 
         #Register schemas that reference the soft-deleted schemas
-        for name in ["proto"]:
+        for name in ["proto", "json"]:
             schema = dependent_schemas[name]
             result_raw = self._post_subjects_subject_versions(
                 subject=schema["subject"],
