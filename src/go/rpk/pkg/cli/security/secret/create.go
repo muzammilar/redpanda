@@ -24,18 +24,17 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 )
 
-var vsm, scopeNames = createScopeMap()
-
 func newCreateCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	var secretName, secretValue string
-	scopes := make([]string, 0)
+	var scopes []string
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new secret",
 		Long: `Create a new secret for your Redpanda Cloud cluster.
 
-Scopes define the areas where the secret can be used. Available options are:` + strings.Join(scopeNames, ", "),
+Scopes define the areas where the secret can be used. Available options are: 
+redpanda_connect, redpanda_cluster`,
 		Run: func(cmd *cobra.Command, _ []string) {
 			err := validateSecretName(secretName)
 			out.MaybeDie(err, "invalid secret name: %v", err)
@@ -58,11 +57,11 @@ Scopes define the areas where the secret can be used. Available options are:` + 
 			cl, err := publicapi.NewDataPlaneClientSet(url, p.CurrentAuth().AuthToken)
 			out.MaybeDie(err, "unable to initialize cloud client: %v", err)
 
-			scopeRequest := make([]dataplanev1.Scope, 0)
+			var scopeRequest []dataplanev1.Scope
 			for _, scope := range scopes {
-				vs, ok := vsm[scope]
+				vs, ok := mapNameToScope()[scope]
 				if !ok {
-					out.Die("invalid scope: %s, available options are: %s", scope, strings.Join(scopeNames, ", "))
+					out.Die("invalid scope: %s, available options are: %s", scope, strings.Join(getScopeNames(), ", "))
 				}
 				scopeRequest = append(scopeRequest, vs)
 			}
@@ -101,29 +100,51 @@ Scopes define the areas where the secret can be used. Available options are:` + 
 
 	cmd.Flags().StringVar(&secretName, "name", "", "Name of the secret, must be uppercase and can only contain letters, digits, and underscores")
 	cmd.Flags().StringVar(&secretValue, "value", "", "Value of the secret")
-	cmd.Flags().StringSliceVar(&scopes, "scopes", nil, "Scope of the secret, e.g., redpanda_connect")
+	cmd.Flags().StringSliceVar(&scopes, "scopes", nil, "Scope of the secret (e.g. redpanda_connect)")
 	cmd.MarkFlagRequired("name")
 	cmd.MarkFlagRequired("value")
 	cmd.MarkFlagRequired("scopes")
 
 	cmd.RegisterFlagCompletionFunc("scopes", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		return scopeNames, cobra.ShellCompDirectiveNoSpace
+		return getScopeNames(), cobra.ShellCompDirectiveNoSpace
 	})
 
 	return cmd
 }
 
-func createScopeMap() (map[string]dataplanev1.Scope, []string) {
-	validScopes := make(map[string]dataplanev1.Scope)
-	names := make([]string, 0)
+func getScopeNames() []string {
+	var scopeNames []string
+	for name := range dataplanev1.Scope_value {
+		if name != dataplanev1.Scope_SCOPE_UNSPECIFIED.String() {
+			s := strings.Replace(name, "SCOPE_", "", -1)
+			s = strings.ToLower(s)
+			scopeNames = append(scopeNames, s)
+		}
+	}
+	return scopeNames
+}
+
+func mapNameToScope() map[string]dataplanev1.Scope {
+	nameByScope := make(map[string]dataplanev1.Scope)
 	for name, enum := range dataplanev1.Scope_value {
 		if name != dataplanev1.Scope_SCOPE_UNSPECIFIED.String() {
 			s := strings.Replace(name, "SCOPE_", "", -1)
 			s = strings.ToLower(s)
-			validScopes[s] = dataplanev1.Scope(enum)
-			names = append(names, s)
+			nameByScope[s] = dataplanev1.Scope(enum)
 		}
 	}
+	return nameByScope
+}
 
-	return validScopes, names
+func mapScopeToName() map[dataplanev1.Scope]string {
+	scopeByName := make(map[dataplanev1.Scope]string)
+
+	for name, enum := range dataplanev1.Scope_value {
+		if name != dataplanev1.Scope_SCOPE_UNSPECIFIED.String() {
+			s := strings.Replace(name, "SCOPE_", "", -1)
+			s = strings.ToLower(s)
+			scopeByName[dataplanev1.Scope(enum)] = s
+		}
+	}
+	return scopeByName
 }
