@@ -23,10 +23,9 @@ public:
       pandaproxy::schema_registry::subject sub,
       std::optional<pandaproxy::schema_registry::schema_version> version,
       pandaproxy::schema_registry::include_deleted inc_dec) final;
-    ss::future<pandaproxy::schema_registry::canonical_schema_definition>
+    ss::future<pandaproxy::schema_registry::schema_definition>
     get_schema_definition(pandaproxy::schema_registry::schema_id id) final;
-    ss::future<
-      std::optional<pandaproxy::schema_registry::canonical_schema_definition>>
+    ss::future<std::optional<pandaproxy::schema_registry::schema_definition>>
     maybe_get_schema_definition(
       pandaproxy::schema_registry::schema_id id) final;
 
@@ -45,7 +44,7 @@ public:
     synced_getter() const override {
         return getter();
     }
-    ss::future<pandaproxy::schema_registry::canonical_schema_definition>
+    ss::future<pandaproxy::schema_registry::schema_definition>
     get_schema_definition(
       pandaproxy::schema_registry::schema_id id) const override;
 
@@ -55,7 +54,7 @@ public:
       const override;
 
     ss::future<pandaproxy::schema_registry::schema_id> create_schema(
-      pandaproxy::schema_registry::unparsed_schema unparsed) override;
+      pandaproxy::schema_registry::subject_schema unparsed) override;
 
     const std::vector<pandaproxy::schema_registry::stored_schema>& get_all();
 
