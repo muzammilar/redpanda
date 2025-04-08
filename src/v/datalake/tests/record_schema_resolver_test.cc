@@ -379,7 +379,7 @@ struct counting_store : public pandaproxy::schema_registry::schema_getter {
       : registry(registry)
       , counts(counts) {}
 
-    ss::future<pandaproxy::schema_registry::subject_schema> get_subject_schema(
+    ss::future<pandaproxy::schema_registry::stored_schema> get_subject_schema(
       pandaproxy::schema_registry::subject sub,
       std::optional<pandaproxy::schema_registry::schema_version> version,
       pandaproxy::schema_registry::include_deleted inc_dec) final {
@@ -425,7 +425,7 @@ public:
         return _store.get_schema_definition(id);
     }
 
-    ss::future<pandaproxy::schema_registry::subject_schema> get_subject_schema(
+    ss::future<pandaproxy::schema_registry::stored_schema> get_subject_schema(
       pandaproxy::schema_registry::subject sub,
       std::optional<pandaproxy::schema_registry::schema_version> version)
       const override {
@@ -437,7 +437,7 @@ public:
         return _registry.create_schema(std::move(unparsed));
     }
 
-    const std::vector<pandaproxy::schema_registry::subject_schema>& get_all() {
+    const std::vector<pandaproxy::schema_registry::stored_schema>& get_all() {
         return _registry.get_all();
     }
 

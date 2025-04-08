@@ -54,7 +54,7 @@ public:
         auto [reader, _] = co_await service();
         co_return co_await reader->get_schema_definition(id);
     }
-    ss::future<ppsr::subject_schema> get_subject_schema(
+    ss::future<ppsr::stored_schema> get_subject_schema(
       ppsr::subject sub,
       std::optional<ppsr::schema_version> version) const override {
         auto [reader, _] = co_await service();
@@ -98,7 +98,7 @@ public:
         throw std::logic_error(
           "invalid attempted usage of a disabled schema registry");
     }
-    ss::future<ppsr::subject_schema> get_subject_schema(
+    ss::future<ppsr::stored_schema> get_subject_schema(
       ppsr::subject, std::optional<ppsr::schema_version>) const override {
         throw std::logic_error(
           "invalid attempted usage of a disabled schema registry");
