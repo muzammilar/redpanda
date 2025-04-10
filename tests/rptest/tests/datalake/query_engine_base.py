@@ -15,6 +15,7 @@ from enum import Enum
 class QueryEngineType(str, Enum):
     SPARK = 'spark'
     TRINO = 'trino'
+    DATABRICKS_SQL = 'databricks_sql'
 
 
 class QueryEngineBase(ABC):
