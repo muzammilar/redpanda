@@ -12,6 +12,7 @@
 #include "container/json.h"
 #include "pandaproxy/json/rjson_util.h"
 #include "pandaproxy/json/types.h"
+#include "pandaproxy/logger.h"
 #include "pandaproxy/parsing/httpd.h"
 #include "pandaproxy/schema_registry/error.h"
 #include "pandaproxy/schema_registry/errors.h"
@@ -73,6 +74,12 @@ parse_schema_version(const ss::sstring& ver) {
              : parse_numerical_schema_version(ver).value();
 }
 
+template<ppj::impl::RjsonParseHandler Handler>
+typename ss::future<typename Handler::rjson_parse_result>
+rjson_parse(ss::http::request& req, Handler handler) {
+    co_return co_await ppj::rjson_parse(req, std::move(handler), srreqs);
+}
+
 ss::future<server::reply_t>
 get_config(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
@@ -92,8 +99,7 @@ ss::future<server::reply_t>
 put_config(server::request_t rq, server::reply_t rp) {
     parse_content_type_header(rq);
     parse_accept_header(rq, rp);
-    auto config = co_await ppj::rjson_parse(
-      std::move(rq.req), put_config_handler<>{});
+    auto config = co_await rjson_parse(*rq.req, put_config_handler<>{});
 
     co_await rq.service().writer().write_config(std::nullopt, config.compat);
 
@@ -157,8 +163,7 @@ put_config_subject(server::request_t rq, server::reply_t rp) {
     parse_content_type_header(rq);
     parse_accept_header(rq, rp);
     auto sub = parse::request_param<subject>(*rq.req, "subject");
-    auto config = co_await ppj::rjson_parse(
-      std::move(rq.req), put_config_handler<>{});
+    auto config = co_await rjson_parse(*rq.req, put_config_handler<>{});
 
     // Ensure we see latest writes
     co_await rq.service().writer().read_sync();
@@ -216,7 +221,7 @@ ss::future<server::reply_t> put_mode(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
     auto frc = parse::query_param<std::optional<force>>(*rq.req, "force")
                  .value_or(force::no);
-    auto res = co_await ppj::rjson_parse(std::move(rq.req), mode_handler<>{});
+    auto res = co_await rjson_parse(*rq.req, mode_handler<>{});
 
     co_await rq.service().writer().write_mode(std::nullopt, res.mode, frc);
 
@@ -249,7 +254,7 @@ put_mode_subject(server::request_t rq, server::reply_t rp) {
     auto frc = parse::query_param<std::optional<force>>(*rq.req, "force")
                  .value_or(force::no);
     auto sub = parse::request_param<subject>(*rq.req, "subject");
-    auto res = co_await ppj::rjson_parse(std::move(rq.req), mode_handler<>{});
+    auto res = co_await rjson_parse(*rq.req, mode_handler<>{});
 
     // Ensure we see latest writes
     co_await rq.service().writer().read_sync();
@@ -428,8 +433,8 @@ post_subject(server::request_t rq, server::reply_t rp) {
 
     subject_schema schema;
     try {
-        auto unparsed = co_await ppj::rjson_parse(
-          std::move(rq.req), post_subject_versions_request_handler<>{sub});
+        auto unparsed = co_await rjson_parse(
+          *rq.req, post_subject_versions_request_handler<>{sub});
         schema = co_await rq.service().schema_store().make_canonical_schema(
           std::move(unparsed.def), norm);
     } catch (const exception& e) {
@@ -468,8 +473,8 @@ post_subject_versions(server::request_t rq, server::reply_t rp) {
 
     co_await rq.service().writer().read_sync();
 
-    auto unparsed = co_await ppj::rjson_parse(
-      std::move(rq.req), post_subject_versions_request_handler<>{sub});
+    auto unparsed = co_await rjson_parse(
+      *rq.req, post_subject_versions_request_handler<>{sub});
 
     // If presented with a non-positive integer for version, set it to
     // invalid_schema_version so that the version number can be projected
@@ -656,8 +661,8 @@ compatibility_subject_version(server::request_t rq, server::reply_t rp) {
     auto is_verbose{
       parse::query_param<std::optional<verbose>>(*rq.req, "verbose")
         .value_or(verbose::no)};
-    auto unparsed = co_await ppj::rjson_parse(
-      std::move(rq.req), post_subject_versions_request_handler<>{sub});
+    auto unparsed = co_await rjson_parse(
+      *rq.req, post_subject_versions_request_handler<>{sub});
 
     // Must read, in case we have the subject in cache with an outdated config
     co_await rq.service().writer().read_sync();
