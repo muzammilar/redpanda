@@ -199,8 +199,22 @@ ss::future<> state_machine_manager::start() {
           stm_meta->stm->last_applied_offset());
         offsets.push_back(stm_meta->stm->last_applied_offset());
     }
-    std::sort(offsets.begin(), offsets.end());
-    _next = model::next_offset(offsets.front());
+    _next = model::next_offset(*std::ranges::max_element(offsets));
+    auto log_offsets = _raft->log()->offsets();
+    /**
+     * Special case for the `archival_metadata_stm` local snapshot created
+     * during recovery. The snapshot last included offset was set to the log
+     * start offset.
+     */
+    if (log_offsets.start_offset > log_offsets.committed_offset) {
+        vlog(
+          _log.info,
+          "starting state machine manager with empty log. Clamping _next {} to "
+          "the start offset: {}",
+          _next,
+          log_offsets.start_offset);
+        _next = log_offsets.start_offset;
+    }
     vlog(
       _log.debug,
       "started state machine manager with initial next offset: {}",
@@ -427,7 +441,6 @@ ss::future<> state_machine_manager::try_apply_in_foreground() {
 }
 
 ss::future<> state_machine_manager::apply() {
-    co_await try_apply_in_foreground();
     /**
      * If any of the state machine is behind, dispatch background apply fibers
      */
@@ -436,6 +449,7 @@ ss::future<> state_machine_manager::apply() {
             maybe_start_background_apply(entry);
         }
     }
+    co_await try_apply_in_foreground();
 }
 
 void state_machine_manager::maybe_start_background_apply(
