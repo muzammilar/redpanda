@@ -965,7 +965,7 @@ TEST_F_CORO(persisted_stm_test_fixture, test_application_on_lagging_replica) {
 
     for (const auto& [id, stm] : node_stms) {
         ASSERT_EQ_CORO(stm->state, expected);
-        // snapshot was applied, not further applies should happen
+        // snapshot was applied, no further applies should happen
         ASSERT_EQ_CORO(stm->apply_count, 0);
     }
     for (auto& stm : other_stms) {
