@@ -46,6 +46,8 @@ class registry;
 
 namespace datalake {
 
+class core_0_disk_manager;
+
 /*
  * Per shard instance responsible for launching and synchronizing all datalake
  * related tasks like file format translation, frontend etc.
@@ -173,6 +175,7 @@ private:
     config::binding<model::iceberg_invalid_record_action>
       _iceberg_invalid_record_action;
     std::filesystem::path _writer_scratch_space;
+    std::unique_ptr<core_0_disk_manager> _disk_manager;
     translation::scheduling::scheduler _scheduler;
     ssx::work_queue _queue;
     ssx::semaphore _disk_space_monitor_sem{0, "datalake::disk_space_monitor"};

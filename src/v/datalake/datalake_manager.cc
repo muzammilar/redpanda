@@ -84,6 +84,16 @@ make_record_translator(const model::iceberg_mode& mode) {
 }
 } // namespace
 
+class core_0_disk_manager : public translation::scheduling::disk_manager {
+public:
+    static constexpr ss::shard_id manager_shard = 0;
+
+    /*
+     * A temporary implementation that grants all requests.
+     */
+    ss::future<size_t> reserve() override { co_return 1_MiB; }
+};
+
 datalake_manager::datalake_manager(
   model::node_id self,
   ss::sharded<raft::group_manager>* group_mgr,
@@ -125,6 +135,7 @@ datalake_manager::datalake_manager(
   , _iceberg_invalid_record_action(
       config::shard_local_cfg().iceberg_invalid_record_action.bind())
   , _writer_scratch_space(config::node().datalake_staging_path())
+  , _disk_manager(std::make_unique<core_0_disk_manager>())
   , _scheduler(
       memory_limit,
       config::shard_local_cfg().datalake_scheduler_block_size_bytes(),
@@ -132,7 +143,8 @@ datalake_manager::datalake_manager(
         config::shard_local_cfg()
           .datalake_scheduler_max_concurrent_translations.bind(),
         std::chrono::duration_cast<translation::scheduling::clock::duration>(
-          config::shard_local_cfg().datalake_scheduler_time_slice_ms())))
+          config::shard_local_cfg().datalake_scheduler_time_slice_ms())),
+      *_disk_manager)
   , _queue(
       sg,
       [](const std::exception_ptr& ex) {
@@ -272,8 +284,7 @@ ss::future<> datalake_manager::start() {
     /*
      * Start the global disk space usage monitor loop
      */
-    const ss::shard_id disk_space_monitor_core = 0;
-    if (ss::this_shard_id() == disk_space_monitor_core) {
+    if (ss::this_shard_id() == core_0_disk_manager::manager_shard) {
         // setup config bindings to trigger reconfiguration
         _disk_space_manager_enable.watch([this] { update_disk_limits(); });
         _scratch_space_size_bytes.watch([this] { update_disk_limits(); });

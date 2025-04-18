@@ -22,11 +22,13 @@ public:
     explicit default_reservations_tracker(
       size_t total_memory,
       size_t block_size,
-      scheduling_notifications& notifier)
+      scheduling_notifications& notifier,
+      disk_manager& disk_manager)
       : _total_memory((total_memory / block_size) * block_size)
       , _available_memory{_total_memory, "dl/translation/memory"}
       , _reservation_block_size(block_size)
-      , _notifier(notifier) {
+      , _notifier(notifier)
+      , _disk_manager(disk_manager) {
         auto blocks = _total_memory / block_size;
         vassert(
           blocks > 0,
@@ -81,6 +83,7 @@ private:
     ssx::semaphore _available_memory;
     const size_t _reservation_block_size;
     scheduling_notifications& _notifier;
+    [[maybe_unused]] disk_manager& _disk_manager;
 };
 
 std::ostream& operator<<(std::ostream& os, const translation_status& status) {
@@ -263,10 +266,12 @@ void executor::stop_translation(
 scheduler::scheduler(
   size_t total_memory,
   size_t memory_block_size,
-  std::unique_ptr<scheduling_policy> policy)
+  std::unique_ptr<scheduling_policy> policy,
+  disk_manager& disk_monitor)
   : _scheduling_policy(std::move(policy))
+  , _disk_monitor(disk_monitor)
   , _mem_tracker(reservations_tracker::make_default(
-      total_memory, memory_block_size, *this)) {
+      total_memory, memory_block_size, *this, _disk_monitor)) {
     ssx::repeat_until_gate_closed_or_aborted(
       _executor.gate, _executor.as, [this] {
           return main().handle_exception([](const std::exception_ptr& e) {
@@ -462,9 +467,10 @@ std::unique_ptr<scheduling_policy> scheduling_policy::make_default(
 std::unique_ptr<reservations_tracker> reservations_tracker::make_default(
   size_t total_memory,
   size_t memory_block_size,
-  scheduling_notifications& notifier) {
+  scheduling_notifications& notifier,
+  disk_manager& disk_manager) {
     return std::make_unique<default_reservations_tracker>(
-      total_memory, memory_block_size, notifier);
+      total_memory, memory_block_size, notifier, disk_manager);
 }
 
 } // namespace datalake::translation::scheduling

@@ -59,6 +59,25 @@ public:
     virtual void notify_memory_exhausted() = 0;
 };
 
+/*
+ * Interface for scheduler to interact with the global disk manager.
+ */
+class disk_manager {
+public:
+    disk_manager() = default;
+    disk_manager(const disk_manager&) = delete;
+    disk_manager& operator=(const disk_manager&) = delete;
+    disk_manager(disk_manager&& other) noexcept;
+    disk_manager& operator=(disk_manager&&) noexcept;
+    virtual ~disk_manager() = default;
+
+    /*
+     * Request additional disk reservation from the global pool. This method
+     * will return zero units if the request cannot be satisfied immediately.
+     */
+    virtual ss::future<size_t> reserve() = 0;
+};
+
 using reservation = ssx::semaphore_units;
 
 /**
@@ -87,7 +106,10 @@ public:
     virtual size_t allocated_memory() const = 0;
 
     static std::unique_ptr<reservations_tracker> make_default(
-      size_t total_memory, size_t memory_block_size, scheduling_notifications&);
+      size_t total_memory,
+      size_t memory_block_size,
+      scheduling_notifications&,
+      disk_manager&);
 };
 
 /**
@@ -378,7 +400,8 @@ public:
     explicit scheduler(
       size_t total_memory,
       size_t memory_block_size,
-      std::unique_ptr<scheduling_policy>);
+      std::unique_ptr<scheduling_policy>,
+      disk_manager&);
     scheduler(const scheduler&) = delete;
     scheduler& operator=(const scheduler&) = delete;
     scheduler(scheduler&&) = delete;
@@ -437,6 +460,7 @@ private:
     bool requires_scheduling_actions() const;
     ss::condition_variable _state_changed_cvar;
     std::unique_ptr<scheduling_policy> _scheduling_policy;
+    disk_manager& _disk_monitor;
     std::unique_ptr<reservations_tracker> _mem_tracker;
     executor _executor;
 };
