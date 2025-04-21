@@ -457,13 +457,10 @@ public:
      */
     struct finish_request {
         translator_id id;
-        size_t size;
         translator::stop_reason reason;
 
-        finish_request(
-          translator_id id, size_t size, translator::stop_reason reason)
+        finish_request(translator_id id, translator::stop_reason reason)
           : id(std::move(id))
-          , size(size)
           , reason(reason) {}
     };
     void request_immediate_finish(chunked_vector<finish_request>);

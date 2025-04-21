@@ -563,8 +563,6 @@ void scheduler::request_immediate_finish(
     // `i` captures both priority (lowest is highest), and serves as a unique
     // identifer. see `on_resource_exhaustion` for how this property is used.
     for (size_t i = 0; i < translators.size(); ++i) {
-        // the flush size of the translator is thrown away here, but preserved
-        // at the scheduler API level for future use by the scheduler.
         _executor.translators_for_immediate_finish.emplace(
           i,
           executor::finish_request(

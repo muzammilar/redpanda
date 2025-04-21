@@ -481,9 +481,11 @@ ss::future<> datalake_manager::check_and_manage_disk_space() {
         if (schedule_total_bytes >= adjusted_target_excess) {
             break;
         }
+        // it.first is the data usage by the translator. if the scheduling
+        // policy can make use of it, then it coudl be passed in here to avoid
+        // recalulation of the same value.
         schedule[it.second.first].emplace_back(
           it.second.second,
-          it.first,
           translation::scheduling::translator::stop_reason::out_of_disk);
         schedule_total_bytes += it.first;
         num_translators++;
