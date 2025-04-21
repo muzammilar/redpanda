@@ -814,10 +814,6 @@ redpanda_cc_bench(
     memory = "4GiB",
     runs = 1,
     tags = ["exclusive"],
-    target_compatible_with = select({
-        "//bazel:optimized_build": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
     deps = [
         ":kafka_test_utils",
         "//src/v/base",
