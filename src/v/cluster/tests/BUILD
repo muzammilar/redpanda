@@ -598,6 +598,7 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cluster",
+        "//src/v/cluster:state_machine_registry",
         "//src/v/config",
         "//src/v/model",
         "//src/v/raft",

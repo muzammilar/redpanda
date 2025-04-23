@@ -399,7 +399,10 @@ public:
       ss::sharded<cluster::topic_table>&);
 
     bool is_applicable_for(const storage::ntp_config&) const final;
-    void create(raft::state_machine_manager_builder&, raft::consensus*) final;
+    void create(
+      raft::state_machine_manager_builder&,
+      raft::consensus*,
+      const cluster::stm_instance_config&) final;
 
 private:
     bool _cloud_storage_enabled;
