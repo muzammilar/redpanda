@@ -122,6 +122,11 @@ public:
      */
     const_iterator erase(const_iterator it);
 
+    /**
+     * Returns the number of elements in the map.
+     */
+    [[nodiscard]] size_t size() const;
+
 private:
     map_type map_;
 };
@@ -226,6 +231,10 @@ interval_map<T, V>::const_iterator
 interval_map<T, V>::erase(interval_map<T, V>::const_iterator it) {
     return map_.erase(it);
 }
+
+template<std::integral T, typename V>
+size_t interval_map<T, V>::size() const {
+    return map_.size();
 }
 
 } // namespace experimental::io

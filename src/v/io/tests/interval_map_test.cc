@@ -41,6 +41,23 @@ TEST(IntervalMap, InsertIntoEmptyMap) {
     }
 }
 
+TEST(IntervalMap, Size) {
+    imap map;
+    EXPECT_EQ(map.size(), 0);
+
+    EXPECT_TRUE(map.insert({0, 10}, 0).second);
+    EXPECT_EQ(map.size(), 1);
+
+    EXPECT_TRUE(map.insert({10, 10}, 0).second);
+    EXPECT_EQ(map.size(), 2);
+
+    map.erase(map.begin());
+    EXPECT_EQ(map.size(), 1);
+
+    map.erase(map.begin());
+    EXPECT_EQ(map.size(), 0);
+}
+
 TEST(IntervalMap, InsertOverlapRejected) {
     imap map;
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
