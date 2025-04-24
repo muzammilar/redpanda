@@ -1,8 +1,10 @@
 import base64
+from collections import namedtuple
 from io import BytesIO
 from model import *
 from reader import Endianness, Reader
 from storage import Segment
+from storage import BatchType
 import datetime
 
 
@@ -163,12 +165,17 @@ def is_transactional_type(hdr):
     return hdr.type != 1
 
 
+def timestamp_to_str(timestamp: int):
+    return datetime.datetime.fromtimestamp(
+        timestamp / 1000.0,
+        datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 def decode_record(hdr, r):
     v = {}
     v['epoch'] = hdr.first_ts
     v['offset'] = hdr.base_offset + r.offset_delta
-    v['ts'] = datetime.datetime.utcfromtimestamp(
-        hdr.first_ts / 1000.0).strftime('%Y-%m-%d %H:%M:%S')
+    v['ts'] = timestamp_to_str(hdr.first_ts)
     if is_transactional_type(hdr):
         v['key'], v['val'] = TxRecordParser(hdr, r).parse()
     else:
@@ -201,3 +208,91 @@ class OffsetsLog:
                 else:
                     for r in b:
                         yield decode_record(b.header, r)
+
+
+class ConsumerGroupsSummaryGenerator:
+    def __init__(self, ntp):
+        self.ntp = ntp
+        self.log = OffsetsLog(ntp, decode_all_batches=True)
+
+    def build_summary(self):
+        configurations = []
+        archival_batches = []
+        compaction_placeholders = []
+        groups = {}
+
+        def update_group_state(group, state):
+            if group in groups:
+                groups[group]['state'] = state
+            else:
+                groups[group] = {
+                    "state": state,
+                    "offsets": {},
+                }
+
+        def update_group_offsets(group, topic_partition, offset_metadata,
+                                 log_offset):
+            if group not in groups:
+                groups[group] = {
+                    "state": None,
+                    "offsets": {},
+                }
+
+            offsets = groups[group]["offsets"]
+            if offset_metadata == "tombstone":
+                offsets.pop(topic_partition, None)
+            else:
+                offsets[topic_partition] = {
+                    "committed_offset":
+                    offset_metadata['committed_offset'],
+                    "log_offset":
+                    log_offset,
+                    "leader_epoch":
+                    offset_metadata['leader_epoch'],
+                    "commit_timestamp":
+                    offset_metadata["commit_timestamp"],
+                    "commit_timestamp_str":
+                    timestamp_to_str(offset_metadata["commit_timestamp"]),
+                }
+
+        for b in self.log:
+            if "type" in b:
+                if b['type'] == BatchType.raft_configuration.value:
+                    configurations.append({
+                        "base_offset":
+                        b['base_offset'],
+                        "term":
+                        b['term'],
+                        "timestamp":
+                        b['first_ts'],
+                        "timestamp_string":
+                        timestamp_to_str(b['first_ts'])
+                    })
+                elif b['type'] == BatchType.archival_metadata.value:
+                    archival_batches.append(b['base_offset'])
+                elif b['type'] == BatchType.compaction_placeholder.value:
+                    compaction_placeholders.append({
+                        "base_offset":
+                        b['base_offset'],
+                        "term":
+                        b['term']
+                    })
+            else:
+                if b['key']['type'] == "group_metadata":
+                    group = b['key']['group_id']
+                    if b['val'] == 'tombstone':
+                        groups.pop(group, None)
+                    else:
+                        update_group_state(group, b['val'])
+                elif b['key']['type'] == "offset_commit":
+                    group = b['key']['group_id']
+                    update_group_offsets(
+                        group, f"{b['key']['topic']}/{b['key']['partition']}",
+                        b['val'], b['offset'])
+
+        return {
+            "raft_configurations": configurations,
+            "archival_metadata": archival_batches,
+            "compaction_placeholders": compaction_placeholders,
+            "groups": groups
+        }

@@ -7,7 +7,7 @@ from typing import Any
 
 from controller import ControllerLog, ControllerSnapshot
 from consumer_groups import GroupsLog
-from consumer_offsets import OffsetsLog
+from consumer_offsets import ConsumerGroupsSummaryGenerator, OffsetsLog
 
 from crash_report import decode_crash_report
 from topic_manifest import decode_topic_manifest, decode_topic_manifest_to_legacy_v1_json
@@ -133,6 +133,17 @@ class OfflineLogViewer():
                     OffsetsLog(ntp, decode_all_batches))
         self.stream_json(logs, wrap_with_gen=False)
 
+    def print_consumer_offsets_summary(self):
+        store = self.build_store()
+        summaries = {}
+        for ntp in store.ntps:
+            if ntp.nspace == "kafka" and ntp.topic == "__consumer_offsets":
+                if self._should_skip_partition(ntp.partition):
+                    continue
+                summaries[str(ntp)] = ConsumerGroupsSummaryGenerator(
+                    ntp).build_summary()
+        self.output_json(summaries)
+
     def print_tx_coordinator(self):
         store = self.build_store()
         for ntp in store.ntps:
@@ -219,6 +230,8 @@ class OfflineLogViewer():
             self.print_consumer_offsets(decode_all_batches=False)
         elif self._config.type == "consumer_offsets_all":
             self.print_consumer_offsets(decode_all_batches=True)
+        elif self._config.type == "consumer_offsets_summary":
+            self.print_consumer_offsets_summary()
         elif self._config.type == "tx_coordinator":
             self.validate_tx_coordinator()
             self.print_tx_coordinator()
@@ -266,6 +279,7 @@ def main():
                                 'controller_snapshot',
                                 'crash_report',
                                 "consumer_offsets_all",
+                                "consumer_offsets_summary",
                             ],
                             required=True,
                             help='operation to execute')
