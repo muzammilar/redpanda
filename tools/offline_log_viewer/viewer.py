@@ -28,7 +28,6 @@ Configuration = namedtuple("Configuration", [
     "type",
     "topic",
     "binary_dump",
-    "force",
 ])
 
 
@@ -175,14 +174,6 @@ class OfflineLogViewer():
         if not os.path.exists(path):
             logger.error(f"Path doesn't exist {path}")
             sys.exit(1)
-        if self._config.force:
-            return
-        controller = join(path, "redpanda", "controller")
-        if not os.path.exists(controller):
-            logger.error(
-                f"Each redpanda data dir should have controller piece but {controller} isn't found"
-            )
-            sys.exit(1)
 
     def validate_topic(self):
         if self._config.topic:
@@ -234,7 +225,6 @@ def build_config(options):
         type=options.type,
         topic=options.topic,
         binary_dump=options.dump,
-        force=options.force,
     )
 
 
@@ -268,9 +258,7 @@ def main():
             '--dump',
             action='store_true',
             help='output binary dumps of keys and values being parsed')
-        parser.add_argument('--force',
-                            action='store_true',
-                            help='Skip data directory validation')
+        parser.add_argument('--force', action='store_true', help='Deprecated')
         return parser
 
     parser = generate_options()
