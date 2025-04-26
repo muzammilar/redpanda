@@ -788,6 +788,24 @@ disk_log_impl::find_adjacent_compaction_range(const compaction_config& cfg) {
     // sliding window over segments. currently restricted to two segments
     auto range = std::make_pair(_segs.begin(), std::next(_segs.begin(), 2));
 
+    // Ensure that the adjacent segments do not span an offset space greater
+    // than the maximum value that can be represented by a uint32_t. This must
+    // be enforced due to use of roaring::bitmap in the compacted_offset_list,
+    // which is used to deduplicate records during self compaction and sliding
+    // window compaction. Overflows in this area could lead to incorrect
+    // compaction.
+    auto valid_offset_range = [](
+                                ss::lw_shared_ptr<segment>& first,
+                                ss::lw_shared_ptr<segment>& last) -> bool {
+        auto base_offset_first_seg = first->offsets().get_base_offset();
+        auto dirty_offset_last_seg = last->offsets().get_dirty_offset();
+        int64_t offset_delta = dirty_offset_last_seg()
+                               - base_offset_first_seg();
+        static constexpr int64_t u32_max = static_cast<int64_t>(
+          std::numeric_limits<uint32_t>::max());
+        return offset_delta <= u32_max;
+    };
+
     while (true) {
         // the simple compaction process in use right now builds a concatenation
         // of segments so we avoid processing a group that is too large.
@@ -814,7 +832,8 @@ disk_log_impl::find_adjacent_compaction_range(const compaction_config& cfg) {
         // found a good range if all the tests pass
         if (
           same_term
-          && total_size < _manager.config().max_compacted_segment_size()) {
+          && total_size < _manager.config().max_compacted_segment_size()
+          && valid_offset_range(*range.first, *std::prev(range.second))) {
             break;
         }
 

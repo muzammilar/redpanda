@@ -233,8 +233,9 @@ public:
     segment_self_compact(compaction_config, ss::lw_shared_ptr<segment> seg);
 
     // Finds a range of adjacent segments that can be compacted together.
-    // A valid segment range consists of segments with the same raft term, and a
-    // combined size less than max_compacted_segment_size.
+    // A valid segment range consists of segments with the same raft term, a
+    // combined size less than max_compacted_segment_size, and spanning
+    // a range of offsets that fits in a uint32_t.
     //
     // Returns std::nullopt if a valid range of two segments could not be found.
     // Otherwise, a pair of iterators to the segments.
