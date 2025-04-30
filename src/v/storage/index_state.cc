@@ -239,8 +239,6 @@ bool index_state::maybe_index(
       base_offset,
       *this);
 
-    bool retval = false;
-
     // The first non-config batch in the segment, use its timestamp
     // to override the timestamps of any config batch that was indexed
     // by virtue of being the first in the segment.
@@ -264,6 +262,7 @@ bool index_state::maybe_index(
     }
 
     // index_state
+    bool is_empty = false;
     if (empty()) {
         // Ordinarily, we do not allow configuration batches to contribute to
         // the segment's timestamp bounds (because config batches use walltime
@@ -275,7 +274,7 @@ bool index_state::maybe_index(
 
         base_timestamp = first_timestamp;
         max_timestamp = first_timestamp;
-        retval = true;
+        is_empty = true;
     }
 
     // NOTE: we don't need the 'max()' trick below because we controll the
@@ -299,16 +298,23 @@ bool index_state::maybe_index(
           = num_compactible_records_appended.value_or(0) + compactible_records;
     }
     // always saving the first batch simplifies a lot of book keeping
-    if ((accumulator >= step && user_data) || retval) {
-        add_entry(
-          // We know that a segment cannot be > 4GB
-          batch_base_offset() - base_offset(),
-          offset_time_index{last_timestamp - base_timestamp, with_offset},
-          starting_position_in_file);
+    if ((accumulator >= step && user_data) || is_empty) {
+        auto offset_delta = batch_base_offset() - base_offset();
+        if (offset_delta <= std::numeric_limits<uint32_t>::max()) {
+            add_entry(
+              // We know that a segment cannot be > 4GB
+              batch_base_offset() - base_offset(),
+              offset_time_index{last_timestamp - base_timestamp, with_offset},
+              starting_position_in_file);
 
-        retval = true;
+            return true;
+        } else {
+            // We can't index anything beyond uint32 space. Presumably no
+            // further entries will be added because of this same condition.
+            return false;
+        }
     }
-    return retval;
+    return false;
 }
 
 std::ostream& operator<<(std::ostream& o, const index_state& s) {
