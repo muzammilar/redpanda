@@ -89,11 +89,11 @@ namespace {
 
 /// Return true if the exception is a shutdown error or a network error (e.g.
 /// Broken pipe)
-static bool is_shutdown_or_disconnect(const std::exception_ptr& e) {
+bool is_shutdown_or_disconnect(const std::exception_ptr& e) {
     return ssx::is_shutdown_exception(e) || net::is_disconnect_exception(e);
 }
 
-[[maybe_unused]] static bool
+[[maybe_unused]] bool
 is_nested_shutdown_exception(const ss::nested_exception& ex) {
     // During shutdown we could potentially get a 'shutdown' exception. If the
     // 'finally' continuation is used it will be invoked and if it touches the
@@ -109,7 +109,7 @@ is_nested_shutdown_exception(const ss::nested_exception& ex) {
            && (ssx::is_shutdown_exception(ex.inner) || ssx::is_shutdown_exception(ex.outer));
 }
 
-static bool segment_meta_matches_stats(
+bool segment_meta_matches_stats(
   const cloud_storage::segment_meta& meta,
   const cloud_storage::segment_record_stats& stats,
   retry_chain_logger& ctxlog) {
@@ -143,7 +143,7 @@ static bool segment_meta_matches_stats(
     return true;
 }
 
-static bool emit_read_write_fence(
+bool emit_read_write_fence(
   const ss::sharded<features::feature_table>& feature_table) {
     return !config::shard_local_cfg()
               .cloud_storage_disable_archival_stm_rw_fence.value()
@@ -259,8 +259,8 @@ ntp_archiver_upload_result::operator()(cloud_storage::upload_result) const {
     return _result;
 }
 
-static std::unique_ptr<adjacent_segment_merger>
-maybe_make_adjacent_segment_merger(
+namespace {
+std::unique_ptr<adjacent_segment_merger> maybe_make_adjacent_segment_merger(
   ntp_archiver& self, const storage::ntp_config& cfg) {
     std::unique_ptr<adjacent_segment_merger> result = nullptr;
     if (
@@ -275,7 +275,7 @@ maybe_make_adjacent_segment_merger(
     return result;
 }
 
-static std::unique_ptr<scrubber> maybe_make_scrubber(
+std::unique_ptr<scrubber> maybe_make_scrubber(
   ntp_archiver& self,
   cloud_storage::remote& remote,
   features::feature_table& feature_table,
@@ -296,8 +296,7 @@ static std::unique_ptr<scrubber> maybe_make_scrubber(
     return result;
 }
 
-static std::vector<std::exception_ptr>
-flatten_exception(const std::exception_ptr& e) {
+std::vector<std::exception_ptr> flatten_exception(const std::exception_ptr& e) {
     std::vector<std::exception_ptr> result;
     chunked_vector<std::exception_ptr> stk;
     stk.push_back(e);
@@ -316,6 +315,12 @@ flatten_exception(const std::exception_ptr& e) {
     }
     return result;
 }
+
+ss::sstring make_index_path(const remote_segment_path& segment_path) {
+    return fmt::format("{}.index", segment_path().native());
+}
+
+} // namespace
 
 ntp_archiver::ntp_archiver(
   const storage::ntp_config& ntp,
@@ -1365,10 +1370,6 @@ ss::future<cloud_storage::upload_result> ntp_archiver::upload_manifest(
     }
 
     co_return result;
-}
-
-static ss::sstring make_index_path(const remote_segment_path& segment_path) {
-    return fmt::format("{}.index", segment_path().native());
 }
 
 std::optional<ss::sstring> ntp_archiver::upload_should_abort() const {
