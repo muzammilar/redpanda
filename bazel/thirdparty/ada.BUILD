@@ -5,6 +5,7 @@ cc_library(
         "ada.h",
         "ada_c.h",
     ],
+    defines = ["ADA_INCLUDE_URL_PATTERN=0"],
     includes = ["."],
     visibility = [
         "//visibility:public",
