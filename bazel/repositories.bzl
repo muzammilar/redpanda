@@ -15,8 +15,8 @@ def data_dependency():
     http_archive(
         name = "ada",
         build_file = "//bazel/thirdparty:ada.BUILD",
-        sha256 = "caae8ecdb96fd4a50828205a327b62d047a028f08cd370b74178e23903140831",
-        url = "https://vectorized-public.s3.us-west-2.amazonaws.com/dependencies/ada-3.2.2.single-header.zip",
+        sha256 = "bd89fcf57c93e965e6e2488448ab9d1cf8005311808c563b288f921d987e4924",
+        url = "https://vectorized-public.s3.us-west-2.amazonaws.com/dependencies/ada-3.2.4.single-header.zip",
     )
 
     http_archive(
