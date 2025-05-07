@@ -64,7 +64,7 @@ func executeK8SBundle(ctx context.Context, bp bundleParams) error {
 		fileRoot: strings.TrimSuffix(filepath.Base(bp.path), ".zip"),
 	}
 	var errs *multierror.Error
-
+	bp.namespace = resolveNamespace(bp.namespace)
 	steps := []step{
 		saveCPUInfo(ps),
 		saveCmdLine(ps),
@@ -268,6 +268,29 @@ func getClusterDomain() string {
 	clusterDomain := strings.TrimPrefix(cname, apiSvc+".")
 
 	return clusterDomain
+}
+
+// resolveNamespace determines the Kubernetes namespace to use based on the
+// following priority order:
+//  1. The `--namespace` flag, if provided.
+//  2. The `NAMESPACE` environment variable, if set.
+//  3. The contents of the file
+//     `/var/run/secrets/kubernetes.io/serviceaccount/namespace`, if it exists.
+//  4. A default fallback value of "redpanda".
+func resolveNamespace(ns string) string {
+	if ns != "" {
+		return ns
+	}
+	zap.L().Sugar().Warn("flag '--namespace' not set; reading from $NAMESPACE")
+	if envNamespace := os.Getenv("NAMESPACE"); envNamespace != "" {
+		return envNamespace
+	}
+	zap.L().Sugar().Warn("$NAMESPACE not set; reading /var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		return strings.TrimSpace(string(data))
+	}
+	zap.L().Sugar().Warn("could not identify namespace; using default 'redpanda'")
+	return "redpanda"
 }
 
 // saveClusterAdminAPICalls saves per-cluster Admin API requests in the 'admin/'
