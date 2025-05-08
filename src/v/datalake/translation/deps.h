@@ -226,6 +226,7 @@ enum translation_errc {
     time_limit_exceeded,
     shutting_down,
     out_of_disk,
+    type_resolution_error,
 };
 
 std::ostream& operator<<(std::ostream&, translation_errc);

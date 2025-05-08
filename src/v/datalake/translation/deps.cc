@@ -48,6 +48,8 @@ map_error_code(datalake::translation_task::errc errc) {
         return translation_errc::shutting_down;
     case datalake::translation_task::errc::out_of_disk:
         return translation_errc::out_of_disk;
+    case datalake::translation_task::errc::type_resolution_error:
+        return translation_errc::type_resolution_error;
     }
 }
 } // namespace
@@ -474,6 +476,8 @@ std::ostream& operator<<(std::ostream& o, translation_errc ec) {
         return o << "translation_errc::shutting_down";
     case out_of_disk:
         return o << "translation_errc::out_of_disk";
+    case type_resolution_error:
+        return o << "translation_errc::type_resolution_error";
     }
 }
 

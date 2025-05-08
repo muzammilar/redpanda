@@ -56,6 +56,8 @@ translation_task::errc map_error_code(writer_error errc) {
         return translation_task::errc::out_of_disk;
     case writer_error::unknown_error:
         return translation_task::errc::file_io_error;
+    case writer_error::retryable_type_resolution_error:
+        return translation_task::errc::type_resolution_error;
     }
 }
 
@@ -265,7 +267,7 @@ ss::future<checked<void, translation_task::errc>> translation_task::flush() {
     auto result = co_await _multiplexer.flush_writers();
     if (result != writer_error::ok) {
         vlog(_log.debug, "error flushing writers: {}", result);
-        co_return translation_task::errc::flush_error;
+        co_return map_error_code(result);
     }
     co_return outcome::success();
 }
@@ -408,6 +410,8 @@ std::ostream& operator<<(std::ostream& o, translation_task::errc ec) {
         return o << "shutting down";
     case translation_task::errc::out_of_disk:
         return o << "disk exhausted";
+    case translation_task::errc::type_resolution_error:
+        return o << "type resolution error";
     }
 }
 } // namespace datalake

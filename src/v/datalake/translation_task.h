@@ -49,6 +49,7 @@ public:
         time_limit_exceeded,
         shutting_down,
         out_of_disk,
+        type_resolution_error,
     };
 
     using custom_partitioning_enabled
