@@ -2388,6 +2388,13 @@ disk_log_impl::offset_range_size(
         }
     }
 
+    // Recheck log offsets as well, as we could race with a prefix truncation
+    // while waiting for segment locks.
+    if (!log_contains_offset_range(first, last)) {
+        vlog(stlog.debug, "Log does not include entire range");
+        co_return std::nullopt;
+    }
+
     // Left subscan
     auto ix_left = segments.front()->index().find_nearest(first);
     if (ix_left.has_value()) {
@@ -2547,10 +2554,18 @@ disk_log_impl::offset_range_size(
     auto holders = co_await ss::when_all_succeed(
       std::begin(f_locks), std::end(f_locks));
 
+    // Check if anything was closed after the scheduling point.
     for (const auto& s : segments) {
         if (s->is_closed()) {
             co_return std::nullopt;
         }
+    }
+
+    // Recheck log offsets as well, as we could race with a prefix truncation
+    // while waiting for segment locks.
+    if (!log_contains_offset(first)) {
+        vlog(stlog.debug, "Log does not include offset {}", first);
+        co_return std::nullopt;
     }
 
     if (
