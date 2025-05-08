@@ -264,11 +264,6 @@ public:
     virtual std::optional<kafka::offset> last_translated_offset() const = 0;
 
     /**
-     * Reconciles the translator configurations.
-     */
-    virtual void reconcile_properties() = 0;
-
-    /**
      * Cleans up state and uploads data to cloud storage. Should be called in
      * all cases for appropriate cleanup.
      * This is called outside of translation scheduler context so it does not
