@@ -1178,3 +1178,31 @@ redpanda_cc_gtest(
         "@seastar//:testing",
     ],
 )
+
+redpanda_cc_btest(
+    name = "rm_stm_test",
+    timeout = "short",
+    srcs = [
+        "rm_stm_tests.cc",
+    ],
+    cpu = 1,
+    deps = [
+        ":randoms",
+        ":rm_stm_test_fixture",
+        "//src/v/cluster",
+        "//src/v/config",
+        "//src/v/finjector",
+        "//src/v/model",
+        "//src/v/model/tests:random",
+        "//src/v/raft",
+        "//src/v/random:generators",
+        "//src/v/storage:record_batch_builder",
+        "//src/v/storage/tests:disk_log_builder",
+        "//src/v/test_utils:random",
+        "//src/v/test_utils:seastar_boost",
+        "//src/v/utils:directory_walker",
+        "@boost//:test",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
