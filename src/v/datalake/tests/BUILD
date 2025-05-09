@@ -1,4 +1,4 @@
-load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_gtest", "redpanda_test_cc_library")
+load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_btest", "redpanda_cc_gtest", "redpanda_test_cc_library")
 
 redpanda_test_cc_library(
     name = "catalog_and_registry_fixture",
@@ -371,6 +371,36 @@ redpanda_cc_gtest(
         "//src/v/test_utils:gtest",
         "@fmt",
         "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_test_cc_library(
+    name = "translator_fixture",
+    hdrs = ["fixture.h"],
+    include_prefix = "datalake/tests",
+    visibility = [":__subpackages__"],
+    deps = [
+        "//src/v/cluster/archival/tests:archival_service_fixture",
+        "//src/v/datalake/coordinator:frontend",
+        "//src/v/datalake/coordinator:stm",
+    ],
+)
+
+redpanda_cc_btest(
+    name = "translator_fixture_test",
+    timeout = "moderate",
+    srcs = [
+        "translator_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        ":translator_fixture",
+        "//src/v/kafka/client",
+        "//src/v/kafka/client/test:utils",
+        "//src/v/model/tests:random",
+        "//src/v/test_utils:random",
+        "//src/v/test_utils:scoped_config",
         "@seastar",
     ],
 )
