@@ -75,3 +75,28 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "controller_snapshot_reconciliation_test",
+    timeout = "short",
+    srcs = [
+        "controller_snapshot_reconciliation_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        ":cluster_metadata_utils",
+        "//src/v/cloud_io/tests:s3_imposter",
+        "//src/v/cloud_storage",
+        "//src/v/cluster",
+        "//src/v/cluster/tests:tx_compaction_utils_gtest",
+        "//src/v/config",
+        "//src/v/model",
+        "//src/v/redpanda:application",
+        "//src/v/redpanda/tests:fixture",
+        "//src/v/security",
+        "//src/v/ssx:future_util",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
