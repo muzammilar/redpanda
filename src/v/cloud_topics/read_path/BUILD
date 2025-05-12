@@ -41,12 +41,12 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "placeholder_extent_reader",
+    name = "materialized_extent_reader",
     srcs = [
-        "placeholder_extent_reader.cc",
+        "materialized_extent_reader.cc",
     ],
     hdrs = [
-        "placeholder_extent_reader.h",
+        "materialized_extent_reader.h",
     ],
     include_prefix = "cloud_topics/read_path",
     deps = [
@@ -54,6 +54,7 @@ redpanda_cc_library(
         "//src/v/cloud_io:basic_cache_service_api",
         "//src/v/cloud_io:io_result",
         "//src/v/cloud_io:remote",
+        "//src/v/cloud_topics:extent_meta",
         "//src/v/cloud_topics:logger",
         "//src/v/cloud_topics:placeholder",
         "//src/v/cloud_topics:types",
@@ -88,7 +89,7 @@ redpanda_cc_library(
         "//src/v/cloud_topics/core:event_filter",
         "//src/v/cloud_topics/core:read_pipeline",
         "//src/v/cloud_topics/core:read_request",
-        "//src/v/cloud_topics/read_path:placeholder_extent_reader",
+        "//src/v/cloud_topics/read_path:materialized_extent_reader",
         "//src/v/model",
         "//src/v/ssx:future_util",
         "//src/v/storage",
