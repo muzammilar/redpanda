@@ -733,6 +733,26 @@ redpanda_cc_btest(
     ],
 )
 
+redpanda_cc_btest(
+    name = "controller_api_tests",
+    timeout = "short",
+    srcs = ["controller_api_tests.cc"],
+    deps = [
+        ":cluster_test_fixture",
+        "//src/v/base",
+        "//src/v/cluster",
+        "//src/v/model",
+        "//src/v/raft",
+        "//src/v/ssx:future_util",
+        "//src/v/test_utils:seastar_boost",
+        "//src/v/utils:unresolved_address",
+        "@boost//:test",
+        "@fmt",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
+
 redpanda_cc_bench(
     name = "health_report_rpbench",
     srcs = ["health_bench.cc"],
