@@ -3599,7 +3599,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                 "subject": "schema_proto",
                 "version": 1,
                 "id": 1,
-                "failing_format": [ignore_extensions, serialized]
+                "failing_format": [ignore_extensions]
             },
             "proto_b64": {
                 "schema": schema_proto_b64.strip(),
@@ -3607,7 +3607,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                 "subject": "schema_proto",
                 "version": 1,
                 "id": 1,
-                "failing_format": [ignore_extensions, serialized]
+                "failing_format": [ignore_extensions]
             },
             "avro_def": {
                 "schema": schema_avro_def.strip(),
@@ -3653,11 +3653,14 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         def test_runner(test_func):
             for entry in ["proto_def", "avro_def", "json_def"]:
                 for format in [
-                        default_format, bad_value, resolved, ignore_extensions,
-                        serialized
+                        default_format, bad_value, resolved, ignore_extensions
                 ]:
                     successful = is_successful(entries[entry], format)
                     test_func(entries[entry], successful, format)
+
+            for entry in ["proto_b64", "avro_def", "json_def"]:
+                successful = is_successful(entries[entry], serialized)
+                test_func(entries[entry], successful, serialized)
 
         def test_ids_id(schema_entry, successful, format=None):
             id = schema_entry["id"]
