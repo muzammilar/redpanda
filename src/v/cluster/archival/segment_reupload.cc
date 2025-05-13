@@ -23,6 +23,10 @@
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/when_all.hh>
 
+#include <boost/range/irange.hpp>
+
+#include <ranges>
+
 namespace archival {
 segment_collector::segment_collector(
   model::offset begin_inclusive,
@@ -716,6 +720,7 @@ ss::future<candidate_creation_result> segment_collector::make_upload_candidate(
 
     auto last = _segments.back();
     auto last_size_bytes = last->size_bytes();
+    auto last_unsealed = last->has_appender();
 
     // Take the locks before opening any readers on the segments.
     auto deadline = std::chrono::steady_clock::now() + segment_lock_duration;
@@ -738,24 +743,39 @@ ss::future<candidate_creation_result> segment_collector::make_upload_candidate(
       std::back_inserter(current_gen),
       [](const auto& seg) { return seg->get_generation_id()(); });
 
-    if (_generations != current_gen) {
+    // special case: skip the generation check iff
+    //   - the last segment in the list was NOT closed AND
+    //   - the last segment is the ONLY segment with gen ID difference
+
+    auto gen_id_diff_view = boost::irange(0ul, _segments.size())
+                            | std::views::filter([this, &current_gen](auto i) {
+                                  return _generations.at(i)
+                                         != current_gen.at(i);
+                              });
+
+    auto skip_gen_id_check = std::accumulate(
+      gen_id_diff_view.begin(),
+      gen_id_diff_view.end(),
+      last_unsealed && !gen_id_diff_view.empty(),
+      std::logical_and{});
+
+    // If the last collected segment is not closed,
+    if (!skip_gen_id_check && !gen_id_diff_view.empty()) {
         std::stringstream sstr;
-        for (size_t i = 0; i < _segments.size(); i++) {
-            if (_generations.at(i) != current_gen.at(i)) {
-                // Segment was updated concurrently while we were waiting
-                // for the locks.
-                fmt::print(
-                  sstr,
-                  "segment {}-{} (seq: {}, old gen: {}, new gen: {}, old size: "
-                  "{}, new size: {}); ",
-                  _segments.at(i)->offsets().get_base_offset(),
-                  _segments.at(i)->offsets().get_committed_offset(),
-                  i,
-                  _generations.at(i),
-                  current_gen.at(i),
-                  _sizes.at(i),
-                  _segments.at(i)->size_bytes());
-            }
+        for (auto i : gen_id_diff_view) {
+            // Segment was updated concurrently while we were waiting
+            // for the locks.
+            fmt::print(
+              sstr,
+              "segment {}-{} (seq: {}, old gen: {}, new gen: {}, old size: "
+              "{}, new size: {}); ",
+              _segments.at(i)->offsets().get_base_offset(),
+              _segments.at(i)->offsets().get_committed_offset(),
+              i,
+              _generations.at(i),
+              current_gen.at(i),
+              _sizes.at(i),
+              _segments.at(i)->size_bytes());
         }
         // The segment was updated while we were waiting for the locks.
         // It's a race condition so we should fail the upload and retry.
