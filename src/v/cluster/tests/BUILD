@@ -85,6 +85,21 @@ redpanda_test_cc_library(
 )
 
 redpanda_test_cc_library(
+    name = "tx_compaction_utils_gtest",
+    hdrs = [
+        "tx_compaction_utils.h",
+    ],
+    include_prefix = "cluster/tests",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cluster",
+        "//src/v/storage/tests:storage_test_fixture_gtest",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:random",
+    ],
+)
+
+redpanda_test_cc_library(
     name = "rm_stm_test_fixture",
     hdrs = [
         "rm_stm_test_fixture.h",
