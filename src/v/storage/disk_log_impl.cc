@@ -31,6 +31,7 @@
 #include "storage/key_offset_map.h"
 #include "storage/kvstore.h"
 #include "storage/log_manager.h"
+#include "storage/log_reader.h"
 #include "storage/logger.h"
 #include "storage/offset_assignment.h"
 #include "storage/offset_to_filepos.h"
@@ -113,6 +114,60 @@ bool deletion_exempt(const model::ntp& ntp) {
     return (!is_tx_manager_ntp && is_internal_namespace)
            || (is_consumer_offsets_ntp && !config::shard_local_cfg().unsafe_enable_consumer_offsets_delete_retention());
 }
+
+// Meant for reading batches from a single `segment`. This does not consider any
+// other `log` state- meaning, the `log` could have been prefix truncated and
+// batches read from the `segment` could be ahead of the new `_start_offset`.
+//
+// This class should only be used when it is necessary to consider the batches
+// still physically stored in a `segment` on disk, e.g for file position
+// calculations. For all other applications, the `log_reader` should be used.
+class single_segment_reader final : public model::record_batch_reader::impl {
+public:
+    using storage_t = model::record_batch_reader::storage_t;
+    single_segment_reader(
+      ss::lw_shared_ptr<segment> seg,
+      ss::rwlock::holder seg_read_lock,
+      log_reader_config reader_cfg,
+      probe& pb)
+      : _seg(seg)
+      , _seg_read_lock(std::move(seg_read_lock))
+      , _config(reader_cfg)
+      , _rdr(*_seg, _config, pb) {}
+
+    ~single_segment_reader() final = default;
+
+    bool is_end_of_stream() const final { return _is_end_of_stream; }
+
+    ss::future<storage_t>
+    do_load_slice(model::timeout_clock::time_point timeout) final {
+        auto recs = co_await _rdr.read_some(timeout);
+        if (!recs.has_value() || recs.value().empty()) {
+            _is_end_of_stream = true;
+            co_return storage_t{};
+        }
+
+        auto& batches = recs.value();
+        co_return std::move(batches);
+    }
+
+    ss::future<> finally() noexcept final { return _rdr.close(); }
+
+    void print(std::ostream& os) final {
+        fmt::print(
+          os,
+          "storage::single_segment_reader for {}, config {}",
+          _seg->filename(),
+          _config);
+    }
+
+private:
+    ss::lw_shared_ptr<segment> _seg;
+    ss::rwlock::holder _seg_read_lock;
+    log_reader_config _config;
+    log_segment_batch_reader _rdr;
+    bool _is_end_of_stream{false};
+};
 
 disk_log_impl::disk_log_impl(
   ntp_config cfg,
@@ -2294,12 +2349,16 @@ ss::future<size_t> disk_log_impl::get_file_offset(
       .boundary = boundary,
     };
 
-    storage::log_reader_config reader_cfg(index_entry.offset, target, priority);
+    auto reader_start_offset = index_entry.offset;
+
+    storage::log_reader_config reader_cfg(
+      reader_start_offset, target, priority);
 
     reader_cfg.skip_batch_cache = true;
     reader_cfg.skip_readers_cache = true;
 
-    auto reader = co_await make_reader(reader_cfg);
+    auto reader = model::make_record_batch_reader<single_segment_reader>(
+      s, co_await s->read_lock(), reader_cfg, *_probe);
 
     try {
         co_await std::move(reader).consume(acc, model::no_timeout);
@@ -2313,23 +2372,44 @@ ss::future<size_t> disk_log_impl::get_file_offset(
     co_return size_bytes;
 }
 
+bool disk_log_impl::log_contains_offset(model::offset o) const noexcept {
+    auto log_offsets = offsets();
+    auto log_interval = model::bounded_offset_interval::optional(
+      log_offsets.start_offset, log_offsets.committed_offset);
+
+    if (!log_interval.has_value()) {
+        // Log is empty
+        return false;
+    }
+
+    return log_interval->contains(o);
+}
+
+bool disk_log_impl::log_contains_offset_range(
+  model::offset first, model::offset last) const noexcept {
+    auto log_offsets = offsets();
+    auto log_interval = model::bounded_offset_interval::optional(
+      log_offsets.start_offset, log_offsets.committed_offset);
+
+    if (!log_interval.has_value()) {
+        // Log is empty
+        return false;
+    }
+
+    return log_interval->contains(first) && log_interval->contains(last);
+}
+
 ss::future<std::optional<log::offset_range_size_result_t>>
 disk_log_impl::offset_range_size(
   model::offset first, model::offset last, ss::io_priority_class io_priority) {
-    auto log_offsets = offsets();
     vlog(
       stlog.debug,
       "Offset range size, first: {}, last: {}, lstat: {}",
       first,
       last,
-      log_offsets);
-    auto log_interval = model::bounded_offset_interval::optional(
-      log_offsets.start_offset, log_offsets.committed_offset);
-    if (!log_interval.has_value()) {
-        vlog(stlog.debug, "Log is empty, returning early");
-        co_return std::nullopt;
-    }
-    if (!log_interval->contains(first) || !log_interval->contains(last)) {
+      offsets());
+
+    if (!log_contains_offset_range(first, last)) {
         vlog(stlog.debug, "Log does not include entire range");
         co_return std::nullopt;
     }
@@ -2394,6 +2474,13 @@ disk_log_impl::offset_range_size(
         if (s->is_closed()) {
             co_return std::nullopt;
         }
+    }
+
+    // Recheck log offsets as well, as we could race with a prefix truncation
+    // while waiting for segment locks.
+    if (!log_contains_offset_range(first, last)) {
+        vlog(stlog.debug, "Log does not include entire range");
+        co_return std::nullopt;
     }
 
     // Left subscan
@@ -2487,21 +2574,15 @@ disk_log_impl::offset_range_size(
   model::offset first,
   offset_range_size_requirements_t target,
   ss::io_priority_class io_priority) {
-    auto log_offsets = offsets();
     vlog(
       stlog.debug,
       "Offset range size, first: {}, target size: {}/{}, lstat: {}",
       first,
       target.target_size,
       target.min_size,
-      log_offsets);
-    auto log_interval = model::bounded_offset_interval::optional(
-      log_offsets.start_offset, log_offsets.committed_offset);
-    if (!log_interval.has_value()) {
-        vlog(stlog.debug, "Log is empty, returning early");
-        co_return std::nullopt;
-    }
-    if (!log_interval->contains(first)) {
+      offsets());
+
+    if (!log_contains_offset(first)) {
         vlog(stlog.debug, "Log does not include offset {}", first);
         co_return std::nullopt;
     }
@@ -2561,10 +2642,18 @@ disk_log_impl::offset_range_size(
     auto holders = co_await ss::when_all_succeed(
       std::begin(f_locks), std::end(f_locks));
 
+    // Check if anything was closed after the scheduling point.
     for (const auto& s : segments) {
         if (s->is_closed()) {
             co_return std::nullopt;
         }
+    }
+
+    // Recheck log offsets as well, as we could race with a prefix truncation
+    // while waiting for segment locks.
+    if (!log_contains_offset(first)) {
+        vlog(stlog.debug, "Log does not include offset {}", first);
+        co_return std::nullopt;
     }
 
     if (
