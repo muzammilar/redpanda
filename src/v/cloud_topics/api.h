@@ -44,11 +44,10 @@ public:
       std::chrono::milliseconds timeout)
       = 0;
 
-    virtual ss::future<result<chunked_circular_buffer<model::record_batch>>>
-    materialize(
+    virtual ss::future<result<chunked_vector<model::record_batch>>> materialize(
       model::ntp ntp,
       size_t output_size_estimate,
-      ss::circular_buffer<model::record_batch> metadata,
+      chunked_vector<extent_meta> metadata,
       std::chrono::milliseconds timeout)
       = 0;
 };

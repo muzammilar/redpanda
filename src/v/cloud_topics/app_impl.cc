@@ -83,11 +83,10 @@ public:
           std::move(ntp), std::move(r), timeout);
     }
 
-    ss::future<result<chunked_circular_buffer<model::record_batch>>>
-    materialize(
+    ss::future<result<chunked_vector<model::record_batch>>> materialize(
       model::ntp ntp,
       size_t output_size_estimate,
-      ss::circular_buffer<model::record_batch> metadata,
+      chunked_vector<extent_meta> metadata,
       std::chrono::milliseconds timeout) override {
         auto res = co_await _read_pipeline->make_reader(
           ntp,
