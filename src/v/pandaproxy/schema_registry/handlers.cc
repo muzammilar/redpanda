@@ -591,6 +591,7 @@ ss::future<ctx_server<service>::reply_t> get_subject_versions_version_schema(
     auto inc_del{
       parse::query_param<std::optional<include_deleted>>(*rq.req, "deleted")
         .value_or(include_deleted::no)};
+    const auto format = parse_output_format(*rq.req);
 
     co_await rq.service().writer().read_sync();
 
@@ -599,7 +600,11 @@ ss::future<ctx_server<service>::reply_t> get_subject_versions_version_schema(
     auto get_res = co_await rq.service().schema_store().get_subject_schema(
       sub, version, inc_del);
 
-    auto resp = std::move(get_res.schema).def().raw();
+    auto [_, def] = std::move(get_res.schema).destructure();
+    auto formatted_schema = co_await rq.service().schema_store().format_schema(
+      std::move(def), format);
+
+    auto resp = std::move(formatted_schema).raw();
     log_response(*rq.req, resp);
     rp.rep->write_body("json", ppj::as_body_writer(std::move(resp)()));
     co_return rp;

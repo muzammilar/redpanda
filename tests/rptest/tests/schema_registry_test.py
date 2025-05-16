@@ -1257,6 +1257,21 @@ class SchemaRegistryEndpoints(RedpandaTest):
                              params=params,
                              **kwargs)
 
+    def _get_subjects_subject_versions_version_schema(self,
+                                                      subject,
+                                                      version,
+                                                      format=None,
+                                                      headers=HTTP_GET_HEADERS,
+                                                      **kwargs):
+        params = {}
+        if format is not None:
+            params['format'] = format
+        return self._request("GET",
+                             f"subjects/{subject}/versions/{version}/schema",
+                             headers=headers,
+                             params=params,
+                             **kwargs)
+
     def _get_subjects_subject_versions_version_referenced_by(
             self, subject, version, headers=HTTP_GET_HEADERS, **kwargs):
         deprecated = self._request(
@@ -3719,6 +3734,31 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                         f"for subject {subject}, schema {schema} and format '{format}'"
 
         test_runner(test_subjects_subject_versions_version)
+
+        def test_subjects_subject_versions_version_schema(
+                schema_entry, successful, format=None):
+            subject = schema_entry["subject"]
+            version = schema_entry["version"]
+            schema = schema_entry["schema"]
+            result_raw = self._get_subjects_subject_versions_version_schema(
+                subject=subject, version=version, format=format)
+            schema = schema.strip()
+
+            if successful:
+                assert result_raw.status_code == requests.codes.ok, \
+                        f"expected {requests.codes.ok} but got {result_raw.status_code} " \
+                        f"for subject {subject}, schema {schema} and format '{format}'"
+                result = result_raw.text.strip()
+
+                assert result == schema.strip(), \
+                        f"expected:\n{schema}\ngot:\n{result}\n" \
+                        f"for subject {subject}, schema {schema} and format '{format}'"
+            else:
+                assert result_raw.status_code == 501, \
+                        f"expected {501} but got {result_raw.status_code} " \
+                        f"for subject {subject}, schema {schema} and format '{format}'"
+
+        test_runner(test_subjects_subject_versions_version_schema)
 
 
 class SchemaRegistryModeNotMutableTest(SchemaRegistryEndpoints):
