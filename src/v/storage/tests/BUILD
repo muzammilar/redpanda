@@ -754,21 +754,21 @@ redpanda_cc_btest(
     ],
 )
 
-redpanda_cc_btest(
-    name = "half_page_concurrent_dispatch",
+redpanda_cc_gtest(
+    name = "half_page_concurrent_dispatch_test",
     timeout = "short",
     srcs = [
-        "half_page_concurrent_dispatch.cc",
+        "half_page_concurrent_dispatch_test.cc",
     ],
     deps = [
         "//src/v/storage",
         "//src/v/storage:record_batch_builder",
         "//src/v/storage/tests:disk_log_builder",
         "//src/v/test_utils:fixture",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
+        "//src/v/test_utils:gtest",
+        "@fmt",
+        "@googletest//:gtest",
         "@seastar",
-        "@seastar//:testing",
     ],
 )
 
