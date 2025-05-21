@@ -614,7 +614,7 @@ redpanda_cc_btest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "segment_size_jitter_test",
     timeout = "short",
     srcs = [
@@ -622,10 +622,8 @@ redpanda_cc_btest(
     ],
     deps = [
         "//src/v/storage",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
-        "@seastar",
-        "@seastar//:testing",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
     ],
 )
 
