@@ -66,6 +66,7 @@ redpanda_test_cc_library(
     include_prefix = "storage/tests",
     deps = [
         ":disk_log_builder",
+        "@googletest//:gtest",
     ],
 )
 
@@ -377,7 +378,7 @@ redpanda_cc_gtest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "timequery_test",
     timeout = "short",
     srcs = [
@@ -388,8 +389,8 @@ redpanda_cc_btest(
         "//src/v/config",
         "//src/v/model",
         "//src/v/model/tests:random",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
         "@seastar",
     ],
 )
@@ -723,7 +724,7 @@ redpanda_cc_btest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "disk_log_builder_test",
     timeout = "short",
     srcs = [
@@ -736,10 +737,9 @@ redpanda_cc_btest(
         "//src/v/storage",
         "//src/v/storage/tests:disk_log_builder_fixture",
         "//src/v/test_utils:fixture",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
         "@seastar",
-        "@seastar//:testing",
     ],
 )
 
