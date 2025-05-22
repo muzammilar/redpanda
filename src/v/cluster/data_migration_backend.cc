@@ -982,10 +982,7 @@ ss::future<> backend::process_delta(cluster::topic_table_ntp_delta&& delta) {
             if (rwstate_it != topic_work_state.end()) {
                 auto& rwstate = rwstate_it->second;
                 if (rwstate.shard) {
-                    stop_partition_work(
-                      model::topic_namespace_view{delta.ntp},
-                      delta.ntp.tp.partition,
-                      rwstate);
+                    stop_partition_work(delta.ntp, rwstate);
                 }
                 topic_work_state.erase(rwstate_it);
                 if (topic_work_state.empty()) {
@@ -1113,8 +1110,7 @@ void backend::update_partition_shard(
       new_shard);
     if (new_shard != rwstate.shard) {
         if (rwstate.shard) {
-            stop_partition_work(
-              model::topic_namespace_view{ntp}, ntp.tp.partition, rwstate);
+            stop_partition_work(ntp, rwstate);
         }
         rwstate.shard = new_shard;
         if (new_shard) {
@@ -1161,7 +1157,8 @@ backend::clear_tstate(const topic_map_t::value_type& topic_map_entry) {
           topic_work_state, [this, &nt](auto& partition_local_work_entry) {
               auto& [partition_id, rwstate] = partition_local_work_entry;
               if (rwstate.shard) {
-                  stop_partition_work(nt, partition_id, rwstate);
+                  stop_partition_work(
+                    model::ntp(nt.ns, nt.tp, partition_id), rwstate);
               }
           });
     }
@@ -1258,8 +1255,7 @@ ss::future<> backend::reconcile_existing_topic(
                             rwstate.sought_state != scope.sought_state
                             || rwstate.migration_id != migration) {
                               if (it->second.shard) {
-                                  stop_partition_work(
-                                    nt, assignment.id, rwstate);
+                                  stop_partition_work(ntp, rwstate);
                               }
                               rwstate = {migration, *scope.sought_state};
                           }
@@ -1442,26 +1438,25 @@ void backend::start_partition_work(
 }
 
 void backend::stop_partition_work(
-  model::topic_namespace_view nt,
-  model::partition_id partition_id,
-  const backend::replica_work_state& rwstate) {
+  model::ntp ntp, const backend::replica_work_state& rwstate) {
     vlog(
       dm_log.info,
       "while working on migration {}, asking worker on shard "
-      "{} to stop trying to advance ntp {}/{} to state {}",
+      "{} to stop trying to advance ntp {} to state {}",
       rwstate.migration_id,
       rwstate.shard,
-      nt,
-      partition_id,
+      ntp,
       rwstate.sought_state);
-    ssx::spawn_with_gate(_gate, [this, &rwstate, &nt, &partition_id]() {
-        return _worker.invoke_on(
-          *rwstate.shard,
-          &worker::abort_partition_work,
-          model::ntp{nt.ns, nt.tp, partition_id},
-          rwstate.migration_id,
-          rwstate.sought_state);
-    });
+    ssx::spawn_with_gate(
+      _gate,
+      [this,
+       &ntp,
+       id = rwstate.migration_id,
+       shard = rwstate.shard.value(),
+       state = rwstate.sought_state] {
+          return _worker.invoke_on(
+            shard, &worker::abort_partition_work, std::move(ntp), id, state);
+      });
 }
 
 void backend::on_partition_work_completed(

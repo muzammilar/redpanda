@@ -171,10 +171,7 @@ private:
     /* communication with partition workers */
     void start_partition_work(
       const model::ntp& ntp, const replica_work_state& rwstate);
-    void stop_partition_work(
-      model::topic_namespace_view nt,
-      model::partition_id partition_id,
-      const replica_work_state& rwstate);
+    void stop_partition_work(model::ntp ntp, const replica_work_state& rwstate);
     void
     on_partition_work_completed(model::ntp&& ntp, id migration, state state);
 
