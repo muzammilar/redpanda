@@ -713,6 +713,7 @@ redpanda_cc_btest(
         "//src/v/bytes:iostream",
         "//src/v/cloud_io/tests:s3_imposter",
         "//src/v/cloud_storage",
+        "//src/v/container:chunked_circular_buffer",
         "//src/v/test_utils:scoped_config",
         "//src/v/test_utils:seastar_boost",
         "//src/v/utils:lazy_abort_source",

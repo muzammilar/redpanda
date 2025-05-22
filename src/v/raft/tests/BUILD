@@ -263,6 +263,7 @@ redpanda_cc_btest(
         "foreign_entry_test.cc",
     ],
     deps = [
+        "//src/v/container:chunked_circular_buffer",
         "//src/v/model",
         "//src/v/model/tests:random",
         "//src/v/raft",
@@ -288,6 +289,7 @@ redpanda_cc_btest(
     ],
     deps = [
         "//src/v/bytes:iobuf_parser",
+        "//src/v/container:chunked_circular_buffer",
         "//src/v/model",
         "//src/v/model/tests:random",
         "//src/v/raft",
@@ -504,6 +506,7 @@ redpanda_cc_gtest(
         "stm_manager_test.cc",
     ],
     deps = [
+        "//src/v/container:chunked_circular_buffer",
         "//src/v/raft/tests:raft_fixture_retry_policy",
         "//src/v/raft/tests:stm_raft_fixture",
         "//src/v/raft/tests:stm_test_fixture",
@@ -576,6 +579,7 @@ redpanda_cc_gtest(
         "persisted_stm_test.cc",
     ],
     deps = [
+        "//src/v/container:chunked_circular_buffer",
         "//src/v/model",
         "//src/v/raft",
         "//src/v/raft/tests:raft_fixture",
