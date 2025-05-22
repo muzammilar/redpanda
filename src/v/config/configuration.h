@@ -261,8 +261,7 @@ struct configuration final : public config_store {
     property<bool> log_disable_housekeeping_for_tests;
     property<bool> log_compaction_use_sliding_window;
     property<bool> log_compaction_pause_use_sliding_window;
-    property<std::optional<size_t>>
-      log_compaction_adjacent_merge_self_compaction_count;
+    deprecated_property log_compaction_adjacent_merge_self_compaction_count;
     // same as retention.size in kafka - TODO: size not implemented
     property<std::optional<size_t>> retention_bytes;
     property<int32_t> group_topic_partitions;
