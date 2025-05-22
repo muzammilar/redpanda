@@ -85,6 +85,9 @@ private:
           : migration_id(migration_id)
           , sought_state(sought_state) {}
     };
+
+    friend std::ostream& operator<<(std::ostream&, const replica_work_state&);
+
     struct topic_work_result {
         model::topic_namespace nt;
         id migration;

@@ -1594,4 +1594,16 @@ ss::future<errc> backend::topic_scoped_work_state::future() {
     return _promise.get_shared_future();
 }
 
+std::ostream&
+operator<<(std::ostream& os, const backend::replica_work_state& rws) {
+    fmt::print(
+      os,
+      "{{migration {}, sought_state: {}, shard: {}, status: {}}}",
+      rws.migration_id,
+      rws.sought_state,
+      rws.shard,
+      rws.status);
+    return os;
+}
+
 } // namespace cluster::data_migrations
