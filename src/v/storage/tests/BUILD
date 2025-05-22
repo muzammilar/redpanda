@@ -359,7 +359,7 @@ redpanda_cc_btest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "concat_segment_reader_test",
     timeout = "short",
     srcs = [
@@ -370,9 +370,9 @@ redpanda_cc_btest(
         "//src/v/bytes:iostream",
         "//src/v/model/tests:random",
         "//src/v/storage",
-        "//src/v/test_utils:seastar_boost",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
         "@seastar",
-        "@seastar//:testing",
     ],
 )
 
