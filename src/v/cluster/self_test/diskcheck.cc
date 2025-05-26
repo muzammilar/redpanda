@@ -23,6 +23,8 @@
 
 #include <boost/range/irange.hpp>
 
+#include <cstdint>
+
 namespace cluster::self_test {
 
 void diskcheck::validate_options(const diskcheck_opts& opts) {
@@ -120,9 +122,6 @@ ss::future<std::vector<self_test_result>> diskcheck::run(diskcheck_opts opts) {
 ss::future<std::vector<self_test_result>>
 diskcheck::initialize_benchmark(ss::sstring fname) {
     auto flags = ss::open_flags::create | ss::open_flags::rw;
-    if (_opts.dsync) {
-        flags |= ss::open_flags::dsync;
-    }
     ss::file_open_options file_opts{
       .extent_allocation_size_hint = _opts.file_size(),
       .append_is_unlikely = true};
@@ -195,6 +194,19 @@ ss::future<metrics> diskcheck::do_run_benchmark(ss::file& file) {
     co_return m;
 }
 
+ss::future<size_t> write_and_maybe_flush(
+  ss::file& file,
+  uint64_t pos,
+  const std::vector<iovec>& iov,
+  bool dsync,
+  ss::io_intent* intent) {
+    auto bytes_written = co_await file.dma_write(pos, iov, intent);
+    if (dsync) {
+        co_await file.flush();
+    }
+    co_return bytes_written;
+}
+
 template<diskcheck::read_or_write mode>
 ss::future<> diskcheck::run_benchmark_fiber(
   ss::lowres_clock::time_point start, ss::file& file, metrics& m) {
@@ -216,7 +228,8 @@ ss::future<> diskcheck::run_benchmark_fiber(
         }
         co_await m.measure([this, &iov, &file] {
             if constexpr (mode == read_or_write::write) {
-                return file.dma_write(get_pos(), iov, &_intent);
+                return write_and_maybe_flush(
+                  file, get_pos(), iov, _opts.dsync, &_intent);
             } else {
                 return file.dma_read(get_pos(), iov, &_intent);
             }
