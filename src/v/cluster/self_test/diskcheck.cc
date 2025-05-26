@@ -128,6 +128,7 @@ diskcheck::initialize_benchmark(ss::sstring fname) {
     try {
         vlog(clusterlog.debug, "Creating file: {}", fname);
         auto file = co_await ss::open_file_dma(fname, flags, file_opts);
+        co_await file.allocate(0, _opts.file_size());
         co_await file.truncate(_opts.file_size());
         co_await file.flush();
         co_return co_await ss::with_scheduling_group(
