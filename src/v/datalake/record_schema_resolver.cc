@@ -15,10 +15,13 @@
 #include "datalake/schema_identifier.h"
 #include "datalake/schema_registry.h"
 #include "iceberg/conversion/ir_json.h"
+#include "iceberg/conversion/json_schema/frontend.h"
 #include "iceberg/conversion/schema_avro.h"
+#include "iceberg/conversion/schema_json.h"
 #include "iceberg/conversion/schema_protobuf.h"
 #include "iceberg/datatypes.h"
 #include "metrics/prometheus_sanitize.h"
+#include "pandaproxy/schema_registry/json.h"
 #include "pandaproxy/schema_registry/protobuf.h"
 #include "pandaproxy/schema_registry/types.h"
 #include "schema/registry.h"
@@ -98,9 +101,44 @@ checked<resolved_type, type_resolver::errc> translate_protobuf_schema(
 
 checked<resolved_type, type_resolver::errc> translate_json_schema(
   const ppsr::json_schema_definition& json_def, ppsr::schema_id id) {
-    (void)json_def;
-    (void)id;
-    return type_resolver::errc::invalid_config;
+    try {
+        auto& doc = document(json_def());
+        auto fc = iceberg::conversion::json_schema::frontend{};
+        // todo figure out
+        // todo is this cached anywhere?
+        auto json_schema = fc.compile(
+          doc, "https://example.com/schema.json", std::nullopt);
+        auto iceberg_ir = iceberg::type_to_ir(json_schema);
+        if (iceberg_ir.has_error()) {
+            vlog(
+              datalake_log.error,
+              "JSON schema translation to Iceberg IR failed: {}",
+              iceberg_ir.error());
+            return type_resolver::errc::translation_error;
+        }
+
+        auto root_struct = iceberg::type_to_iceberg(iceberg_ir.value());
+        if (root_struct.has_error()) {
+            vlog(
+              datalake_log.error,
+              "JSON schema translation to Iceberg type failed: {}",
+              root_struct.error());
+            return type_resolver::errc::translation_error;
+        }
+
+        return resolved_type{
+          .schema = resolved_schema(
+            ss::make_shared<iceberg::json_conversion_ir>(
+              std::move(iceberg_ir.value()))),
+          .id = {.schema_id = id, .protobuf_offsets = std::nullopt},
+          .type = std::move(root_struct.value())};
+    } catch (...) {
+        vlog(
+          datalake_log.error,
+          "JSON schema translation failed: {}",
+          std::current_exception());
+        return type_resolver::errc::translation_error;
+    }
 }
 
 struct schema_translating_visitor {
