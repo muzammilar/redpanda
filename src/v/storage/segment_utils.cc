@@ -947,7 +947,7 @@ ss::future<std::vector<compacted_index_reader>> make_indices_readers(
   std::vector<ss::lw_shared_ptr<segment>>& segments,
   std::optional<ntp_sanitizer_config> ntp_sanitizer_config,
   ss::abort_source* as) {
-    return ssx::async_transform(
+    return ssx::async_transform<std::vector<compacted_index_reader>>(
       segments.begin(),
       segments.end(),
       [san_cfg = ntp_sanitizer_config, as](ss::lw_shared_ptr<segment>& seg) {
