@@ -2193,7 +2193,6 @@ void application::wire_up_redpanda_services(
     construct_single_service_sharded(
       tx_topic_manager,
       std::ref(*controller),
-      std::ref(feature_table),
       config::shard_local_cfg().transaction_coordinator_partitions.bind(),
       config::shard_local_cfg().transaction_coordinator_log_segment_size.bind(),
       config::shard_local_cfg()
