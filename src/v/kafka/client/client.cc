@@ -341,10 +341,44 @@ client::create_topic(kafka::creatable_topic req) {
     });
 }
 
+namespace {
+
+template<typename T, typename ErrorPredicate>
+requires(KafkaApi<typename T::api_type>)
+void throw_on_error(const T& r, ErrorPredicate should_throw) {
+    using type = std::remove_cvref_t<T>;
+    if constexpr (std::is_same_v<type, list_offsets_response>) {
+        for (const auto& topic : r.data.topics) {
+            for (const auto& partition : topic.partitions) {
+                if (
+                  partition.error_code != error_code::none
+                  && should_throw(partition.error_code)) {
+                    throw partition_error(
+                      model::topic_partition{
+                        topic.name, partition.partition_index},
+                      partition.error_code);
+                }
+            }
+        }
+    }
+}
+
+template<typename T>
+requires(KafkaApi<typename T::api_type>)
+void throw_on_error(const T& r) {
+    return throw_on_error(r, [](error_code) { return true; });
+}
+
+} // namespace
+
 ss::future<list_offsets_response>
 client::list_offsets(model::topic_partition tp) {
     return gated_retry_with_mitigation(
-      [this, tp{std::move(tp)}]() { return do_list_offsets(tp); });
+             [this, tp{std::move(tp)}]() { return do_list_offsets(tp); })
+      .then([](auto res) {
+          throw_on_error<list_offsets_response>(res);
+          return res;
+      });
 }
 
 ss::future<list_offsets_response>
@@ -365,15 +399,12 @@ client::do_list_offsets(model::topic_partition tp) {
         .topics = std::move(cv),
       }});
 
-    const auto& topics = res.data.topics;
-    for (const auto& topic : topics) {
-        for (const auto& part : topic.partitions) {
-            if (part.error_code != error_code::none) {
-                co_return ss::coroutine::exception(std::make_exception_ptr(
-                  partition_error(tp, part.error_code)));
-            }
-        }
-    }
+    // We must always throw and retry if a custom mitigator is
+    // configured, as the mitigator may need to handle this error
+    throw_on_error(res, [&](auto ec) {
+        return kafka::is_retriable(ec) || _external_mitigate.has_value();
+    });
+
     co_return res;
 }
 
