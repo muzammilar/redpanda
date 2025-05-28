@@ -27,6 +27,7 @@
 #include "kafka/protocol/describe_configs.h"
 #include "kafka/protocol/fetch.h"
 #include "kafka/protocol/list_offset.h"
+#include "model/timestamp.h"
 #include "ssx/semaphore.h"
 #include "utils/retry.h"
 #include "utils/unresolved_address.h"
@@ -112,6 +113,8 @@ public:
     ss::future<produce_response>
     produce_records(model::topic topic, chunked_vector<record_essence> batch);
 
+    ss::future<list_offsets_response> list_offsets(list_offsets_request req);
+
     ss::future<list_offsets_response> list_offsets(model::topic_partition tp);
 
     ss::future<fetch_response> fetch_partition(
@@ -179,7 +182,7 @@ public:
 
 private:
     ss::future<list_offsets_response>
-    do_list_offsets(model::topic_partition tp);
+    do_list_offsets(const list_offsets_request&);
 
     ss::future<describe_configs_response> do_describe_topics(
       chunked_vector<model::topic> topics,
