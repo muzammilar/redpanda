@@ -68,8 +68,8 @@ auto retry_with_mitigation(
                   "\t    auto _ = consume(std::move(movable_state));\n"
                   "\t};");
 
-                return fut.then(func).handle_exception(
-                  [&eptr](std::exception_ptr ex) mutable {
+                return fut.then([&func] { return func(); })
+                  .handle_exception([&eptr](std::exception_ptr ex) mutable {
                       eptr = ex;
                       return Futurator::make_exception_future(eptr);
                   });
@@ -95,7 +95,7 @@ std::invoke_result_t<Func> gated_retry_with_mitigation_impl(
        &retry_gate,
        func{std::move(func)},
        errFunc{std::move(errFunc)},
-       as]() {
+       as]() mutable {
           return retry_with_mitigation(
             retries,
             retry_base_backoff,
