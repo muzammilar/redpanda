@@ -1364,22 +1364,38 @@ ss::future<> disk_log_impl::housekeeping(housekeeping_config cfg) {
 ss::future<> disk_log_impl::do_compact(
   compaction_config compact_cfg,
   std::optional<model::offset> new_start_offset) {
+    compact_cfg.asrc = &_compaction_as;
+
+    auto compact_fut = ss::now();
+
     auto use_adjacent_merge
       = !config::shard_local_cfg().log_compaction_use_sliding_window()
         || config::shard_local_cfg().log_compaction_pause_use_sliding_window()
         || (compact_cfg.hash_key_map && compact_cfg.hash_key_map->capacity() == 0);
 
     if (use_adjacent_merge) {
-        co_return co_await adjacent_merge_compact(
+        compact_fut = adjacent_merge_compact(
           _segs, compact_cfg, new_start_offset);
+    } else {
+        compact_fut = sliding_window_compact(compact_cfg, new_start_offset)
+                        .then([&](bool compacted) {
+                            vlog(
+                              gclog.debug,
+                              "Sliding compaction of {} did {}compact "
+                              "data, proceeding to adjacent "
+                              "segment compaction",
+                              config().ntp(),
+                              compacted ? "" : "not ");
+                            return compact_adjacent_segment_ranges(
+                                     compact_cfg, new_start_offset)
+                              .discard_result();
+                        });
     }
 
-    // TODO: unify error handling.
-    compact_cfg.asrc = &_compaction_as;
-    auto did_compact_fut = co_await ss::coroutine::as_future(
-      sliding_window_compact(compact_cfg, new_start_offset));
-    if (did_compact_fut.failed()) {
-        auto eptr = did_compact_fut.get_exception();
+    auto compact_result = co_await ss::coroutine::as_future(
+      std::move(compact_fut));
+    if (compact_result.failed()) {
+        auto eptr = compact_result.get_exception();
         if (ssx::is_shutdown_exception(eptr)) {
             vlog(
               gclog.debug,
@@ -1389,14 +1405,6 @@ ss::future<> disk_log_impl::do_compact(
         }
         std::rethrow_exception(eptr);
     }
-    bool compacted = did_compact_fut.get();
-    vlog(
-      gclog.debug,
-      "Sliding compaction of {} did {}compact data, proceeding to adjacent "
-      "segment compaction",
-      config().ntp(),
-      compacted ? "" : "not ");
-    co_await compact_adjacent_segment_ranges(compact_cfg, new_start_offset);
 }
 
 ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
