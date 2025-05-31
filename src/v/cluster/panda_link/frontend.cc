@@ -91,6 +91,15 @@ bool frontend::panda_link_active(bool check_license) const {
            && !(check_license && _features->should_sanction());
 }
 
+frontend::notification_id
+frontend::register_for_updates(notification_callback cb) {
+    return _table->register_for_updates(std::move(cb));
+}
+
+void frontend::unregister_for_updates(notification_id id) {
+    _table->unregister_for_updates(id);
+}
+
 ss::future<mutation_result> frontend::do_mutation(
   panda_link_cmd cmd, model::timeout_clock::time_point timeout) {
     auto cluster_leader = _leaders->get_leader(model::controller_ntp);

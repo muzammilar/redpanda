@@ -34,6 +34,11 @@ public:
     table& operator=(table&&) = delete;
     ~table() = default;
 
+    using notification_id
+      = named_type<size_t, struct panda_link_notification_tag>;
+    using notification_callback
+      = ss::noncopyable_function<void(::panda_link::model::id_t)>;
+
     /// Number of links in the table
     size_t size() const;
 
@@ -54,10 +59,10 @@ public:
     ss::future<>
     apply_snapshot(model::offset, const cluster::controller_snapshot&);
 
-private:
-    using name_index_t = absl::
-      flat_hash_map<::panda_link::model::name_t, ::panda_link::model::id_t>;
+    notification_id register_for_updates(notification_callback);
+    void unregister_for_updates(notification_id);
 
+private:
     /// Snapshot copy of all the panda links
     map_t all_links() const;
     /// Restores a panda link table from a snapshot
@@ -69,7 +74,16 @@ private:
     /// Removes a link by ID
     cluster::errc remove_link(const ::panda_link::model::name_t&);
 
+    void run_callbacks(::panda_link::model::id_t);
+
+private:
+    using name_index_t = absl::
+      flat_hash_map<::panda_link::model::name_t, ::panda_link::model::id_t>;
+
     map_t _link_metadata;
     name_index_t _name_index;
+
+    absl::flat_hash_map<notification_id, notification_callback> _callbacks;
+    notification_id _latest_id{0};
 };
 } // namespace cluster::panda_link

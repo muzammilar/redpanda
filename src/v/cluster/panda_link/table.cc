@@ -32,7 +32,23 @@ size_t table::size() const { return _link_metadata.size(); }
 
 void table::reset_links(map_t links) {
     name_index_t snap_name_index;
+    chunked_vector<id_t> all_deletes;
+    chunked_vector<id_t> all_inserts;
+    chunked_vector<id_t> all_changes;
+
+    for (const auto& [k, v] : _link_metadata) {
+        auto it = links.find(k);
+        if (it == links.end()) {
+            all_deletes.push_back(k);
+        } else if (v != it->second) {
+            all_changes.push_back(k);
+        }
+    }
+
     for (const auto& [id, metadata] : links) {
+        if (!_link_metadata.contains(id)) {
+            all_inserts.push_back(id);
+        }
         auto it = snap_name_index.emplace(metadata.name, id);
         if (!it.second) {
             throw std::logic_error(fmt::format(
@@ -46,6 +62,16 @@ void table::reset_links(map_t links) {
 
     _link_metadata = std::move(links);
     _name_index = std::move(snap_name_index);
+
+    for (const auto& deleted : all_deletes) {
+        run_callbacks(deleted);
+    }
+    for (const auto& inserted : all_inserts) {
+        run_callbacks(inserted);
+    }
+    for (const auto& changed : all_changes) {
+        run_callbacks(changed);
+    }
 }
 std::optional<std::reference_wrapper<const metadata>>
 table::find_link_by_name(const name_t& name) const {
@@ -124,6 +150,20 @@ table::apply_snapshot(model::offset, const cluster::controller_snapshot& snap) {
       [&snap](table& table) { table.reset_links(snap.panda_links.links); });
 }
 
+table::notification_id table::register_for_updates(notification_callback cb) {
+    auto it = _callbacks.insert({++_latest_id, std::move(cb)});
+    vassert(it.second, "Invalid duplicate in callbacks");
+    return _latest_id;
+}
+
+void table::unregister_for_updates(notification_id id) { _callbacks.erase(id); }
+
+void table::run_callbacks(id_t id) {
+    for (const auto& [_, cb] : _callbacks) {
+        cb(id);
+    }
+}
+
 cluster::errc table::upsert_link(id_t id, metadata meta) {
     auto name_it = _name_index.find(meta.name);
     if (name_it != _name_index.end()) {
@@ -140,7 +180,9 @@ cluster::errc table::upsert_link(id_t id, metadata meta) {
     } else {
         _name_index.emplace(meta.name, id);
     }
+
     _link_metadata.insert_or_assign(id, std::move(meta));
+    run_callbacks(id);
     return cluster::errc::success;
 }
 
@@ -160,6 +202,7 @@ cluster::errc table::remove_link(const name_t& name) {
     _name_index.erase(name_it);
     _link_metadata.erase(it);
 
+    run_callbacks(id);
     return cluster::errc::success;
 }
 } // namespace cluster::panda_link
