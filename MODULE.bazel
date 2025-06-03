@@ -139,6 +139,19 @@ COMPILERS = {
     "previous": {
         "tars": {
             "aarch64": {
+                "build_date": "2025-03-10",
+                "sha": "9f52789c5aee794d6f013249b6e003b50f72e4c3874fd656723a72bf9322eff9",
+            },
+            "x86_64": {
+                "build_date": "2025-03-10",
+                "sha": "51e547308112bc6671f391d03420c315b7c099238d797631e00374f1bd80712e",
+            },
+        },
+        "version": "18.1.8",
+    },
+    "current": {
+        "tars": {
+            "aarch64": {
                 "build_date": "2025-03-15",
                 "sha": "cdba86609d71cfc379bfce9fb5ce97389cc08320fb713c6abab8d698a53e3fa2",
             },
@@ -149,7 +162,7 @@ COMPILERS = {
         },
         "version": "19.1.7",
     },
-    "current": {
+    "next": {
         "tars": {
             "aarch64": {
                 "build_date": "2025-05-13",
@@ -160,6 +173,7 @@ COMPILERS = {
                 "sha": "e45a9d5e763829f249635244dae9f7653a006549e67253c51730fabc59563501",
             },
         },
+        # TODO: try again when the version with llvm/llvm-project#142648 is released
         "version": "20.1.4",
     },
 }
@@ -347,6 +361,7 @@ crate.from_cargo(
     ],
 )
 use_repo(crate, "crates")
+
 crate.annotation(
     additive_build_file = "//bazel/thirdparty:wasmtime.BUILD",
     crate = "wasmtime-c-api-impl",
