@@ -7,12 +7,17 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "base/units.h"
 #include "bytes/iobuf_parser.h"
 #include "random/generators.h"
 #include "test_utils/random_bytes.h"
 #include "utils/base64.h"
 
+#include <seastar/core/memory.hh>
+
 #include <boost/test/unit_test.hpp>
+
+#include <iterator>
 
 BOOST_AUTO_TEST_CASE(bytes_type) {
     auto encdec = [](std::string_view input, std::string_view expected) {
@@ -77,6 +82,27 @@ BOOST_AUTO_TEST_CASE(test_base64_to_iobuf) {
     iobuf_parser p{std::move(decoded)};
     auto decoded_str = p.read_string(p.bytes_left());
     BOOST_REQUIRE_EQUAL(decoded_str, "this is a string");
+}
+
+BOOST_AUTO_TEST_CASE(test_iobuf_to_base64_allocations) {
+    iobuf buf;
+    for (size_t size : {512_KiB, 512_KiB - 1, 512_KiB + 1}) {
+        std::string large_string = random_generators::gen_alphanum_string(size);
+        auto large_frag = std::make_unique<iobuf::fragment>(
+          large_string.size());
+        large_frag->append(large_string.data(), large_string.size());
+        BOOST_REQUIRE_EQUAL(large_frag->size(), size);
+        buf.append(std::move(large_frag));
+    }
+    BOOST_REQUIRE_EQUAL(std::distance(buf.begin(), buf.end()), 3);
+    auto baseline = ss::memory::stats();
+    ss::memory::scoped_large_allocation_warning_threshold threshold(128_KiB);
+    auto encoded = iobuf_to_base64(buf);
+    auto decoded = base64_to_iobuf(encoded);
+    BOOST_REQUIRE_EQUAL(decoded, buf);
+    auto updated = ss::memory::stats();
+    BOOST_REQUIRE_EQUAL(
+      baseline.large_allocations(), updated.large_allocations());
 }
 
 BOOST_AUTO_TEST_CASE(base64_url_decode_test_basic) {
