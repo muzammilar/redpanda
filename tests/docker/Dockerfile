@@ -319,13 +319,16 @@ COPY --from=kafka-tools /root/.m2 /root/.m2
 COPY --from=spark /root/.m2 /root/.m2
 
 ###################################
-# Not used by the final image, but useful for debugging.
+# Not used by the final image, but useful for debugging the cache mount contents.
 # You can invoke this like:
-# task rp:build-test-docker-image EXTRA_BUILD_ARGS="--target=debug-dl-cache --progress=plain --build-arg=CACHE_BREAK=$RANDOM"
-FROM os_base AS debug-dl-cache
+# task rp:build-test-docker-image EXTRA_BUILD_ARGS="--target=debug-caches --progress=plain --build-arg=CACHE_BREAK=$RANDOM"
+FROM os_base AS debug-caches
 ARG CACHE_BREAK=0
-COPY --chmod=0755 tests/docker/ducktape-deps/download-utils /
-RUN --mount=type=cache,id=dl-cache,target=/dl-cache bash -c "source /download-utils && debug_cache"
+COPY --chmod=0755 tests/docker/ducktape-deps/download-utils tests/docker/ducktape-deps/debug-cache /
+RUN --mount=type=cache,id=dl-cache,target=/dl-cache \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    bash -c "source /debug-cache && debug_cache"
 
 ###################################
 # Not used by the final image, but useful to clean the cache mount(s).
