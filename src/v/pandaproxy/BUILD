@@ -5,6 +5,19 @@ load("//src/v/schema/protobuf:well_known.bzl", "well_known_cc_protos")
 seastar_cc_swagger_library(
     name = "rest_swagger",
     src = "api/api-doc/rest.json",
+    visibility = ["//visibility:public"],
+)
+
+redpanda_cc_library(
+    name = "rest_swagger_definitions",
+    hdrs = [
+        "api/api-doc/rest.json.hh",
+    ],
+    include_prefix = "pandaproxy",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rest_swagger",
+    ],
 )
 
 seastar_cc_swagger_library(
@@ -189,53 +202,6 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "rest_server",
-    srcs = [
-        "rest/api.cc",
-        "rest/configuration.cc",
-        "rest/handlers.cc",
-        "rest/proxy.cc",
-    ],
-    hdrs = [
-        "api/api-doc/rest.json.hh",
-        "rest/api.h",
-        "rest/configuration.h",
-        "rest/fwd.h",
-        "rest/handlers.h",
-        "rest/proxy.h",
-    ],
-    include_prefix = "pandaproxy",
-    visibility = ["//visibility:public"],
-    deps = [
-        ":core",
-        ":error_reply",
-        ":json",
-        ":logger",
-        ":parsing",
-        ":rest_requests",
-        ":rest_swagger",
-        "//src/v/base",
-        "//src/v/cluster",
-        "//src/v/config",
-        "//src/v/kafka/client",
-        "//src/v/kafka/protocol:fetch",
-        "//src/v/kafka/protocol/schemata:offset_commit_request",
-        "//src/v/model",
-        "//src/v/net",
-        "//src/v/security",
-        "//src/v/ssx:sformat",
-        "//src/v/utils:adjustable_semaphore",
-        "//src/v/utils:log_hist",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@boost//:algorithm",
-        "@boost//:lexical_cast",
-        "@boost//:range",
-        "@fmt",
-        "@seastar",
-    ],
-)
-
-redpanda_cc_library(
     name = "schema_registry_exceptions",
     hdrs = [
         "schema_registry/exceptions.h",
@@ -399,8 +365,8 @@ redpanda_cc_library(
     name = "pandaproxy",
     visibility = ["//visibility:public"],
     deps = [
-        ":rest_server",
         ":schema_registry",
+        "//src/v/pandaproxy/rest:server",
     ],
 )
 
