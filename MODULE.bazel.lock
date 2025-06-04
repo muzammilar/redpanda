@@ -7377,7 +7377,7 @@
     "@@toolchains_llvm+//toolchain/extensions:llvm.bzl%llvm": {
       "general": {
         "bzlTransitiveDigest": "A+u2LOTdHfpDgS94zRvkPJu/Zdu++ZN5a8ruhZFRcRI=",
-        "usagesDigest": "RGxra9pIIm/nFwOBjKKefyeexC1ea1s/1qU84ZbMpqI=",
+        "usagesDigest": "7cQCQMYHRMakftftFUSW1bvDzzyScYxgeOeZwTw/O6A=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -7566,20 +7566,20 @@
               "exec_os": "",
               "libclang_rt": {},
               "llvm_mirror": "",
-              "llvm_version": "20.1.4",
+              "llvm_version": "20.1.6",
               "llvm_versions": {},
               "netrc": "",
               "sha256": {
-                "linux-aarch64": "c67a6f9091344274299bfc34875585d5688c10f88c7aa029535a9bc3ce010b69",
-                "linux-x86_64": "e45a9d5e763829f249635244dae9f7653a006549e67253c51730fabc59563501"
+                "linux-aarch64": "a543fc0d1d9608e52bc5aaa0c7a66f1303f198a483fc8695bc8af39ec0847e02",
+                "linux-x86_64": "7583b655e6b309ae72353f53181f4aa72ae98c81582de01aa08ba669dc03b1e4"
               },
               "strip_prefix": {},
               "urls": {
                 "linux-aarch64": [
-                  "https://github.com/redpanda-data/llvm-project/releases/download/llvmorg-20.1.4/llvm-20.1.4-debian-11-aarch64-2025-05-13.tar.zst"
+                  "https://github.com/redpanda-data/llvm-project/releases/download/llvmorg-20.1.6/llvm-20.1.6-debian-11-aarch64-2025-06-04.tar.zst"
                 ],
                 "linux-x86_64": [
-                  "https://github.com/redpanda-data/llvm-project/releases/download/llvmorg-20.1.4/llvm-20.1.4-debian-11-x86_64-2025-05-13.tar.zst"
+                  "https://github.com/redpanda-data/llvm-project/releases/download/llvmorg-20.1.6/llvm-20.1.6-debian-11-x86_64-2025-06-04.tar.zst"
                 ]
               }
             }
@@ -7629,7 +7629,7 @@
               "link_flags": {},
               "link_libs": {},
               "llvm_versions": {
-                "": "20.1.4"
+                "": "20.1.6"
               },
               "opt_compile_flags": {},
               "opt_link_flags": {},
