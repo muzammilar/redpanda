@@ -273,20 +273,23 @@ RUN --mount=target=/running/ocsf-server,type=tmpfs --mount=type=cache,target=/va
 
 FROM java-base AS polaris
 COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/polaris /
-RUN /polaris && rm /polaris
+RUN --mount=type=cache,target=/root/.gradle/caches/modules-2,id=gradle-polaris \
+    /polaris && rm /polaris
 
 #################################
 
 FROM java-base AS nessie
 COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/nessie /
-RUN /nessie && rm /nessie
+RUN --mount=type=cache,target=/root/.gradle/caches/modules-2,id=gradle-nessie \
+    /nessie && rm /nessie
 
 #################################
 
 FROM java-base AS iceberg-rest
 COPY --chown=0:0 tests/java/iceberg-rest-catalog /opt/redpanda-tests/java/iceberg-rest-catalog
 COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/iceberg-rest-catalog /
-RUN /iceberg-rest-catalog && rm /iceberg-rest-catalog
+RUN --mount=type=cache,target=/root/.gradle/caches/modules-2,id=gradle-iceberg \
+    /iceberg-rest-catalog && rm /iceberg-rest-catalog
 
 #################################
 
@@ -328,6 +331,9 @@ COPY --chmod=0755 tests/docker/ducktape-deps/download-utils tests/docker/ducktap
 RUN --mount=type=cache,id=dl-cache,target=/dl-cache \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=cache,target=/gradle_polaris,id=gradle-polaris \
+    --mount=type=cache,target=/gradle_nessie,id=gradle-nessie \
+    --mount=type=cache,target=/gradle_iceberg,id=gradle-iceberg \
     bash -c "source /debug-cache && debug_cache"
 
 ###################################

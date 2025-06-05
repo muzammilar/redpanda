@@ -31,7 +31,7 @@ dir_stats() {
 debug_cache() {
   set_vars
   local all_caches
-  all_caches=("$DL_CACHE_DIR" /var/cache/apt /var/lib/apt)
+  all_caches=("$DL_CACHE_DIR" /var/cache/apt /var/lib/apt /gradle_polaris /gradle_nessie /gradle_iceberg)
   local logdir=/debug-cache-logs
 
   mkdir -p $logdir
