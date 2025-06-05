@@ -1501,7 +1501,7 @@ configuration::configuration()
       {.needs_restart = needs_restart::no,
        .example = "10737418240",
        .visibility = visibility::tunable},
-      5_GiB)
+      512_MiB)
   , storage_ignore_timestamps_in_future_sec(
       *this,
       "storage_ignore_timestamps_in_future_sec",
