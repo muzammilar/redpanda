@@ -1750,6 +1750,7 @@ class ntp_archiver:
         self.mutex = named_samaphore(ref['_mutex'])
         self.last_upload_time = time_point(ref['_last_upload_time'])
         self.uploads_active = named_samaphore(ref['_uploads_active'])
+        self.start_term = model_offset(ref['_start_term'])
         self.last_marked_clean_time = time_point(
             ref['_last_marked_clean_time'])
         self.gate_count = ref['_gate']['_count']
@@ -1759,7 +1760,7 @@ class ntp_archiver:
         self.remote = cloud_storage_remote(ref['_remote'].referenced_value())
 
     def __repr__(self):
-        return f"ntp_archiver(mutex={self.mutex}, last_upload_time={self.last_upload_time}, uploads_active={self.uploads_active}, last_marked_clean_time={self.last_marked_clean_time}, gate_count={self.gate_count}, paused={self.paused}, leader_cond={self.leader_cond}, flush_cond={self.flush_cond}, remote={self.remote})"
+        return f"ntp_archiver(mutex={self.mutex}, start_term={self.start_term}, last_upload_time={self.last_upload_time}, uploads_active={self.uploads_active}, last_marked_clean_time={self.last_marked_clean_time}, gate_count={self.gate_count}, paused={self.paused}, leader_cond={self.leader_cond}, flush_cond={self.flush_cond}, remote={self.remote})"
 
 
 class archival_metadata_stm:
