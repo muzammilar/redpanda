@@ -661,9 +661,16 @@ class seastar_basic_rwlock():
     def __init__(self, ref):
         self.ref = ref
         self.count = ref["_sem"]["_count"]
+        self.wait_list = abortable_fifo(ref["_sem"]["_wait_list"])
+        self.wait_list_nrs = [
+            int(std_optional(e.payload).get()['nr']) for e in self.wait_list
+        ]
+        self.wait_list_prs = [
+            std_optional(e.payload).get()['pr'] for e in self.wait_list
+        ]
 
     def __repr__(self):
-        return f"basic_rwlock(count={self.count})"
+        return f"basic_rwlock(count={self.count}, wait_list_size={self.wait_list.size}, wait_list_nrs={self.wait_list_nrs}, wait_list_prs={self.wait_list_prs})"
 
 
 class seastar_shared_ptr():
