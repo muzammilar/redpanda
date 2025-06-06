@@ -1215,6 +1215,9 @@ class segment:
     def offsets_tracker(self):
         return offset_tracker(self.ref['_tracker'])
 
+    def destructive_ops(self):
+        return seastar_basic_rwlock(self.ref['_destructive_ops'])
+
     def reader(self):
         return segment_reader(self.ref["_reader"])
 
@@ -1554,7 +1557,8 @@ class redpanda_storage(gdb.Command):
             print(f"{ntp} segment count {log.segments().size()}")
             for segment in log.segments():
                 offsets = segment.offsets_tracker()
-                print(f"{ntp} - {offsets}")
+                destructive_ops = segment.destructive_ops()
+                print(f"{ntp} - {offsets} - {destructive_ops}")
 
     def print_readers_cache_memory(self):
         print(f"# Readers cache")
