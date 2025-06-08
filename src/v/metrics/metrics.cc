@@ -15,6 +15,10 @@
 
 namespace metrics {
 
+const ss::metrics::label namespace_label{"namespace"};
+const ss::metrics::label topic_label{"topic"};
+const ss::metrics::label partition_label{"partition"};
+
 internal_metric_groups& internal_metric_groups::add_group(
   const ss::metrics::group_name_type& name,
   std::vector<ss::metrics::impl::metric_definition_impl> metrics,
