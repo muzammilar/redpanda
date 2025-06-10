@@ -83,7 +83,7 @@ def cluster(log_allow_list: LogAllowList | None = None,
         Mark.mark(f, ClusterUseMetadata(**kwargs))
 
         class HasRedpanda(Protocol):
-            redpanda: RedpandaServiceBase | RedpandaServiceCloud
+            redpanda: RedpandaService | RedpandaServiceCloud | None
             test_context: TestContext
 
         @functools.wraps(f)

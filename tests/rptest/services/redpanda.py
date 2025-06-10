@@ -62,7 +62,7 @@ from rptest.clients.installpack import InstallPackClient
 from rptest.clients.rp_storage_tool import RpStorageTool
 from rptest.context.cloud_storage import CloudStorageType  # noqa: F401 # Re-exported for backwards compatibility.
 from rptest.services import redpanda_types, tls
-from rptest.services.redpanda_types import KafkaClientSecurity, LogAllowListElem
+from rptest.services.redpanda_types import KafkaClientSecurity, LogAllowList, LogAllowListElem
 from rptest.services.admin import Admin
 from rptest.services.redpanda_installer import RedpandaInstaller, VERSION_RE as RI_VERSION_RE, RedpandaVersionTriple, int_tuple as ri_int_tuple
 from rptest.services.redpanda_cloud import CloudCluster, get_config_profile_name
@@ -2390,8 +2390,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             f'Expected {expected_nodes} per tier definition but there '
             f'were only {broker_count} brokers: {brokers}')
 
-    def raise_on_crash(self,
-                       log_allow_list: list[str | re.Pattern] | None = None):
+    def raise_on_crash(self, log_allow_list: Any = None):
         """Function checks if active RP pods has restart counter changed since last check
         """
 
@@ -3205,7 +3204,7 @@ class RedpandaService(RedpandaServiceBase):
         return all(self.for_nodes(self._started, check_node))
 
     def signal_redpanda(self,
-                        node,
+                        node: ClusterNode,
                         signal=signal.SIGKILL,
                         idempotent=False,
                         thread=None):
@@ -3769,8 +3768,7 @@ class RedpandaService(RedpandaServiceBase):
         assert node in self.nodes, f"Node {node.account.hostname} is not started"
         return node.account.monitor_log(RedpandaService.STDOUT_STDERR_CAPTURE)
 
-    def raise_on_crash(self,
-                       log_allow_list: list[str | re.Pattern] | None = None):
+    def raise_on_crash(self, log_allow_list: LogAllowList | None = None):
         """
         Check if any redpanda nodes are unexpectedly not running,
         or if any logs contain segfaults or assertions.
