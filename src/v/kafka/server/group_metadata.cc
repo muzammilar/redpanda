@@ -27,6 +27,7 @@
 #include <fmt/ostream.h>
 
 #include <chrono>
+#include <optional>
 #include <string_view>
 
 namespace kafka {
@@ -328,6 +329,33 @@ iobuf maybe_unwrap_from_iobuf(iobuf buffer) {
     return buffer;
 }
 } // namespace
+
+std::ostream& operator<<(std::ostream& o, const group_block& block) {
+    fmt::print(
+      o, "{{group_id: {}, is_blocked: {}}}", block.group_id, block.is_blocked);
+    return o;
+}
+
+group_block::group_block(kafka::group_id group_id, bool is_blocked)
+  : group_id(std::move(group_id))
+  , is_blocked(is_blocked) {}
+group_block::group_block(model::record record)
+  : group_id(protocol::decoder(record.release_key()).read_string())
+  , is_blocked(!record.is_tombstone()) {}
+
+void group_block::add_to_batch_builder(storage::record_batch_builder& b) const {
+    iobuf key;
+    protocol::encoder ke{key};
+    ke.write(group_id);
+
+    // unblock to act as a tombstone
+    std::optional<iobuf> value;
+    if (is_blocked) {
+        value.emplace();
+    }
+
+    b.add_raw_kv(std::move(key), std::move(value));
+}
 
 namespace group_metadata_serializer {
 group_metadata_type get_metadata_type(iobuf buffer) {

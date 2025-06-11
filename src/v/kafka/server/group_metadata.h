@@ -177,6 +177,15 @@ inline group_metadata_version read_metadata_version(protocol::decoder& reader) {
     return group_metadata_version{reader.read_int16()};
 }
 
+struct group_block {
+    kafka::group_id group_id;
+    bool is_blocked;
+    friend std::ostream& operator<<(std::ostream&, const group_block&);
+
+    group_block(kafka::group_id group_id, bool is_blocked);
+    explicit group_block(model::record record);
+    void add_to_batch_builder(storage::record_batch_builder&) const;
+};
 namespace group_metadata_serializer {
 struct key_value {
     iobuf key;
@@ -190,6 +199,7 @@ offset_metadata_kv decode_offset_metadata(model::record record);
 }; // namespace group_metadata_serializer
 
 namespace group_tx {
+
 struct fence_metadata_v0 {
     kafka::group_id group_id;
     friend std::ostream& operator<<(std::ostream&, const fence_metadata_v0&);
