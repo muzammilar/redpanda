@@ -280,7 +280,7 @@ private:
       ss::lowres_clock::time_point timeout);
 
     ss::lw_shared_ptr<attached_partition>
-    get_attached_partition(model::ntp ntp) {
+    get_attached_partition(const model::ntp& ntp) {
         auto it = _partitions.find(ntp);
         if (it == _partitions.end()) {
             return nullptr;
