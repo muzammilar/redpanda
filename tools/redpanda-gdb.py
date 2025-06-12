@@ -2096,6 +2096,12 @@ class consensus:
         return f"consensus(term={self.term}, confirmed_term={self.confirmed_term}, v_state={self.v_state}, is_leader={self.is_leader()}, election_lock={self.election_lock}, op_lock={self.op_lock}, snapshot_lock={self.snapshot_lock}, offset_monitor={self.offset_monitor})"
 
 
+def parse_shard_arg(arg):
+    if arg is None or arg == "":
+        return None
+    return int(arg)
+
+
 class redpanda_partition:
     def __init__(self, ptr):
         self.ptr = ptr
@@ -2135,7 +2141,7 @@ class redpanda_partitions(gdb.Command):
                     print("Skipping ntp {}: {}".format(model_ntp(ntp), e))
 
     def invoke(self, arg, from_tty):
-        self.print_partitions(arg)
+        self.print_partitions(parse_shard_arg(arg))
 
 
 class redpanda_cloud_clients(gdb.Command):
@@ -2144,7 +2150,7 @@ class redpanda_cloud_clients(gdb.Command):
                              gdb.COMPLETE_NONE, True)
 
     def invoke(self, arg, from_tty):
-        cpu = arg
+        cpu = parse_shard_arg(arg)
         cpu_list = range(cpus()) if cpu is None else [int(cpu)]
         for i in cpu_list:
             client_pool_ref = find_cloud_storage_clients(i)
