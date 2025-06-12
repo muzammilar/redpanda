@@ -203,10 +203,10 @@ TEST(CheckpointMutex, checkpoint_mutex_lock_with) {
     // Acquire the mutex normally.
     auto res = mutex
                  .with([&] {
-		     return ss::sleep(500ms).then([&] {
-                     EXPECT_FALSE(mutex.has_units());
-                     return 1;
-		       });
+                     return ss::sleep(500ms).then([&] {
+                         EXPECT_FALSE(mutex.has_units());
+                         return 1;
+                     });
                  })
                  .get();
     EXPECT_TRUE(mutex.has_units());
@@ -216,10 +216,10 @@ TEST(CheckpointMutex, checkpoint_mutex_lock_with) {
             .with(
               1s,
               [&] {
-		     return ss::sleep(500ms).then([&] {
-                  EXPECT_FALSE(mutex.has_units());
-                  return 2;
-		});
+                  return ss::sleep(500ms).then([&] {
+                      EXPECT_FALSE(mutex.has_units());
+                      return 2;
+                  });
               })
             .get();
     EXPECT_TRUE(mutex.has_units());
@@ -229,10 +229,10 @@ TEST(CheckpointMutex, checkpoint_mutex_lock_with) {
             .with(
               ss::timer<>::clock::now() + 1s,
               [&] {
-		     return ss::sleep(500ms).then([&] {
-                  EXPECT_FALSE(mutex.has_units());
-                  return 3;
-		});
+                  return ss::sleep(500ms).then([&] {
+                      EXPECT_FALSE(mutex.has_units());
+                      return 3;
+                  });
               })
             .get();
     EXPECT_TRUE(mutex.has_units());
@@ -243,10 +243,10 @@ TEST(CheckpointMutex, checkpoint_mutex_lock_with) {
             .with(
               as,
               [&] {
-		     return ss::sleep(500ms).then([&] {
-                  EXPECT_FALSE(mutex.has_units());
-                  return 4;
-		});
+                  return ss::sleep(500ms).then([&] {
+                      EXPECT_FALSE(mutex.has_units());
+                      return 4;
+                  });
               })
             .get();
     EXPECT_TRUE(mutex.has_units());
