@@ -56,12 +56,6 @@ public:
     using function_handler
       = std::variant<regular_function_handler, deferred_function_handler>;
 
-    // temporary constructor
-    explicit auth(level lvl)
-      : _lvl{lvl}
-      , _op{op::all}
-      , _res{global{}} {}
-
     auth(level lvl, std::optional<op> op, resource res)
       : _lvl{lvl}
       , _op{op}
