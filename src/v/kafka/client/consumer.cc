@@ -436,7 +436,7 @@ ss::future<fetch_response> consumer::fetch(
     for (const auto& [t, ps] : _assignment) {
         for (const auto& p : ps) {
             auto tp = model::topic_partition{t, p};
-            auto leader = co_await _topic_cache.leader(tp);
+            auto leader = _topic_cache.leader(tp);
             auto broker = _brokers.find(leader);
             auto& session = _fetch_sessions[broker];
 

@@ -158,7 +158,7 @@ ss::future<> client::update_metadata(wait_or_start::tag) {
 ss::future<> client::apply(metadata_response res) {
     try {
         co_await _brokers.apply(std::move(res.data.brokers));
-        co_await _topic_cache.apply(std::move(res.data.topics));
+        _topic_cache.apply(std::move(res.data.topics));
         _controller = res.data.controller_id;
     } catch (const std::exception& ex) {
         vlog(_logger.debug, "Failed to apply metadata request: {}", ex);
@@ -264,7 +264,8 @@ ss::future<produce_response> client::produce_records(
         auto p_id = record.partition_id;
         if (!p_id) {
             p_id = co_await gated_retry_with_mitigation([&, this]() {
-                       return _topic_cache.partition_for(topic, record);
+                       return ss::make_ready_future<model::partition_id>(
+                         _topic_cache.partition_for(topic, record));
                    }).handle_exception([](std::exception_ptr) {
                 // Assume auto topic creation is on and assign to first
                 // partition
@@ -416,7 +417,7 @@ client::do_list_offsets(const list_offsets_request& unsharded_req) {
     for (const auto& topic : unsharded_req.data.topics) {
         for (const auto& partition : topic.partitions) {
             model::topic_partition tp{topic.name, partition.partition_index};
-            auto node_id = co_await _topic_cache.leader(tp);
+            auto node_id = _topic_cache.leader(tp);
 
             auto& topics
               = reqs.try_emplace(node_id, kafka::list_offsets_request{})
@@ -508,16 +509,12 @@ ss::future<fetch_response> client::fetch_partition(
       std::move(tp),
       [this](auto& build_request, model::topic_partition& tp) {
           return gated_retry_with_mitigation([this, &tp, &build_request]() {
-                     return _topic_cache.leader(tp)
-                       .then([this](model::node_id leader) {
-                           return _brokers.find(leader);
-                       })
-                       .then([&tp, &build_request](shared_broker_t&& b) {
-                           return b->dispatch(build_request(tp))
-                             .then([b, &tp](fetch_response res) {
-                                 return maybe_throw_exception(
-                                   b, tp, std::move(res));
-                             });
+                     auto leader = _topic_cache.leader(tp);
+                     auto broker = _brokers.find(leader);
+                     return broker->dispatch(build_request(tp))
+                       .then([broker, &tp](fetch_response res) {
+                           return maybe_throw_exception(
+                             broker, tp, std::move(res));
                        });
                  })
             .handle_exception([&tp](std::exception_ptr ex) {
