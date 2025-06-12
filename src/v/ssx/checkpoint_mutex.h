@@ -358,8 +358,9 @@ auto basic_checkpoint_mutex<Clock>::with(
   Func&& func, vlog::file_line line) noexcept {
     return get_units(line).then(
       [f = std::forward<Func>(func)](basic_mutex_units<Clock> units
-                                     [[maybe_unused]]) mutable {
-          return seastar::futurize_invoke(std::forward<Func>(f));
+                                     ) mutable {
+          return seastar::futurize_invoke(std::forward<Func>(f))
+            .finally([units = std::move(units)] {});
       });
 }
 
@@ -369,8 +370,9 @@ auto basic_checkpoint_mutex<Clock>::with(
   Clock::time_point deadline, Func&& func, vlog::file_line line) noexcept {
     return get_units(deadline, line)
       .then([f = std::forward<Func>(func)](basic_mutex_units<Clock> units
-                                           [[maybe_unused]]) mutable {
-          return seastar::futurize_invoke(std::forward<Func>(f));
+                                           ) mutable {
+          return seastar::futurize_invoke(std::forward<Func>(f))
+            .finally([units = std::move(units)] {});
       });
 }
 
@@ -380,8 +382,9 @@ auto basic_checkpoint_mutex<Clock>::with(
   Clock::duration timeout, Func&& func, vlog::file_line line) noexcept {
     return get_units(timeout, line)
       .then([f = std::forward<Func>(func)](basic_mutex_units<Clock> units
-                                           [[maybe_unused]]) mutable {
-          return seastar::futurize_invoke(std::forward<Func>(f));
+                                           ) mutable {
+          return seastar::futurize_invoke(std::forward<Func>(f))
+            .finally([units = std::move(units)] {});
       });
 }
 
@@ -391,8 +394,9 @@ auto basic_checkpoint_mutex<Clock>::with(
   seastar::abort_source& as, Func&& func, vlog::file_line line) noexcept {
     return get_units(as, line).then(
       [f = std::forward<Func>(func)](basic_mutex_units<Clock> units
-                                     [[maybe_unused]]) mutable {
-          return seastar::futurize_invoke(std::forward<Func>(f));
+                                     ) mutable {
+          return seastar::futurize_invoke(std::forward<Func>(f))
+            .finally([units = std::move(units)] {});
       });
 }
 
