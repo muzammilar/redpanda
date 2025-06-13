@@ -14,6 +14,7 @@ from confluent_kafka import avro
 from confluent_kafka.avro import AvroProducer
 from databricks.sql.types import Row
 from ducktape.mark import matrix
+from ducktape.mark._mark import Mark
 
 from rptest.clients.rpk import RpkTool
 from rptest.context.databricks import DatabricksContext as DatabricksContext
@@ -30,13 +31,53 @@ from rptest.tests.datalake.datalake_verifier import DatalakeVerifier
 from rptest.tests.datalake.query_engine_base import QueryEngineType
 from rptest.tests.datalake.utils import supported_storage_types
 from rptest.tests.redpanda_test import RedpandaTest
-from rptest.utils.mode_checks import cleanup_on_early_exit
 
 
 def fetch_dbx_schema(dl: DatalakeServices, table_name: str) -> list[Row]:
     return dl.query_engine(
         QueryEngineType.DATABRICKS_SQL).make_client().cursor().execute(
             f"describe {table_name}").fetchall()
+
+
+class DatabricksOnlyTestMark(Mark):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def apply(self, seed_context, context_list):
+        """
+        Apply the mark to the test context list.
+        This will skip the test if the Databricks context is not available.
+        """
+        assert len(
+            context_list
+        ) > 0, "ignore annotation is not being applied to any test cases"
+
+        should_ignore_test = False
+        if not DatabricksContext.available(seed_context):
+            seed_context.logger.debug(
+                f"Skipping {seed_context} test because Databricks context is not available"
+            )
+            should_ignore_test = True
+        elif get_cloud_provider() != "aws":
+            seed_context.logger.debug(
+                f"Skipping {seed_context} test because it is only supported on AWS, but the current cloud provider is {get_cloud_provider()}"
+            )
+            should_ignore_test = True
+
+        for ctx in context_list:
+            ctx.ignore = should_ignore_test
+
+        return context_list
+
+
+def databricks_only_test(func, /):
+    """
+    Decorator to mark a test as a Databricks test.
+    Such tests will only run if the Databricks context is available.
+    """
+
+    Mark.mark(func, DatabricksOnlyTestMark())
+    return func
 
 
 class DatabricksTest(RedpandaTest):
@@ -66,23 +107,10 @@ class DatabricksTest(RedpandaTest):
         # redpanda will be started by DatalakeServices
         pass
 
+    @databricks_only_test
     @cluster(num_nodes=2)
     @matrix(cloud_storage_type=supported_storage_types())
     def test_e2e_basic(self, cloud_storage_type):
-        # TODO: Move this in the matrix decorator. Somehow.
-        if not DatabricksContext.available(self.test_context):
-            self.logger.warning(
-                "Skipping test because Databricks context is not available")
-            cleanup_on_early_exit(self)
-            return
-
-        if get_cloud_provider() != "aws":
-            self.logger.warning(
-                f"Skipping test because it is only supported on AWS, but the current cloud provider is {get_cloud_provider()}"
-            )
-            cleanup_on_early_exit(self)
-            return
-
         count = 100
         with DatalakeServices(self.test_context,
                               redpanda=self.redpanda,
@@ -121,23 +149,10 @@ class DatabricksTest(RedpandaTest):
                 self.redpanda, self.topic_name,
                 dl.query_engine(QueryEngineType.DATABRICKS_SQL))
 
+    @databricks_only_test
     @cluster(num_nodes=1)
     @matrix(cloud_storage_type=supported_storage_types())
     def test_e2e_with_schema(self, cloud_storage_type):
-        # TODO: Move this in the matrix decorator. Somehow.
-        if not DatabricksContext.available(self.test_context):
-            self.logger.warning(
-                "Skipping test because Databricks context is not available")
-            cleanup_on_early_exit(self)
-            return
-
-        if get_cloud_provider() != "aws":
-            self.logger.warning(
-                f"Skipping test because it is only supported on AWS, but the current cloud provider is {get_cloud_provider()}"
-            )
-            cleanup_on_early_exit(self)
-            return
-
         count = 100
 
         @dataclasses.dataclass
@@ -231,23 +246,10 @@ class DatabricksTest(RedpandaTest):
                 assert actual_schema == tc.dbx_schema, \
                     f"Expected DBX schema {tc.dbx_schema} but got {actual_schema}"
 
+    @databricks_only_test
     @cluster(num_nodes=2)
     @matrix(cloud_storage_type=supported_storage_types())
     def test_e2e_with_partition_evolution(self, cloud_storage_type):
-        # TODO: Move this in the matrix decorator. Somehow.
-        if not DatabricksContext.available(self.test_context):
-            self.logger.warning(
-                "Skipping test because Databricks context is not available")
-            cleanup_on_early_exit(self)
-            return
-
-        if get_cloud_provider() != "aws":
-            self.logger.warning(
-                f"Skipping test because it is only supported on AWS, but the current cloud provider is {get_cloud_provider()}"
-            )
-            cleanup_on_early_exit(self)
-            return
-
         with DatalakeServices(
                 self.test_context,
                 redpanda=self.redpanda,
