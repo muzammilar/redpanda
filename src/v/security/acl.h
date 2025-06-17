@@ -657,6 +657,13 @@ public:
     void serde_write(iobuf&) const;
     void serde_read(iobuf_parser&, const serde::header&);
 
+    // Helpers for serde compatibility testing
+    // They read/write the full object, including the header
+    void testing_serde_full_write_v0(iobuf&) const;
+    void testing_serde_full_read_v0(iobuf_parser&, const std::size_t);
+    void testing_serde_full_write_v2(iobuf&) const;
+    void testing_serde_full_read_v2(iobuf_parser&, const std::size_t);
+
 private:
     resource_pattern_filter _pattern;
     acl_entry_filter _acl;
@@ -665,5 +672,19 @@ private:
 /// Name of the principal the kafka client for auditing will be using
 inline const acl_principal audit_principal{
   principal_type::ephemeral_user, "__auditing"};
+
+namespace testing {
+
+struct acl_binding_filter_v0 : public acl_binding_filter {
+    static constexpr auto redpanda_serde_version = serde::version_t{0};
+    static constexpr auto redpanda_serde_compat_version = serde::version_t{0};
+};
+
+struct acl_binding_filter_v2 : public acl_binding_filter {
+    static constexpr auto redpanda_serde_version = serde::version_t{2};
+    static constexpr auto redpanda_serde_compat_version = serde::version_t{0};
+};
+
+} // namespace testing
 
 } // namespace security

@@ -230,3 +230,20 @@ redpanda_cc_bench(
         "@seastar//:benchmark",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "acl_serde_test",
+    timeout = "short",
+    srcs = [
+        "acl_serde_test.cc",
+    ],
+    deps = [
+        ":utils",
+        "//src/v/bytes:iobuf",
+        "//src/v/bytes:iobuf_parser",
+        "//src/v/security",
+        "//src/v/serde",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)

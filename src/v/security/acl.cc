@@ -12,6 +12,9 @@
 
 #include "security/acl_store.h"
 #include "security/logger.h"
+#include "serde/envelope.h"
+#include "serde/read_header.h"
+#include "serde/rw/rw.h"
 #include "utils/to_string.h"
 
 #include <seastar/coroutine/maybe_yield.hh>
@@ -669,6 +672,92 @@ void acl_binding_filter::serde_read(iobuf_parser& in, const serde::header& h) {
         // V1+: read actual data from new enveloped field
         _pattern = read_nested<decltype(_pattern)>(in, h._bytes_left_limit);
     }
+}
+
+namespace {
+template<typename Other, typename Writer>
+void write_other_version(iobuf& out, Writer writer) {
+    // This is a test-only, simplified version of:
+    // `void tag_invoke(tag_t<write_tag>, iobuf& out, T t)`
+
+    serde::write(out, Other::redpanda_serde_version);
+    serde::write(out, Other::redpanda_serde_compat_version);
+
+    auto size_placeholder = out.reserve(sizeof(serde::serde_size_t));
+
+    const auto size_before = out.size_bytes();
+
+    writer();
+
+    const auto written_size = out.size_bytes() - size_before;
+    if (unlikely(
+          written_size > std::numeric_limits<serde::serde_size_t>::max())) {
+        throw serde::serde_exception("envelope too big");
+    }
+    const auto size = ss::cpu_to_le(
+      static_cast<serde::serde_size_t>(written_size));
+    size_placeholder.write(
+      reinterpret_cast<const char*>(&size), sizeof(serde::serde_size_t));
+}
+} // namespace
+
+void acl_binding_filter::testing_serde_full_write_v0(iobuf& out) const {
+    write_other_version<testing::acl_binding_filter_v0>(out, [&]() {
+        using serde::write;
+
+        write_v0(out, _pattern);
+        write(out, _acl);
+    });
+}
+
+void acl_binding_filter::testing_serde_full_read_v0(
+  iobuf_parser& in, const std::size_t bytes_left_limit) {
+    // This follows the pattern of:
+    // `void tag_invoke(tag_t<read_tag>, iobuf_parser& in, T& t, const
+    // std::size_t bytes_left_limit)`
+
+    auto h = serde::read_header<testing::acl_binding_filter_v0>(
+      in, bytes_left_limit);
+
+    read_nested_v0(in, _pattern, h._bytes_left_limit);
+
+    if (unlikely(in.bytes_left() < h._bytes_left_limit)) {
+        throw serde::serde_exception(fmt_with_ctx(
+          ssx::sformat,
+          "field spill over in {}, field type {}: envelope_end={}, "
+          "in.bytes_left()={}",
+          serde::type_str<testing::acl_binding_filter_v0>(),
+          serde::type_str<decltype(_acl)>(),
+          h._bytes_left_limit,
+          in.bytes_left()));
+    }
+
+    if (h._bytes_left_limit != in.bytes_left()) {
+        _acl = serde::read_nested<decltype(_acl)>(in, h._bytes_left_limit);
+    }
+
+    if (in.bytes_left() > h._bytes_left_limit) {
+        in.skip(in.bytes_left() - h._bytes_left_limit);
+    }
+}
+
+void acl_binding_filter::testing_serde_full_write_v2(iobuf& out) const {
+    write_other_version<testing::acl_binding_filter_v2>(out, [&]() {
+        using serde::write;
+
+        write_v0_dummy_resource_pattern_filter(out);
+        write(out, _acl);
+        write(out, _pattern);
+    });
+}
+
+void acl_binding_filter::testing_serde_full_read_v2(
+  iobuf_parser& in, const std::size_t bytes_left_limit) {
+    // The V2 read path will be identical to the V0 read path, the only
+    // difference being the serde version and compat version
+    auto res = serde::read_nested<testing::acl_binding_filter_v2>(
+      in, bytes_left_limit);
+    *this = acl_binding_filter{res._pattern, res._acl};
 }
 
 } // namespace security
