@@ -17,6 +17,21 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "errc",
+    srcs = [
+        "errc.cc",
+    ],
+    hdrs = [
+        "errc.h",
+    ],
+    include_prefix = "cluster_link",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+    ],
+)
+
+redpanda_cc_library(
     name = "impl",
     srcs = [
         "link.cc",

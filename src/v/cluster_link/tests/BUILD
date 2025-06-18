@@ -17,3 +17,16 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "errc_test",
+    timeout = "short",
+    srcs = [
+        "errc_test.cc",
+    ],
+    deps = [
+        "//src/v/cluster_link:errc",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
