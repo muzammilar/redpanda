@@ -48,8 +48,10 @@ public:
         if (ec == cluster::cluster_link::errc::success) {
             auto existing = _table.local().find_id_by_name(m.name);
             auto id = existing.value_or(++_latest_id);
-            co_await _table.local().apply_update(
-              testing::create_upsert_command(model::offset{id()}, cmd.value));
+            auto err = co_await _table.local().apply_update(
+              testing::create_upsert_command(
+                model::offset{id()}, std::move(m)));
+            vassert(!err, "Failed to upsert link: {}", err.message());
         }
 
         co_return ec;
@@ -61,6 +63,7 @@ public:
         if (ec == cluster::cluster_link::errc::success) {
             auto err = co_await _table.local().apply_update(
               testing::create_remove_command(cmd.key));
+            vassert(!err, "Failed to remove link: {}", err.message());
         }
         co_return ec;
     }
