@@ -230,7 +230,8 @@ public:
     /// Load arbitrary offset range using segment_upload class
     void read_offset_range(
       size_limited_offset_range range,
-      std::optional<size_limited_upl_result>& result) {
+      std::optional<size_limited_upl_result>& result,
+      bool expect_compacted = false) {
         vlog(
           adu_fixture_log.info,
           "Query range: {}, max size {}, min size {}",
@@ -276,8 +277,19 @@ public:
             return;
         }
         auto actual_offset_range = upl_res.value()->get_meta().offsets;
-        auto meta_size_bytes = upl_res.value()->get_meta().size_bytes;
 
+        ASSERT_NE(
+          upl_res.value()->get_meta().base_timestamp,
+          model::timestamp::missing());
+        ASSERT_NE(
+          upl_res.value()->get_meta().max_timestamp,
+          model::timestamp::missing());
+
+        ASSERT_EQ(
+          upl_res.value()->get_meta().eligible_for_compacted_reupload,
+          expect_compacted);
+
+        auto meta_size_bytes = upl_res.value()->get_meta().size_bytes;
         // Check metadata first
         ASSERT_EQ(range.base, actual_offset_range.base);
 
@@ -318,7 +330,9 @@ public:
 
     /// Load arbitrary offset range using segment_upload class
     void read_offset_range(
-      inclusive_offset_range range, std::optional<iobuf>& result) {
+      inclusive_offset_range range,
+      std::optional<iobuf>& result,
+      bool expect_compacted = false) {
         auto partition = get_test_partition();
         const auto& offsets = partition->log()->offsets();
         vlog(
@@ -359,10 +373,22 @@ public:
             return;
         }
         auto actual_offset_range = upl_res.value()->get_meta().offsets;
-        auto meta_size_bytes = upl_res.value()->get_meta().size_bytes;
 
         // Check metadata first
         ASSERT_TRUE(range == actual_offset_range);
+
+        ASSERT_NE(
+          upl_res.value()->get_meta().base_timestamp,
+          model::timestamp::missing());
+        ASSERT_NE(
+          upl_res.value()->get_meta().max_timestamp,
+          model::timestamp::missing());
+
+        ASSERT_EQ(
+          upl_res.value()->get_meta().eligible_for_compacted_reupload,
+          expect_compacted);
+
+        auto meta_size_bytes = upl_res.value()->get_meta().size_bytes;
 
         auto upl_size = upl_res.value()->get_size_bytes();
         auto inp_s = std::move(*upl_res.value()).detach_stream().get();
