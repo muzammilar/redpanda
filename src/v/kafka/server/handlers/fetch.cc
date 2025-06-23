@@ -435,7 +435,7 @@ read_result::memory_units_t reserve_memory_units(
 
 static void fill_fetch_responses(
   op_context& octx,
-  std::vector<read_result> results,
+  chunked_vector<read_result> results,
   const chunked_vector<op_context::response_placeholder_ptr>& responses,
   op_context::latency_point start_time,
   bool record_latency = true) {
@@ -550,7 +550,7 @@ static void fill_fetch_responses(
     }
 }
 
-static ss::future<std::vector<read_result>> fetch_ntps(
+static ss::future<chunked_vector<read_result>> fetch_ntps(
   cluster::partition_manager& cluster_pm,
   const replica_selector& replica_selector,
   chunked_vector<ntp_fetch_config> ntp_fetch_configs,
@@ -567,7 +567,7 @@ static ss::future<std::vector<read_result>> fetch_ntps(
     const size_t max_bytes_per_fetch = std::min<size_t>(
       config::shard_local_cfg().kafka_max_bytes_per_fetch(), bytes_left);
 
-    std::vector<read_result> results;
+    chunked_vector<read_result> results;
     results.reserve(ntp_fetch_configs.size());
 
     for (auto& ntp_cfg : ntp_fetch_configs) {
@@ -667,7 +667,7 @@ handle_shard_fetch(ss::shard_id shard, op_context& octx, shard_fetch fetch) {
         })
       .then([responses = std::move(fetch.responses),
              start_time = fetch.start_time,
-             &octx](std::vector<read_result> results) mutable {
+             &octx](auto results) mutable {
           fill_fetch_responses(octx, std::move(results), responses, start_time);
       });
 }
@@ -721,7 +721,7 @@ public:
       : _ctx(std::move(ctx)) {}
 
     struct worker_result {
-        std::vector<read_result> read_results;
+        chunked_vector<read_result> read_results;
         // The total amount of bytes read across all results in `read_results`.
         size_t total_size;
         // The time it took for the first `fetch_ntps` to complete
@@ -771,7 +771,7 @@ private:
         std::vector<model::offset> last_visible_indexes;
         // Indicates if any `read_result` in `results` has an error.
         bool has_error;
-        std::vector<read_result> results;
+        chunked_vector<read_result> results;
         size_t total_size;
     };
 
@@ -811,7 +811,7 @@ private:
         // A read_result needs to be returned for every partition. Hence,
         // the function can't return before calling
         // `fetch_ntps`.
-        std::vector<read_result> results = co_await fetch_ntps(
+        auto results = co_await fetch_ntps(
           _ctx.mgr,
           _ctx.srv.get_replica_selector(),
           std::move(requests),
@@ -893,7 +893,7 @@ private:
         // `_ctx.requests`.
         std::vector<size_t> requests_map;
 
-        std::vector<read_result> results;
+        chunked_vector<read_result> results;
         size_t total_size{0};
 
         for (;;) {
