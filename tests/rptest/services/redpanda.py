@@ -4100,6 +4100,16 @@ class RedpandaService(RedpandaServiceBase):
         version_str = self.get_version(node)
         return ri_int_tuple(RI_VERSION_RE.findall(version_str)[0])
 
+    def get_version_if_not_head(self, node):
+        """
+        Returns the redpanda binary version as a string if it differs from HEAD.
+        I.e., if this node is running a previous version of redpanda.
+        """
+        cur_ver = self._installer.installed_version(node)
+        if cur_ver != RedpandaInstaller.HEAD:
+            return self.get_version(node)
+        return None
+
     def stop(self, **kwargs):
         """
         Override default stop() to execude stop_node in parallel
