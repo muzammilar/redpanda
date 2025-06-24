@@ -12,6 +12,7 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "cluster/shard_placement_table_probe.h"
 #include "cluster/types.h"
 #include "container/chunked_hash_map.h"
 #include "storage/fwd.h"
@@ -42,7 +43,7 @@ namespace cluster {
 class shard_placement_table
   : public ss::peering_sharded_service<shard_placement_table> {
 private:
-    class probe;
+    using probe = shard_placement_table_probe;
 
 public:
     // assignment modification methods must be called on this shard
