@@ -139,7 +139,7 @@ size_t string_parser::advance(
             return pos + 1;
 
         case state::in_string: {
-            auto c = buf[pos];
+            auto c = static_cast<unsigned char>(buf[pos]);
             pos += 1;
 
             if (c == '\\') {
@@ -154,12 +154,42 @@ size_t string_parser::advance(
                 // Exclude the closing quote.
                 do_sink_raw(true);
                 return pos;
-            } else if (unsigned(c) < 0x20) {
+            } else if (c < 0x20) {
                 // Invalid character in string.
                 // RFC 4627: unescaped = %x20-21 / %x23-5B / %x5D-10FFFF
                 err = result::invalid_json_string;
                 _state = state::finished_with_error;
                 return pos;
+            } else if (c >= 0x80) {
+                do_sink_raw(true);
+
+                // Non-ASCII character. UTF-8 processing required.
+                // Determine UTF-8 sequence length, validate start byte,
+                // and begin accumulating decoded codepoint.
+                if ((c & 0xE0u) == 0xC0u) {
+                    // 2-byte UTF-8 sequence: 110xxxxx 10xxxxxx
+                    _utf8_bytes_remaining = 1;
+                    _utf8_codepoint = (c & 0x1Fu);
+                } else if ((c & 0xF0u) == 0xE0u) {
+                    // 3-byte UTF-8 sequence: 1110xxxx 10xxxxxx 10xxxxxx
+                    _utf8_bytes_remaining = 2;
+                    _utf8_codepoint = (c & 0x0Fu);
+                } else if ((c & 0xF8u) == 0xF0u) {
+                    // 4-byte UTF-8 sequence: 11110xxx 10xxxxxx 10xxxxxx
+                    // 10xxxxxx
+                    _utf8_bytes_remaining = 3;
+                    _utf8_codepoint = (c & 0x07u);
+                } else {
+                    // Invalid UTF-8 start byte.
+                    err = result::invalid_json_string;
+                    _state = state::finished_with_error;
+                    return pos;
+                }
+
+                // Reset start position to beginning of UTF-8 sequence.
+                start = pos - 1;
+                _state = state::in_utf8_sequence;
+                continue;
             }
             break;
         }
@@ -287,6 +317,57 @@ size_t string_parser::advance(
             _state = state::in_unicode;
             start = pos;
             continue;
+        }
+
+        case state::in_utf8_sequence: {
+            auto c = static_cast<unsigned char>(buf[pos]);
+            pos += 1;
+
+            if ((c & 0xC0u) != 0x80u) {
+                // Not a valid UTF-8 continuation byte (10xxxxxx pattern)
+                err = result::invalid_json_string;
+                _state = state::finished_with_error;
+                return pos;
+            }
+
+            _utf8_codepoint = (_utf8_codepoint << 6u) | (c & 0x3Fu);
+            _utf8_bytes_remaining--;
+
+            if (_utf8_bytes_remaining == 0) {
+                bool valid = false;
+
+                // Check for overlong encodings and valid ranges.
+                if (_utf8_codepoint <= 0x7F) {
+                    // Should have been encoded as 1-byte sequence.
+                    valid = false;
+                } else if (_utf8_codepoint <= 0x7FF) {
+                    // 2-byte sequence - check for overlong.
+                    valid = (_utf8_codepoint >= 0x80);
+                } else if (_utf8_codepoint <= 0xFFFF) {
+                    // 3-byte sequence - check for overlong and surrogates.
+                    valid
+                      = (_utf8_codepoint >= 0x800)
+                        && (_utf8_codepoint < 0xD800 || _utf8_codepoint > 0xDFFF);
+                } else if (_utf8_codepoint <= 0x10FFFF) {
+                    // 4-byte sequence - check for overlong.
+                    valid = (_utf8_codepoint >= 0x10000);
+                } else {
+                    // Out of valid Unicode range.
+                    valid = false;
+                }
+
+                if (!valid) {
+                    err = result::invalid_json_string;
+                    _state = state::finished_with_error;
+                    return pos;
+                }
+
+                do_sink_raw(false);
+                _state = state::in_string;
+                start = pos;
+                _utf8_codepoint = 0;
+            }
+            break;
         }
         }
     }

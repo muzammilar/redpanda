@@ -28,6 +28,7 @@ private:
         in_unicode,
         surrogate_start,
         surrogate_escape,
+        in_utf8_sequence,
         finished_with_error,
         finished_with_value,
     };
@@ -69,6 +70,10 @@ private:
 
     uint8_t _unicode_index{0};
     std::array<char, 8> _unicode_buffer{};
+
+    // UTF-8 sequence tracking for incremental parsing
+    uint8_t _utf8_bytes_remaining{0};
+    uint32_t _utf8_codepoint{0};
 };
 
 } // namespace experimental::serde::json::detail

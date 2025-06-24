@@ -146,6 +146,159 @@ constexpr auto test_strings = std::to_array<test_case>({
     7,
     "",
   },
+
+  //////////////////////////////////////////////////////////////
+  // UTF-8 validation test cases.
+
+  // Valid UTF-8 sequences
+  // 2-byte UTF-8: Euro sign (U+20AC)
+  {
+    "\"€\"",
+    string_parser::result::done,
+    5,
+    "€",
+  },
+  // 3-byte UTF-8: Check mark (U+2713)
+  {
+    "\"✓\"",
+    string_parser::result::done,
+    5,
+    "✓",
+  },
+  // 4-byte UTF-8: Musical symbol (U+1D11E)
+  {
+    "\"\xF0\x9D\x84\x9E\"",
+    string_parser::result::done,
+    6,
+    "\xF0\x9D\x84\x9E",
+  },
+  // Mixed ASCII and UTF-8
+  {
+    "\"Hello 世界\"",
+    string_parser::result::done,
+    14,
+    "Hello 世界",
+  },
+
+  // Invalid UTF-8 start bytes
+  // Invalid start byte 0x80 (continuation byte used as start)
+  {
+    "\"\x80\"",
+    string_parser::result::invalid_json_string,
+    2,
+  },
+  // Invalid start byte 0xBF (continuation byte used as start)
+  {
+    "\"\xBF\"",
+    string_parser::result::invalid_json_string,
+    2,
+  },
+  // Invalid start byte 0xFE
+  {
+    "\"\xFE\"",
+    string_parser::result::invalid_json_string,
+    2,
+  },
+  // Invalid start byte 0xFF
+  {
+    "\"\xFF\"",
+    string_parser::result::invalid_json_string,
+    2,
+  },
+
+  // Truncated UTF-8 sequences
+  // Truncated 2-byte sequence (missing closing quote to simulate end of buffer)
+  {
+    "\"\xC2",
+    string_parser::result::need_more_data,
+    2,
+  },
+  // Truncated 3-byte sequence (missing closing quote to simulate end of buffer)
+  {
+    "\"\xE0\xA0",
+    string_parser::result::need_more_data,
+    3,
+  },
+  // Truncated 4-byte sequence (missing closing quote to simulate end of buffer)
+  {
+    "\"\xF0\x90\x80",
+    string_parser::result::need_more_data,
+    4,
+  },
+
+  // Invalid continuation bytes
+  // 2-byte sequence with invalid continuation
+  {
+    "\"\xC2\x20\"",
+    string_parser::result::invalid_json_string,
+    3,
+  },
+  // 3-byte sequence with invalid first continuation
+  {
+    "\"\xE0\x20\x80\"",
+    string_parser::result::invalid_json_string,
+    3,
+  },
+  // 3-byte sequence with invalid second continuation
+  {
+    "\"\xE0\xA0\x20\"",
+    string_parser::result::invalid_json_string,
+    4,
+  },
+  // 4-byte sequence with invalid continuation
+  {
+    "\"\xF0\x20\x80\x80\"",
+    string_parser::result::invalid_json_string,
+    3,
+  },
+
+  // Overlong encodings
+  // Overlong 2-byte encoding of U+0000
+  {
+    "\"\xC0\x80\"",
+    string_parser::result::invalid_json_string,
+    3,
+  },
+  // Overlong 3-byte encoding of U+0000
+  {
+    "\"\xE0\x80\x80\"",
+    string_parser::result::invalid_json_string,
+    4,
+  },
+  // Overlong 3-byte encoding of U+007F
+  {
+    "\"\xE0\x81\xBF\"",
+    string_parser::result::invalid_json_string,
+    4,
+  },
+  // Overlong 4-byte encoding of U+0000
+  {
+    "\"\xF0\x80\x80\x80\"",
+    string_parser::result::invalid_json_string,
+    5,
+  },
+
+  // UTF-16 surrogates in raw UTF-8 (invalid)
+  // High surrogate U+D800
+  {
+    "\"\xED\xA0\x80\"",
+    string_parser::result::invalid_json_string,
+    4,
+  },
+  // Low surrogate U+DC00
+  {
+    "\"\xED\xB0\x80\"",
+    string_parser::result::invalid_json_string,
+    4,
+  },
+
+  // Out of valid Unicode range
+  // U+110000 (too large)
+  {
+    "\"\xF4\x90\x80\x80\"",
+    string_parser::result::invalid_json_string,
+    5,
+  },
 });
 
 TEST_P(string_parse_test, test_string) {
