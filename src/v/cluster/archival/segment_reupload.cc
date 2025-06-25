@@ -953,10 +953,15 @@ ss::future<candidate_creation_result> segment_collector::make_upload_candidate(
           _end_inclusive,
           tail_seek.offset_inside_batch,
           tail_seek.offset);
-        co_return skip_offset_range{
-          .begin_offset = _begin_inclusive,
-          .end_offset = _end_inclusive,
-          .reason = candidate_creation_error::offset_inside_batch};
+        if (is_reupload_mode(_mode)) {
+            co_return skip_offset_range{
+              .begin_offset = _begin_inclusive,
+              .end_offset = _end_inclusive,
+              .reason = candidate_creation_error::offset_inside_batch};
+        } else {
+            // This should never occur, but return an error here just in case.
+            co_return candidate_creation_error::offset_inside_batch;
+        }
     }
 
     vlog(
@@ -1000,9 +1005,11 @@ ss::future<candidate_creation_result> segment_collector::make_upload_candidate(
     // is smaller than that of the replaced one. Skip the upload if that's
     // not the case.
     if (auto to_replace = _manifest.find(starting_offset);
-        to_replace != _manifest.end()
-        && to_replace->committed_offset == final_offset) {
-        if (to_replace->size_bytes <= content_length) {
+        to_replace != _manifest.end()) {
+        if (
+          is_reupload_mode(_mode)
+          && to_replace->committed_offset == final_offset
+          && to_replace->size_bytes <= content_length) {
             vlog(
               archival_log.debug,
               "Skipping re-upload of compacted segment as its size has "
@@ -1013,6 +1020,13 @@ ss::future<candidate_creation_result> segment_collector::make_upload_candidate(
               .begin_offset = _begin_inclusive,
               .end_offset = _end_inclusive,
               .reason = candidate_creation_error::upload_size_unchanged};
+        }
+        if (!is_reupload_mode(_mode)) {
+            vlog(
+              archival_log.debug,
+              "New segment upload already appears in manifest: {}",
+              _segments.front());
+            co_return candidate_creation_error::concurrency_error;
         }
     }
 

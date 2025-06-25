@@ -2225,3 +2225,43 @@ SEASTAR_THREAD_TEST_CASE(test_new_segment_upload_fuzz) {
           open_range_collector, start_bound, end_bound, expected_size);
     }
 }
+
+SEASTAR_THREAD_TEST_CASE(test_new_segment_never_skip_offsets) {
+    // Start with empty manifest and try to upload
+    cloud_storage::partition_manifest m(
+      model::ntp{"test_ns", "test_tpc", 0}, model::initial_revision_id{0});
+
+    temporary_dir tmp_dir("concat_segment_read");
+    auto data_path = tmp_dir.get_path();
+    using namespace storage;
+
+    auto b = make_log_builder(data_path.string());
+    b | start(ntp_config{{"test_ns", "test_tpc", 0}, {data_path}});
+    auto defer = ss::defer([&b] { b.stop().get(); });
+
+    populate_log(
+      b,
+      {.segment_starts = {0, 20},
+       .compacted_segment_indices = {},
+       .last_segment_num_records = 10});
+
+    {
+        // with a clean manifest, we should be able to upload the segment, but
+        // the begin offset lands inside a batch.
+        archival::segment_collector collector{
+          segment_collector_mode::new_upload,
+          model::offset{10},
+          m,
+          b.get_disk_log_impl(),
+          max_upload_size,
+          model::offset{19},
+        };
+        collector.collect_segments();
+
+        auto c = collector.make_upload_candidate_stream(1s).get();
+        BOOST_REQUIRE(std::holds_alternative<candidate_creation_error>(c));
+        BOOST_REQUIRE(
+          std::get<candidate_creation_error>(c)
+          == candidate_creation_error::offset_inside_batch);
+    }
+}
