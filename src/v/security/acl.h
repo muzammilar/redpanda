@@ -73,9 +73,9 @@ constexpr std::string_view to_string_view(resource_type type) {
     case resource_type::transactional_id:
         return "transactional_id";
     case resource_type::sr_subject:
-        return "schema_registry_subject";
+        return "subject";
     case resource_type::sr_global:
-        return "schema_registry_global";
+        return "global";
     }
     __builtin_unreachable();
 }
