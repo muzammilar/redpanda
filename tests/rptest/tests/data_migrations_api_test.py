@@ -882,8 +882,10 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
             '/transfer_leadership\] reason - seastar::gate_closed_exception',
         ])
     @matrix(transfer_leadership=[True, False],
+            include_groups=[True, False],
             params=generate_tmptpdi_params())
-    def test_migrated_topic_data_integrity(self, transfer_leadership: bool,
+    def test_migrated_topic_data_integrity(self, include_groups: bool,
+                                           transfer_leadership: bool,
                                            params: TmtpdiParams):
         cancellation = params['cancellation']
         use_alias = params['use_alias']
@@ -897,11 +899,13 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
 
         producer = self.start_producer(workload_topic.name)
 
+        groups = ["consumer-group-id"] if include_groups else []
+
         tl_topic_name = workload_topic.name if transfer_leadership else None
         with self.tl_thread(tl_topic_name):
             workload_ns_topic = make_namespaced_topic(workload_topic.name)
             out_migration = OutboundDataMigration(topics=[workload_ns_topic],
-                                                  consumer_groups=[])
+                                                  consumer_groups=groups)
             out_migration_id = self.create_and_wait(out_migration)
 
             self.admin.execute_data_migration_action(out_migration_id,
@@ -1000,7 +1004,7 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
             while not remounted:
                 in_migration = InboundDataMigration(
                     topics=[InboundTopic(workload_ns_topic, alias=alias)],
-                    consumer_groups=[])
+                    consumer_groups=groups)
                 in_migration_id = self.create_and_wait(in_migration)
 
                 # check if topic that is being migrated can not be created even if
