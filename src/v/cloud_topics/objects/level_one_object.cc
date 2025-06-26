@@ -15,6 +15,7 @@
 #include "model/fundamental.h"
 #include "model/record.h"
 #include "model/record_batch_types.h"
+#include "reflection/type_traits.h"
 #include "serde/rw/rw.h"
 #include "serde/rw/vector.h"
 #include "storage/record_batch_builder.h"
@@ -28,12 +29,92 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <type_traits>
 
 namespace experimental::cloud_topics::l1 {
 
 namespace {
+
 constexpr static std::string_view partition_marker_key = "pm";
 constexpr static std::string_view footer_key = "f";
+
+template<typename T>
+requires std::is_integral_v<T> || std::is_scoped_enum_v<T>
+         || reflection::is_rp_named_type<T>
+         || std::is_same_v<model::timestamp, T>
+         || std::is_same_v<model::record_batch_attributes, T>
+constexpr auto as_bytes(T value) {
+    if constexpr (std::is_scoped_enum_v<T>) {
+        return std::bit_cast<
+          std::array<char, sizeof(std::underlying_type_t<T>)>,
+          std::underlying_type_t<T>>(std::to_underlying(value));
+    } else if constexpr (
+      reflection::is_rp_named_type<T> || std::is_same_v<model::timestamp, T>) {
+        return std::bit_cast<
+          std::array<char, sizeof(typename T::type)>,
+          typename T::type>(value());
+    } else if constexpr (std::is_same_v<model::record_batch_attributes, T>) {
+        return std::bit_cast<
+          std::array<char, sizeof(typename T::type)>,
+          typename T::type>(value.value());
+    } else {
+        return std::bit_cast<std::array<char, sizeof(T)>, T>(value);
+    }
+}
+
+template<typename T>
+requires std::is_integral_v<T> || std::is_scoped_enum_v<T>
+         || reflection::is_rp_named_type<T>
+         || std::is_same_v<model::timestamp, T>
+         || std::is_same_v<model::record_batch_attributes, T>
+constexpr T from_bytes(const void* ptr) {
+    if constexpr (std::is_scoped_enum_v<T>) {
+        std::underlying_type_t<T> value;
+        std::memcpy(&value, ptr, sizeof(value));
+        return static_cast<T>(value);
+    } else if constexpr (
+      reflection::is_rp_named_type<T> || std::is_same_v<model::timestamp, T>
+      || std::is_same_v<model::record_batch_attributes, T>) {
+        typename T::type value;
+        std::memcpy(&value, ptr, sizeof(value));
+        return T(value);
+    } else {
+        T value;
+        std::memcpy(&value, ptr, sizeof(value));
+        return value;
+    }
+}
+
+constexpr void
+for_each_batch_header_field(model::record_batch_header& hdr, auto func) {
+    func(hdr.header_crc);
+    func(hdr.size_bytes);
+    func(hdr.type);
+    func(hdr.crc);
+    func(hdr.attrs);
+    func(hdr.base_offset);
+    func(hdr.last_offset_delta);
+    func(hdr.first_timestamp);
+    func(hdr.max_timestamp);
+    func(hdr.producer_id);
+    func(hdr.producer_epoch);
+    func(hdr.base_sequence);
+    func(hdr.record_count);
+    // The difference between this and the packed header in model/local storage
+    // is that we serialize the term here.
+    func(hdr.ctx.term);
+}
+
+consteval size_t compute_batch_header_size() noexcept {
+    size_t size = 0;
+    model::record_batch_header hdr{};
+    for_each_batch_header_field(
+      hdr, [&size](const auto& field) { size += sizeof(as_bytes(field)); });
+    return size;
+}
+
+constinit const static size_t batch_header_size = compute_batch_header_size();
+
 } // namespace
 
 object_index::partition object_index::partition::copy() const {
@@ -111,11 +192,10 @@ object_index object_index::copy() const {
 
 std::variant<object_index, size_t> object_index::read_footer(iobuf buf) {
     if (buf.size_bytes() < sizeof(uint32_t)) {
-        throw std::runtime_error(
-          fmt::format(
-            "expected at least {} bytes in footer, got: {}",
-            sizeof(uint32_t),
-            buf.size_bytes()));
+        throw std::runtime_error(fmt::format(
+          "expected at least {} bytes in footer, got: {}",
+          sizeof(uint32_t),
+          buf.size_bytes()));
     }
     iobuf_const_parser parser(buf);
     auto footer_size
@@ -123,28 +203,42 @@ std::variant<object_index, size_t> object_index::read_footer(iobuf buf) {
     if (buf.size_bytes() >= (footer_size + sizeof(uint32_t))) {
         iobuf_parser p(buf.share(
           buf.size_bytes() - sizeof(uint32_t) - footer_size, footer_size));
-        auto footer_batch = serde::read<model::record_batch>(p);
+        if (p.bytes_left() < batch_header_size) {
+            throw std::runtime_error(fmt::format(
+              "expected at least {} bytes, got {}",
+              batch_header_size,
+              p.bytes_left()));
+        }
+        model::record_batch_header hdr;
+        for_each_batch_header_field(hdr, [&p](auto& field) {
+            constinit static size_t field_size = sizeof(as_bytes(field));
+            using T = std::remove_reference_t<decltype(field)>;
+            auto b = p.read_bytes(field_size);
+            field = from_bytes<T>(b.data());
+        });
+        auto records = p.share(
+          hdr.size_bytes - model::packed_record_batch_header_size);
+        auto footer_batch = model::record_batch(
+          hdr, std::move(records), model::record_batch::tag_ctor_ng{});
         if (
           footer_batch.header().type
           != model::record_batch_type::cloud_topics_l1_metadata) {
-            throw std::runtime_error(
-              fmt::format(
-                "expected cloud_topics_l1_metadata batch, got: {}",
-                footer_batch.header().type));
+            throw std::runtime_error(fmt::format(
+              "expected cloud_topics_l1_metadata batch, got: {}",
+              footer_batch.header().type));
         }
         if (footer_batch.record_count() != 1) {
-            throw std::runtime_error(
-              fmt::format(
-                "expected 1 record in footer, got: {}",
-                footer_batch.record_count()));
+            throw std::runtime_error(fmt::format(
+              "expected 1 record in footer, got: {}",
+              footer_batch.record_count()));
         }
         auto footer_record = std::move(footer_batch.copy_records().front());
         if (footer_record.key() != footer_key) {
-            throw std::runtime_error(
-              fmt::format(
-                "expected footer key to be '{}', got: {}",
-                footer_key,
-                footer_record.key().hexdump(32)));
+            constexpr size_t key_dump_size = 32;
+            throw std::runtime_error(fmt::format(
+              "expected footer key to be '{}', got: {}",
+              footer_key,
+              footer_record.key().hexdump(key_dump_size)));
         }
         return serde::from_iobuf<object_index>(footer_record.release_value());
     }
@@ -152,7 +246,6 @@ std::variant<object_index, size_t> object_index::read_footer(iobuf buf) {
 }
 
 namespace {
-
 class object_builder_impl final : public object_builder {
 public:
     explicit object_builder_impl(ss::output_stream<char> output, options opts)
@@ -220,7 +313,7 @@ public:
         builder.add_raw_kv(
           iobuf::from(footer_key),
           serde::to_iobuf<object_index>(_index.copy()));
-        auto footer_start = _offset + sizeof(uint32_t);
+        auto footer_start = _offset;
         co_await serde_write_to_stream(std::move(builder).build());
         object_info info{
           .index = std::move(_index),
@@ -244,15 +337,11 @@ private:
         _index.partitions.push_back(std::exchange(_current_partition, {}));
     }
 
-    template<typename T>
-    ss::future<> serde_write_to_stream(T&& t) {
+    ss::future<> serde_write_to_stream(model::record_batch batch) {
         iobuf b;
-        auto placeholder = b.reserve(sizeof(uint32_t));
-        serde::write(b, std::forward<T>(t));
-        std::ranges::copy(
-          std::bit_cast<std::array<char, sizeof(uint32_t)>, uint32_t>(
-            b.size_bytes() - sizeof(uint32_t)),
-          placeholder.mutable_index());
+        for_each_batch_header_field(
+          batch.header(), [&b](auto arg) { b.append(as_bytes(arg)); });
+        b.append(std::move(batch).release_data());
         _offset += b.size_bytes();
         return write_iobuf_to_output_stream(std::move(b), _output);
     }
@@ -297,10 +386,9 @@ public:
             co_return serde::read<object_index>(parser);
         } else {
             constexpr static size_t max_key_size = 32;
-            throw std::runtime_error(
-              fmt::format(
-                "unexpected key in l1 metadata batch: {}",
-                r.key().hexdump(max_key_size)));
+            throw std::runtime_error(fmt::format(
+              "unexpected key in l1 metadata batch: {}",
+              r.key().hexdump(max_key_size)));
         }
     }
 
@@ -308,19 +396,23 @@ public:
 
 private:
     ss::future<model::record_batch> read_next_batch() {
-        ss::temporary_buffer<char> size_prefix_buf
-          = co_await _input.read_exactly(sizeof(uint32_t));
-        if (size_prefix_buf.size() != sizeof(uint32_t)) {
-            throw std::runtime_error(
-              fmt::format(
-                "expected {} bytes, got {}",
-                sizeof(uint32_t),
-                size_prefix_buf.size()));
+        ss::temporary_buffer<char> hdr_buf = co_await _input.read_exactly(
+          batch_header_size);
+        if (hdr_buf.size() != batch_header_size) {
+            throw std::runtime_error(fmt::format(
+              "expected {} bytes, got {}", batch_header_size, hdr_buf.size()));
         }
-        uint32_t size = 0;
-        std::memcpy(&size, size_prefix_buf.get(), size_prefix_buf.size());
-        auto parser = iobuf_parser{co_await read_iobuf_exactly(_input, size)};
-        co_return serde::read<model::record_batch>(parser);
+        model::record_batch_header hdr;
+        for_each_batch_header_field(hdr, [&hdr_buf](auto& field) {
+            constinit static size_t field_size = sizeof(as_bytes(field));
+            using T = std::remove_reference_t<decltype(field)>;
+            field = from_bytes<T>(hdr_buf.get());
+            hdr_buf.trim_front(field_size);
+        });
+        auto records = co_await read_iobuf_exactly(
+          _input, hdr.size_bytes - model::packed_record_batch_header_size);
+        co_return model::record_batch(
+          hdr, std::move(records), model::record_batch::tag_ctor_ng{});
     }
 
     ss::input_stream<char> _input;

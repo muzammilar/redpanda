@@ -15,6 +15,7 @@ redpanda_cc_library(
     implementation_deps = [
         "//src/v/bytes:iobuf",
         "//src/v/bytes:iostream",
+        "//src/v/reflection:type_traits",
         "//src/v/serde:vector",
         "//src/v/storage:record_batch_builder",
     ],
