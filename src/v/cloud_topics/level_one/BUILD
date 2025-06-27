@@ -1,13 +1,13 @@
 load("//bazel:build.bzl", "redpanda_cc_library")
 
-package(default_visibility = ["//src/v/cloud_topics/l1:__subpackages__"])
+package(default_visibility = ["//src/v/cloud_topics/level_one:__subpackages__"])
 
 redpanda_cc_library(
     name = "metastore",
     hdrs = [
         "metastore.h",
     ],
-    include_prefix = "cloud_topics/l1",
+    include_prefix = "cloud_topics/level_one",
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
@@ -27,14 +27,14 @@ redpanda_cc_library(
         "simple_metastore.h",
     ],
     implementation_deps = [
-        "//src/v/cloud_topics/l1:state_update",
+        "//src/v/cloud_topics/level_one:state_update",
     ],
-    include_prefix = "cloud_topics/l1",
+    include_prefix = "cloud_topics/level_one",
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
-        "//src/v/cloud_topics/l1:metastore",
-        "//src/v/cloud_topics/l1:state",
+        "//src/v/cloud_topics/level_one:metastore",
+        "//src/v/cloud_topics/level_one:state",
         "@seastar",
     ],
 )
@@ -47,7 +47,7 @@ redpanda_cc_library(
     hdrs = [
         "state.h",
     ],
-    include_prefix = "cloud_topics/l1",
+    include_prefix = "cloud_topics/level_one",
     deps = [
         "//src/v/base",
         "//src/v/cloud_topics:types",
@@ -55,10 +55,10 @@ redpanda_cc_library(
         "//src/v/model",
         "//src/v/serde",
         "//src/v/serde:map",
+        "//src/v/serde:named_type",
         "//src/v/serde:set",
         "//src/v/serde:uuid",
         "//src/v/serde:vector",
-        "//src/v/serde:named_type",
         "@abseil-cpp//absl/container:btree",
         "@seastar",
     ],
@@ -72,10 +72,10 @@ redpanda_cc_library(
     hdrs = [
         "state_update.h",
     ],
-    include_prefix = "cloud_topics/l1",
+    include_prefix = "cloud_topics/level_one",
     deps = [
         "//src/v/base",
-        "//src/v/cloud_topics/l1:state",
+        "//src/v/cloud_topics/level_one:state",
         "//src/v/container:chunked_hash_map",
         "//src/v/container:fragmented_vector",
         "//src/v/model",

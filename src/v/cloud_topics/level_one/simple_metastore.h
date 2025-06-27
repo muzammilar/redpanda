@@ -10,8 +10,8 @@
 #pragma once
 
 #include "base/seastarx.h"
-#include "cloud_topics/l1/metastore.h"
-#include "cloud_topics/l1/state.h"
+#include "cloud_topics/level_one/metastore.h"
+#include "cloud_topics/level_one/state.h"
 
 #include <seastar/core/future.hh>
 
@@ -24,7 +24,7 @@ public:
     ss::future<std::expected<offsets_response, errc>>
     get_offsets(const model::topic_id_partition&) override;
 
-    ss::future<std::expected<std::monostate, errc>>
+    ss::future<std::expected<void, errc>>
     add_objects(const chunked_vector<object_metadata>&) override;
 
     ss::future<std::expected<object_response, errc>>

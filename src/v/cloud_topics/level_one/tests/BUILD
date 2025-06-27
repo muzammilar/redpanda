@@ -8,7 +8,7 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cloud_topics:types",
-        "//src/v/cloud_topics/l1:simple_metastore",
+        "//src/v/cloud_topics/level_one:simple_metastore",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
     ],
@@ -22,10 +22,10 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/bytes:iobuf",
-        "//src/v/cloud_topics/l1:state",
+        "//src/v/cloud_topics/level_one:state",
         "//src/v/serde",
-        "//src/v/serde:uuid",
         "//src/v/serde:named_type",
+        "//src/v/serde:uuid",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
     ],
@@ -39,8 +39,8 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cloud_topics:types",
-        "//src/v/cloud_topics/l1:state",
-        "//src/v/cloud_topics/l1:state_update",
+        "//src/v/cloud_topics/level_one:state",
+        "//src/v/cloud_topics/level_one:state_update",
         "//src/v/container:fragmented_vector",
         "//src/v/model",
         "//src/v/test_utils:gtest",

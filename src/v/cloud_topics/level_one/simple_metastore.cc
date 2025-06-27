@@ -7,10 +7,10 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
-#include "cloud_topics/l1/simple_metastore.h"
+#include "cloud_topics/level_one/simple_metastore.h"
 
-#include "cloud_topics/l1/state.h"
-#include "cloud_topics/l1/state_update.h"
+#include "cloud_topics/level_one/state.h"
+#include "cloud_topics/level_one/state_update.h"
 
 namespace experimental::cloud_topics::l1 {
 
@@ -45,7 +45,7 @@ simple_metastore::get_offsets(const model::topic_id_partition& tpr) {
     };
 }
 
-ss::future<std::expected<std::monostate, metastore::errc>>
+ss::future<std::expected<void, metastore::errc>>
 simple_metastore::add_objects(const chunked_vector<object_metadata>& objects) {
     chunked_vector<new_object> new_objects;
     for (const auto& o : objects) {
@@ -57,7 +57,7 @@ simple_metastore::add_objects(const chunked_vector<object_metadata>& objects) {
     }
     auto apply_res = update_res->apply(state_);
     vassert(apply_res.has_value(), "Apply must succeed if can_apply() is true");
-    co_return std::monostate{};
+    co_return std::expected<void, metastore::errc>{};
 }
 
 ss::future<std::expected<metastore::object_response, metastore::errc>>

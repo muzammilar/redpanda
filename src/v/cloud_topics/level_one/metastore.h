@@ -84,7 +84,7 @@ public:
     // Adds the given objects to the metastore. If any are invalid, e.g.
     // because they break an invariant of a partition's offset ranges, all
     // objects are rejected.
-    virtual ss::future<std::expected<std::monostate, errc>>
+    virtual ss::future<std::expected<void, errc>>
     add_objects(const chunked_vector<object_metadata>&) = 0;
 
     // Finds the first object of a given partition with data greater than or

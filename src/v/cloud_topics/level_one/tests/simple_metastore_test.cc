@@ -7,7 +7,7 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
-#include "cloud_topics/l1/simple_metastore.h"
+#include "cloud_topics/level_one/simple_metastore.h"
 #include "cloud_topics/types.h"
 
 #include <gtest/gtest.h>

@@ -9,7 +9,7 @@
  */
 
 #include "bytes/iobuf.h"
-#include "cloud_topics/l1/state.h"
+#include "cloud_topics/level_one/state.h"
 
 #include <gtest/gtest.h>
 

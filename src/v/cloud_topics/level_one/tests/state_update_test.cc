@@ -10,7 +10,7 @@
 
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
-#include "cloud_topics/l1/state_update.h"
+#include "cloud_topics/level_one/state_update.h"
 #include "cloud_topics/types.h"
 #include "model/fundamental.h"
 #include "utils/uuid.h"

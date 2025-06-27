@@ -8,7 +8,7 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
-#include "cloud_topics/l1/state.h"
+#include "cloud_topics/level_one/state.h"
 
 #include "model/namespace.h"
 

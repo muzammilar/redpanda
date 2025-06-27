@@ -7,7 +7,7 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
-#include "cloud_topics/l1/state_update.h"
+#include "cloud_topics/level_one/state_update.h"
 
 #include "model/fundamental.h"
 
