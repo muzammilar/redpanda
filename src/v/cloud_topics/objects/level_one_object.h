@@ -214,7 +214,7 @@ struct object_index
     // result = l1::object_index::read_footer(std::move(missing));
     // return std::get<l1::object_index>(result);
     // ```
-    static std::variant<object_index, size_t> read_footer(iobuf);
+    static ss::future<std::variant<object_index, size_t>> read_footer(iobuf);
 };
 
 // A builder of an l1 object, which is a collection of partitions.

@@ -207,7 +207,8 @@ object_index object_index::copy() const {
     return copy;
 }
 
-std::variant<object_index, size_t> object_index::read_footer(iobuf buf) {
+ss::future<std::variant<object_index, size_t>>
+object_index::read_footer(iobuf buf) {
     if (buf.size_bytes() < sizeof(uint32_t)) {
         throw std::runtime_error(fmt::format(
           "expected at least {} bytes in footer, got: {}",
@@ -234,9 +235,9 @@ std::variant<object_index, size_t> object_index::read_footer(iobuf buf) {
               p.bytes_left(),
               size));
         }
-        return serde::read<object_index>(p);
+        co_return co_await serde::read_async<object_index>(p);
     }
-    return (footer_size + sizeof(uint32_t)) - buf.size_bytes();
+    co_return (footer_size + sizeof(uint32_t)) - buf.size_bytes();
 }
 
 namespace {
@@ -323,14 +324,15 @@ private:
     }
 
     template<typename T>
-    ss::future<> serde_write_to_stream(data_type dt, T&& data) {
+    ss::future<> serde_write_to_stream(data_type dt, T data) {
         iobuf b;
         b.append(as_bytes(dt));
-        auto serialized = serde::to_iobuf(std::forward<T>(data));
+        iobuf serialized;
+        co_await serde::write_async(serialized, std::move(data));
         b.append(as_bytes<uint32_t>(serialized.size_bytes()));
         b.append(std::move(serialized));
         _offset += b.size_bytes();
-        return write_iobuf_to_output_stream(std::move(b), _output);
+        co_await write_iobuf_to_output_stream(std::move(b), _output);
     }
 
     ss::future<> write_batch_to_stream(model::record_batch batch) {
@@ -395,7 +397,8 @@ private:
         }
         auto size = from_bytes<uint32_t>(size_prefix_buf.get());
         auto buf = co_await read_iobuf_exactly(_input, size);
-        co_return serde::from_iobuf<T>(std::move(buf));
+        auto parser = iobuf_parser(std::move(buf));
+        co_return co_await serde::read_async<T>(parser);
     }
 
     ss::future<model::record_batch> read_next_batch() {

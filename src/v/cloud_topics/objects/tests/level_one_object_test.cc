@@ -490,8 +490,11 @@ TEST(L1Objects, FullScan) {
     EXPECT_EQ(info.size_bytes, object.size_bytes());
     std::variant<object_index, size_t> read_footer_result;
     ASSERT_NO_THROW(
-      read_footer_result = object_index::read_footer(object.share(
-        info.footer_offset, object.size_bytes() - info.footer_offset)));
+      read_footer_result = object_index::read_footer(
+                             object.share(
+                               info.footer_offset,
+                               object.size_bytes() - info.footer_offset))
+                             .get());
     ASSERT_TRUE(std::holds_alternative<object_index>(read_footer_result));
     EXPECT_EQ(info.index, std::get<object_index>(read_footer_result));
     for (size_t missing_len : std::to_array<size_t>(
@@ -501,7 +504,9 @@ TEST(L1Objects, FullScan) {
         size_t offset = info.footer_offset + missing_len;
         ASSERT_NO_THROW(
           read_footer_result = object_index::read_footer(
-            object.share(offset, object.size_bytes() - offset)));
+                                 object.share(
+                                   offset, object.size_bytes() - offset))
+                                 .get());
         EXPECT_THAT(
           read_footer_result, testing::VariantWith<size_t>(missing_len));
     }
