@@ -42,6 +42,10 @@ enum class data_type : uint8_t {
     footer = 2,
 };
 
+// NOTE: we currently don't use serde for this serialization as to not pay the
+// tax of creating an iobuf and iobuf_parser just to read a byte for the
+// data_type or read 4 bytes for the size of a serde serialized object.
+
 template<typename T>
 requires std::is_integral_v<T> || std::is_scoped_enum_v<T>
          || reflection::is_rp_named_type<T>
@@ -51,18 +55,19 @@ constexpr auto as_bytes(T value) {
     if constexpr (std::is_scoped_enum_v<T>) {
         return std::bit_cast<
           std::array<char, sizeof(std::underlying_type_t<T>)>,
-          std::underlying_type_t<T>>(std::to_underlying(value));
+          std::underlying_type_t<T>>(ss::cpu_to_le(std::to_underlying(value)));
     } else if constexpr (
       reflection::is_rp_named_type<T> || std::is_same_v<model::timestamp, T>) {
         return std::bit_cast<
           std::array<char, sizeof(typename T::type)>,
-          typename T::type>(value());
+          typename T::type>(ss::cpu_to_le(value()));
     } else if constexpr (std::is_same_v<model::record_batch_attributes, T>) {
         return std::bit_cast<
           std::array<char, sizeof(typename T::type)>,
-          typename T::type>(value.value());
+          typename T::type>(ss::cpu_to_le(value.value()));
     } else {
-        return std::bit_cast<std::array<char, sizeof(T)>, T>(value);
+        return std::bit_cast<std::array<char, sizeof(T)>, T>(
+          ss::cpu_to_le(value));
     }
 }
 
@@ -75,17 +80,17 @@ constexpr T from_bytes(const void* ptr) {
     if constexpr (std::is_scoped_enum_v<T>) {
         std::underlying_type_t<T> value;
         std::memcpy(&value, ptr, sizeof(value));
-        return static_cast<T>(value);
+        return static_cast<T>(ss::le_to_cpu(value));
     } else if constexpr (
       reflection::is_rp_named_type<T> || std::is_same_v<model::timestamp, T>
       || std::is_same_v<model::record_batch_attributes, T>) {
         typename T::type value;
         std::memcpy(&value, ptr, sizeof(value));
-        return T(value);
+        return T(ss::le_to_cpu(value));
     } else {
         T value;
         std::memcpy(&value, ptr, sizeof(value));
-        return value;
+        return ss::le_to_cpu(value);
     }
 }
 
@@ -425,7 +430,8 @@ public:
               sizeof(data_type),
               dt_buf.size()));
         }
-        switch (from_bytes<data_type>(dt_buf.get())) {
+        auto dt = from_bytes<data_type>(dt_buf.get());
+        switch (dt) {
         case data_type::kafka_batch:
             co_return co_await read_next_batch();
         case data_type::partition_marker:
@@ -433,6 +439,8 @@ public:
         case data_type::footer:
             co_return co_await read_next_serde<footer>();
         }
+        throw std::runtime_error(fmt::format(
+          "unknown data type in object: {}", std::to_underlying(dt)));
     }
 
     ss::future<> close() final { return _input.close(); }
