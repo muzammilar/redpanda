@@ -70,8 +70,11 @@ private:
         bool topic_scoped_work_done;
         void clear();
     };
-    using topic_map_t
-      = chunked_hash_map<model::topic_namespace, topic_reconciliation_state>;
+    using topic_map_t = chunked_hash_map<
+      model::topic_namespace,
+      topic_reconciliation_state,
+      model::topic_namespace_hash,
+      model::topic_namespace_eq>;
     using partition_consumer_group_map_t
       = chunked_hash_map<model::partition_id, chunked_vector<consumer_group>>;
     struct migration_reconciliation_state {
@@ -236,24 +239,33 @@ private:
     std::optional<std::reference_wrapper<replica_work_state>>
     get_replica_work_state(const model::ntp& ntp);
     bool has_local_replica(const model::ntp& ntp);
+    const inbound_topic& get_inbound_topic(
+      const model::topic_namespace_view& nt,
+      const inbound_migration& im,
+      id migration_id) const;
 
     inbound_partition_work_info get_partition_work_info(
-      const model::ntp& ntp, const inbound_migration& im, id migration_id);
+      const model::ntp& ntp,
+      const inbound_migration& im,
+      id migration_id) const;
     outbound_partition_work_info get_partition_work_info(
-      const model::ntp& ntp, const outbound_migration& om, id migration_id);
+      const model::ntp& ntp,
+      const outbound_migration& om,
+      id migration_id) const;
     partition_work_info get_partition_work_info(
-      const model::ntp& ntp, const migration_metadata& metadata);
+      const model::ntp& ntp, const migration_metadata& metadata) const;
 
     inbound_topic_work_info get_topic_work_info(
       const model::topic_namespace& nt,
       const inbound_migration& im,
-      id migration_id);
+      id migration_id) const;
     outbound_topic_work_info get_topic_work_info(
       const model::topic_namespace& nt,
       const outbound_migration& om,
-      id migration_id);
+      id migration_id) const;
     topic_work_info get_topic_work_info(
-      const model::topic_namespace& nt, const migration_metadata& metadata);
+      const model::topic_namespace& nt,
+      const migration_metadata& metadata) const;
 
     template<class M>
     struct migration_direction_tag {};

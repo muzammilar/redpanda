@@ -418,7 +418,7 @@ ss::future<> backend::schedule_topic_work(model::topic_namespace nt) {
     auto migration_id = it->second;
 
     auto& mrstate = _migration_states.find(migration_id)->second;
-    auto& tstate = mrstate.outstanding_topics[nt];
+    auto& tstate = mrstate.outstanding_topics.at(nt);
     if (!tstate.topic_scoped_work_needed || tstate.topic_scoped_work_done) {
         co_return;
     }
@@ -433,11 +433,12 @@ ss::future<> backend::schedule_topic_work(model::topic_namespace nt) {
       .info = get_topic_work_info(nt, maybe_migration->get())};
 
     ssx::spawn_with_gate(
-      _gate, [this, nt = std::move(nt), tw = std::move(tw)]() {
-          return do_topic_work(nt, tw).then([this](topic_work_result&& twr) {
-              _topic_work_results.push_back(std::move(twr));
-              return wakeup();
-          });
+      _gate, [this, nt = std::move(nt), tw = std::move(tw)]() mutable {
+          return do_topic_work(std::move(nt), std::move(tw))
+            .then([this](topic_work_result&& twr) {
+                _topic_work_results.push_back(std::move(twr));
+                return wakeup();
+            });
       });
 }
 
@@ -877,12 +878,10 @@ ss::future<> backend::handle_migration_update(id id) {
 
     auto new_ref = _table.get_migration(id);
     // copying as it may go from the table on scheduling points
-    auto new_metadata = new_ref ? std::make_optional<migration_metadata>(
-                                    new_ref->get().copy())
-                                : std::nullopt;
-    auto new_state = new_metadata
-                       ? std::make_optional<state>(new_metadata->state)
-                       : std::nullopt;
+    auto new_metadata = new_ref.transform(
+      [](const auto& new_ref) { return new_ref.get().copy(); });
+    auto new_state = new_metadata.transform(
+      [](const auto& md) { return md.state; });
     vlog(dm_log.debug, "migration {} new state is {}", id, new_state);
 
     work_scope new_scope;
@@ -1389,24 +1388,42 @@ backend::get_replica_work_state(const model::ntp& ntp) {
     return std::nullopt;
 }
 
+const inbound_topic& backend::get_inbound_topic(
+  const model::topic_namespace_view& nt,
+  const inbound_migration& im,
+  id migration_id) const {
+    auto it = _migration_states.find(migration_id);
+    vassert(
+      it != _migration_states.end(),
+      "migration {} not found in migration states",
+      migration_id);
+    auto idx = it->second.outstanding_topics.at(nt).idx_in_migration;
+    vlog(
+      dm_log.trace,
+      "get_inbound_topic: migration {}, topic {}, idx {}, topics: {}",
+      migration_id,
+      nt,
+      idx,
+      im.topics);
+    return im.topics[idx];
+}
+
 inbound_partition_work_info backend::get_partition_work_info(
-  const model::ntp& ntp, const inbound_migration& im, id migration_id) {
-    auto idx = _migration_states.find(migration_id)
-                 ->second.outstanding_topics[{ntp.ns, ntp.tp.topic}]
-                 .idx_in_migration;
-    auto& inbound_topic = im.topics[idx];
+  const model::ntp& ntp, const inbound_migration& im, id migration_id) const {
+    const auto& inbound_topic = get_inbound_topic(
+      {ntp.ns, ntp.tp.topic}, im, migration_id);
     return {
       .source = inbound_topic.source_topic_name,
       .cloud_storage_location = inbound_topic.cloud_storage_location};
 }
 
 outbound_partition_work_info backend::get_partition_work_info(
-  const model::ntp&, const outbound_migration& om, id) {
+  const model::ntp&, const outbound_migration& om, id) const {
     return {om.copy_to};
 }
 
 partition_work_info backend::get_partition_work_info(
-  const model::ntp& ntp, const migration_metadata& metadata) {
+  const model::ntp& ntp, const migration_metadata& metadata) const {
     return std::visit(
       [this, &ntp, &metadata](auto& migration) -> partition_work_info {
           return get_partition_work_info(ntp, migration, metadata.id);
@@ -1417,11 +1434,9 @@ partition_work_info backend::get_partition_work_info(
 inbound_topic_work_info backend::get_topic_work_info(
   const model::topic_namespace& nt,
   const inbound_migration& im,
-  id migration_id) {
-    auto idx = _migration_states.find(migration_id)
-                 ->second.outstanding_topics[nt]
-                 .idx_in_migration;
-    auto& inbound_topic = im.topics[idx];
+  id migration_id) const {
+    const auto& inbound_topic = get_inbound_topic(nt, im, migration_id);
+
     return {
       .source = inbound_topic.alias
                   ? std::make_optional(inbound_topic.source_topic_name)
@@ -1430,12 +1445,12 @@ inbound_topic_work_info backend::get_topic_work_info(
 }
 
 outbound_topic_work_info backend::get_topic_work_info(
-  const model::topic_namespace&, const outbound_migration& om, id) {
+  const model::topic_namespace&, const outbound_migration& om, id) const {
     return {om.copy_to};
 }
 
 topic_work_info backend::get_topic_work_info(
-  const model::topic_namespace& nt, const migration_metadata& metadata) {
+  const model::topic_namespace& nt, const migration_metadata& metadata) const {
     return std::visit(
       [this, &nt, &metadata](auto& migration) -> topic_work_info {
           return get_topic_work_info(nt, migration, metadata.id);
