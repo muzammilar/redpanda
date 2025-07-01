@@ -29,15 +29,21 @@ concept no_auth = std::is_same_v<T, auth::none>
 template<typename T>
 concept requires_auth = !no_auth<T>;
 
+struct auth_params {
+    security::acl_principal principal;
+    security::acl_host host;
+
+    explicit auth_params(const server::request_t& rq)
+      : principal{security::principal_type::user, rq.user.name}
+      , host{rq.req->get_client_address().addr()} {}
+};
+
 } // namespace detail
 
-void handle_authz(
-  const server::request_t& rq,
-  const auth& auth,
-  request_auth_result& auth_result) {
-    auth_result.pass();
+namespace {
 
-    // Extract the resource from the request
+auth::resource
+extract_resource_from_request(const server::request_t& rq, const auth& auth) {
     auto resource = auth.get_resource();
     ss::visit(
       resource,
@@ -45,33 +51,45 @@ void handle_authz(
           sub = parse::request_param<subject>(*rq.req, "subject");
       },
       [](const auto&) {});
+    return resource;
+}
 
-    security::acl_principal principal{
-      security::principal_type::user, rq.user.name};
-    security::acl_host host{rq.req->get_client_address().addr()};
-    security::acl_operation op = auth.get_op().value_or(
-      security::acl_operation::all);
+void throw_unauthorized() {
+    throw ss::httpd::base_exception(
+      "Forbidden (missing required ACLs)",
+      ss::http::reply::status_type::forbidden);
+}
+
+} // namespace
+
+void handle_authz(
+  const server::request_t& rq,
+  const auth& auth,
+  request_auth_result& auth_result) {
+    auth_result.pass();
+
+    auto params = detail::auth_params{rq};
+    auto op = auth.get_op().value_or(security::acl_operation::all);
+
+    auto resource = extract_resource_from_request(rq, auth);
 
     // Check Authorization
     auto authz_result = ss::visit(
       resource,
       [&](const detail::requires_auth auto& resource_name) {
           return rq.service().authorizor().authorized(
-            resource_name, op, principal, host);
+            resource_name, op, params.principal, params.host);
       },
       [&](const detail::no_auth auto&) {
           return security::auth_result::authz_disabled(
-            principal, host, op, registry_resource{});
+            params.principal, params.host, op, registry_resource{});
       });
 
     if (authz_result.is_authorized()) {
         // TODO(CORE-12275): audit success
     } else {
         // TODO(CORE-12275): audit failure
-
-        throw ss::httpd::base_exception(
-          "Forbidden (missing required ACLs)",
-          ss::http::reply::status_type::forbidden);
+        throw_unauthorized();
     }
 }
 
