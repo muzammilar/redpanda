@@ -686,6 +686,12 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
                     backoff_sec=1,
                     err_msg=f"failed to produce {msg_count} messages in {timeout_sec} seconds")
 
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.stop_if_running()
+
             def stop_if_running(self):
                 if self.producer:
                     self.producer.stop()
@@ -897,207 +903,221 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
 
         self.client().create_topic(workload_topic)
 
-        producer = self.start_producer(workload_topic.name)
+        with self.start_producer(workload_topic.name) as producer:
+            groups = ["consumer-group-id"] if include_groups else []
 
-        groups = ["consumer-group-id"] if include_groups else []
+            tl_topic_name = workload_topic.name if transfer_leadership else None
+            with self.tl_thread(tl_topic_name):
+                workload_ns_topic = make_namespaced_topic(workload_topic.name)
+                out_migration = OutboundDataMigration(
+                    topics=[workload_ns_topic], consumer_groups=groups)
+                out_migration_id = self.create_and_wait(out_migration)
 
-        tl_topic_name = workload_topic.name if transfer_leadership else None
-        with self.tl_thread(tl_topic_name):
-            workload_ns_topic = make_namespaced_topic(workload_topic.name)
-            out_migration = OutboundDataMigration(topics=[workload_ns_topic],
-                                                  consumer_groups=groups)
-            out_migration_id = self.create_and_wait(out_migration)
-
-            self.admin.execute_data_migration_action(out_migration_id,
-                                                     MigrationAction.prepare)
-            if cancellation == CancellationStage(dir='out', stage='preparing'):
-                self.wait_for_migration_states(out_migration_id,
-                                               ['preparing', 'prepared'])
-                return self.cancel_outbound(out_migration_id,
-                                            workload_topic.name, producer)
-
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=True,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=True,
-                                       expect_writable=True)
-
-            self.wait_for_migration_states(out_migration_id, ['prepared'])
-
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=True,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=True,
-                                       expect_writable=True)
-            if cancellation == CancellationStage(dir='out', stage='prepared'):
-                return self.cancel_outbound(out_migration_id,
-                                            workload_topic.name, producer)
-
-            self.admin.execute_data_migration_action(out_migration_id,
-                                                     MigrationAction.execute)
-            if cancellation == CancellationStage(dir='out', stage='executing'):
-                self.wait_for_migration_states(out_migration_id,
-                                               ['executing', 'executed'])
-                return self.cancel_outbound(out_migration_id,
-                                            workload_topic.name, producer)
-
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=True,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=True,
-                                       expect_writable=None)
-
-            self.wait_for_migration_states(out_migration_id, ['executed'])
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=True,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=True,
-                                       expect_writable=False)
-            if cancellation == CancellationStage(dir='out', stage='executed'):
-                return self.cancel_outbound(out_migration_id,
-                                            workload_topic.name, producer)
-
-            time_before_final_action = now()
-            self.admin.execute_data_migration_action(out_migration_id,
-                                                     MigrationAction.finish)
-
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=None,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=False,
-                                       expect_writable=False)
-
-            self.wait_for_migration_states(out_migration_id,
-                                           ['cut_over', 'finished'],
-                                           time_before_final_action)
-
-            producer.stop_if_running()
-
-            self.assert_no_topics()
-
-            self.wait_for_migration_states(out_migration_id, ['finished'],
-                                           time_before_final_action)
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=False,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=False,
-                                       expect_writable=False)
-            self.admin.delete_data_migration(out_migration_id)
-            self.validate_topic_access(topic=workload_topic.name,
-                                       expect_present=False,
-                                       expect_metadata_changeable=False,
-                                       expect_readable=False,
-                                       expect_writable=False)
-
-        # attach topic back
-        if use_alias:
-            inbound_topic_name = "aliased-workload-topic"
-            alias = make_namespaced_topic(topic=inbound_topic_name)
-        else:
-            inbound_topic_name = workload_topic.name
-            alias = None
-
-        tl_topic_name = inbound_topic_name if transfer_leadership else None
-        with self.tl_thread(tl_topic_name):
-            remounted = False
-            # two cycles max: to cancel halfway and to complete + check e2e
-            while not remounted:
-                in_migration = InboundDataMigration(
-                    topics=[InboundTopic(workload_ns_topic, alias=alias)],
-                    consumer_groups=groups)
-                in_migration_id = self.create_and_wait(in_migration)
-
-                # check if topic that is being migrated can not be created even if
-                # migration has not yet been prepared
-                self._do_validate_topic_operation(
-                    inbound_topic_name,
-                    "creation",
-                    expected_to_pass=False,
-                    operation=lambda topic: rpk.create_topic(topic=topic,
-                                                             replicas=3))
                 self.admin.execute_data_migration_action(
-                    in_migration_id, MigrationAction.prepare)
-
-                if cancellation == CancellationStage(dir='in',
+                    out_migration_id, MigrationAction.prepare)
+                if cancellation == CancellationStage(dir='out',
                                                      stage='preparing'):
-                    cancellation = None
-                    self.wait_for_migration_states(in_migration_id,
+                    self.wait_for_migration_states(out_migration_id,
                                                    ['preparing', 'prepared'])
-                    self.cancel_inbound(in_migration_id, inbound_topic_name)
-                    continue
+                    return self.cancel_outbound(out_migration_id,
+                                                workload_topic.name, producer)
 
-                self.validate_topic_access(topic=inbound_topic_name,
+                self.validate_topic_access(topic=workload_topic.name,
+                                           expect_present=True,
+                                           expect_metadata_changeable=False,
+                                           expect_readable=True,
+                                           expect_writable=True)
+
+                self.wait_for_migration_states(out_migration_id, ['prepared'])
+
+                self.validate_topic_access(topic=workload_topic.name,
+                                           expect_present=True,
+                                           expect_metadata_changeable=False,
+                                           expect_readable=True,
+                                           expect_writable=True)
+                if cancellation == CancellationStage(dir='out',
+                                                     stage='prepared'):
+                    return self.cancel_outbound(out_migration_id,
+                                                workload_topic.name, producer)
+
+                self.admin.execute_data_migration_action(
+                    out_migration_id, MigrationAction.execute)
+                if cancellation == CancellationStage(dir='out',
+                                                     stage='executing'):
+                    self.wait_for_migration_states(out_migration_id,
+                                                   ['executing', 'executed'])
+                    return self.cancel_outbound(out_migration_id,
+                                                workload_topic.name, producer)
+
+                self.validate_entities_access(entities=entities,
+                                              expect_present=True,
+                                              expect_metadata_changeable=False,
+                                              expect_readable=True,
+                                              expect_writable=None)
+
+                self.wait_for_migration_states(out_migration_id, ['executed'])
+                self.validate_topic_access(topic=workload_topic.name,
+                                           expect_present=True,
+                                           expect_metadata_changeable=False,
+                                           expect_readable=True,
+                                           expect_writable=False)
+                if cancellation == CancellationStage(dir='out',
+                                                     stage='executed'):
+                    return self.cancel_outbound(out_migration_id,
+                                                workload_topic.name, producer)
+
+                time_before_final_action = now()
+                self.admin.execute_data_migration_action(
+                    out_migration_id, MigrationAction.finish)
+
+                self.validate_topic_access(topic=workload_topic.name,
                                            expect_present=None,
                                            expect_metadata_changeable=False,
                                            expect_readable=False,
                                            expect_writable=False)
 
-                self.wait_for_migration_states(in_migration_id, ['prepared'])
-
-                self.validate_topic_access(topic=inbound_topic_name,
-                                           expect_present=True,
-                                           expect_metadata_changeable=False,
-                                           expect_readable=False,
-                                           expect_writable=False)
-
-                if cancellation == CancellationStage(dir='in',
-                                                     stage='prepared'):
-                    cancellation = None
-                    self.cancel_inbound(in_migration_id, inbound_topic_name)
-                    continue
-
-                topics = list(rpk.list_topics())
-                self.logger.info(
-                    f"topic list after inbound migration is prepared: {topics}"
-                )
-                assert inbound_topic_name in topics, "workload topic should be present after the inbound migration is prepared"
-
-                self.admin.execute_data_migration_action(
-                    in_migration_id, MigrationAction.execute)
-                if cancellation == CancellationStage(dir='in',
-                                                     stage='executing'):
-                    cancellation = None
-                    self.wait_for_migration_states(in_migration_id,
-                                                   ['executing', 'executed'])
-                    self.cancel_inbound(in_migration_id, inbound_topic_name)
-                    continue
-
-                self.validate_topic_access(topic=inbound_topic_name,
-                                           expect_present=True,
-                                           expect_metadata_changeable=False,
-                                           expect_readable=False,
-                                           expect_writable=False)
-
-                self.wait_for_migration_states(in_migration_id, ['executed'])
-
-                self.validate_topic_access(topic=inbound_topic_name,
-                                           expect_present=True,
-                                           expect_metadata_changeable=False,
-                                           expect_readable=False,
-                                           expect_writable=False)
-
-                if cancellation == CancellationStage(dir='in',
-                                                     stage='executed'):
-                    cancellation = None
-                    self.cancel_inbound(in_migration_id, inbound_topic_name)
-                    continue
-
-                time_before_final_action = now()
-                self.admin.execute_data_migration_action(
-                    in_migration_id, MigrationAction.finish)
-
-                self.wait_for_migration_states(in_migration_id, ['finished'],
+                self.wait_for_migration_states(out_migration_id,
+                                               ['cut_over', 'finished'],
                                                time_before_final_action)
-                self.admin.delete_data_migration(in_migration_id)
-                # now the topic should be fully operational
-                self.consume_and_validate(inbound_topic_name,
-                                          producer.acked_records)
-                self.validate_topic_access(topic=inbound_topic_name,
-                                           expect_present=True,
-                                           expect_metadata_changeable=True,
-                                           expect_readable=True,
-                                           expect_writable=True)
-                remounted = True
+
+                producer.stop_if_running()
+
+                self.assert_no_topics()
+
+                self.wait_for_migration_states(out_migration_id, ['finished'],
+                                               time_before_final_action)
+                self.validate_topic_access(topic=workload_topic.name,
+                                           expect_present=False,
+                                           expect_metadata_changeable=False,
+                                           expect_readable=False,
+                                           expect_writable=False)
+                self.admin.delete_data_migration(out_migration_id)
+                self.validate_topic_access(topic=workload_topic.name,
+                                           expect_present=False,
+                                           expect_metadata_changeable=False,
+                                           expect_readable=False,
+                                           expect_writable=False)
+
+            # attach topic back
+            if use_alias:
+                inbound_topic_name = "aliased-workload-topic"
+                alias = make_namespaced_topic(topic=inbound_topic_name)
+            else:
+                inbound_topic_name = workload_topic.name
+                alias = None
+
+            tl_topic_name = inbound_topic_name if transfer_leadership else None
+            with self.tl_thread(tl_topic_name):
+                remounted = False
+                # two cycles max: to cancel halfway and to complete + check e2e
+                while not remounted:
+                    in_migration = InboundDataMigration(
+                        topics=[InboundTopic(workload_ns_topic, alias=alias)],
+                        consumer_groups=groups)
+                    in_migration_id = self.create_and_wait(in_migration)
+
+                    # check if topic that is being migrated can not be created even if
+                    # migration has not yet been prepared
+                    self._do_validate_topic_operation(
+                        inbound_topic_name,
+                        "creation",
+                        expected_to_pass=False,
+                        operation=lambda topic: rpk.create_topic(topic=topic,
+                                                                 replicas=3))
+                    self.admin.execute_data_migration_action(
+                        in_migration_id, MigrationAction.prepare)
+
+                    if cancellation == CancellationStage(dir='in',
+                                                         stage='preparing'):
+                        cancellation = None
+                        self.wait_for_migration_states(
+                            in_migration_id, ['preparing', 'prepared'])
+                        self.cancel_inbound(in_migration_id,
+                                            inbound_topic_name)
+                        continue
+
+                    self.validate_topic_access(
+                        topic=inbound_topic_name,
+                        expect_present=None,
+                        expect_metadata_changeable=False,
+                        expect_readable=False,
+                        expect_writable=False)
+
+                    self.wait_for_migration_states(in_migration_id,
+                                                   ['prepared'])
+
+                    self.validate_topic_access(
+                        topic=inbound_topic_name,
+                        expect_present=True,
+                        expect_metadata_changeable=False,
+                        expect_readable=False,
+                        expect_writable=False)
+
+                    if cancellation == CancellationStage(dir='in',
+                                                         stage='prepared'):
+                        cancellation = None
+                        self.cancel_inbound(in_migration_id,
+                                            inbound_topic_name)
+                        continue
+
+                    topics = list(rpk.list_topics())
+                    self.logger.info(
+                        f"topic list after inbound migration is prepared: {topics}"
+                    )
+                    assert inbound_topic_name in topics, "workload topic should be present after the inbound migration is prepared"
+
+                    self.admin.execute_data_migration_action(
+                        in_migration_id, MigrationAction.execute)
+                    if cancellation == CancellationStage(dir='in',
+                                                         stage='executing'):
+                        cancellation = None
+                        self.wait_for_migration_states(
+                            in_migration_id, ['executing', 'executed'])
+                        self.cancel_inbound(in_migration_id,
+                                            inbound_topic_name)
+                        continue
+
+                    self.validate_topic_access(
+                        topic=inbound_topic_name,
+                        expect_present=True,
+                        expect_metadata_changeable=False,
+                        expect_readable=False,
+                        expect_writable=False)
+
+                    self.wait_for_migration_states(in_migration_id,
+                                                   ['executed'])
+
+                    self.validate_topic_access(
+                        topic=inbound_topic_name,
+                        expect_present=True,
+                        expect_metadata_changeable=False,
+                        expect_readable=False,
+                        expect_writable=False)
+
+                    if cancellation == CancellationStage(dir='in',
+                                                         stage='executed'):
+                        cancellation = None
+                        self.cancel_inbound(in_migration_id,
+                                            inbound_topic_name)
+                        continue
+
+                    time_before_final_action = now()
+                    self.admin.execute_data_migration_action(
+                        in_migration_id, MigrationAction.finish)
+
+                    self.wait_for_migration_states(in_migration_id,
+                                                   ['finished'],
+                                                   time_before_final_action)
+                    self.admin.delete_data_migration(in_migration_id)
+                    # now the topic should be fully operational
+                    self.consume_and_validate(inbound_topic_name,
+                                              producer.acked_records)
+                    self.validate_topic_access(topic=inbound_topic_name,
+                                               expect_present=True,
+                                               expect_metadata_changeable=True,
+                                               expect_readable=True,
+                                               expect_writable=True)
+                    remounted = True
 
     @cluster(num_nodes=3, log_allow_list=MIGRATION_LOG_ALLOW_LIST)
     def test_list_mountable_topics(self):
