@@ -149,4 +149,44 @@ void handle_get_schemas_ids_id_authz(
     }
 }
 
+void handle_get_subjects_authz(
+  const server::request_t& rq,
+  std::optional<request_auth_result>& auth_result,
+  chunked_vector<subject>& subjects) {
+    if (!auth_result.has_value()) {
+        // ACLs or authentication is disabled
+        return;
+    }
+
+    check_authenticated(*auth_result);
+
+    auto params = detail::auth_params{rq};
+
+    auto passing_results = chunked_vector<security::auth_result>{};
+    auto failing_results = chunked_vector<security::auth_result>{};
+
+    auto new_end = std::ranges::remove_if(subjects, [&](const auto& subject) {
+        auto res = rq.service().authorizor().authorized(
+          subject,
+          security::acl_operation::read,
+          params.principal,
+          params.host);
+        if (res.is_authorized()) {
+            passing_results.push_back(std::move(res));
+            return false; // keep
+        } else {
+            failing_results.push_back(std::move(res));
+            return true; // remove
+        }
+    });
+    subjects.erase_to_end(new_end.begin());
+
+    // TODO(CORE-12275): audit success with passing_results (since we always
+    // return a successful response)
+
+    if (!failing_results.empty()) {
+        // TODO(CORE-12275): audit failure with failing_results
+    }
+}
+
 } // namespace pandaproxy::schema_registry::enterprise
