@@ -1836,7 +1836,8 @@ ntp_archiver::schedule_uploads(model::offset max_offset_exclusive) {
 
     if (
       config::shard_local_cfg().cloud_storage_enable_compacted_topic_reupload()
-      && _parent.get_ntp_config().is_compacted()) {
+      && _parent.get_ntp_config().is_compacted()
+      && compacted_segments_upload_start < start_upload_offset) {
         params.push_back({
           .upload_kind = segment_upload_kind::compacted,
           .start_offset = compacted_segments_upload_start,
