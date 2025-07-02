@@ -58,6 +58,7 @@ ss::future<compaction_result> self_compact_segment(
   storage::readers_cache&,
   storage::storage_resources&,
   ss::sharded<features::feature_table>& feature_table,
+  kvstore& kvs,
   bool force_compaction = false);
 
 /// \brief, rebuilds a given segment's compacted index. This method acquires
@@ -112,7 +113,8 @@ ss::future<compaction_result> concatenate_and_rebuild_target_segment(
   storage::readers_cache& readers_cache,
   storage_resources& resources,
   ss::sharded<features::feature_table>& feature_table,
-  mutex& segment_rewrite_lock);
+  mutex& segment_rewrite_lock,
+  kvstore& kvs);
 
 ss::future<> write_concatenated_compacted_index(
   std::filesystem::path,
@@ -218,7 +220,8 @@ ss::future<storage::index_state> do_copy_segment_data(
   storage::compaction_config,
   storage::probe&,
   ss::rwlock::holder,
-  storage_resources&);
+  storage_resources&,
+  kvstore&);
 
 ss::future<> do_swap_data_file_handles(
   std::filesystem::path compacted,
@@ -235,10 +238,12 @@ float random_jitter(jitter_percents);
 enum class kvstore_key_type : int8_t {
     start_offset = 0,
     clean_segment = 1,
+    max_removed_offset = 2,
 };
 
 bytes start_offset_key(model::ntp ntp);
 bytes clean_segment_key(model::ntp ntp);
+bytes max_removed_offset_key(model::ntp ntp);
 
 struct clean_segment_value
   : serde::envelope<
@@ -396,7 +401,8 @@ ss::future<bool> should_keep(
   model::offset segment_last_offset,
   bool past_tombstone_delete_horizon,
   bool& may_have_tombstone_records,
-  bool& has_tx_batches) {
+  bool& has_tx_batches,
+  model::offset& max_removed_offset) {
     auto compaction_placeholder_enabled = feature_table.local().is_active(
       features::feature::compaction_placeholder_batch);
     auto is_last_batch = b.last_offset() == segment_last_offset;
@@ -435,6 +441,8 @@ ss::future<bool> should_keep(
     if (can_discard(b, r, ntp, past_tombstone_delete_horizon)) {
         if (r.is_tombstone()) {
             pb.add_removed_tombstone();
+            max_removed_offset = b.base_offset()
+                                 + model::offset_delta(r.offset_delta());
         }
         co_return false;
     }
@@ -451,5 +459,11 @@ ss::future<bool> should_keep(
 
     co_return keep;
 }
+
+std::optional<model::offset>
+read_max_removed_offset(kvstore&, const model::ntp&);
+
+ss::future<>
+write_max_removed_offset(kvstore&, const model::ntp&, model::offset);
 
 } // namespace storage::internal
