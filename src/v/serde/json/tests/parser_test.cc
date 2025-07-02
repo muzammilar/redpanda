@@ -9,12 +9,14 @@
  * by the Apache License, Version 2.0
  */
 
+#include "gmock/gmock.h"
 #include "serde/json/parser.h"
 #include "serde/json/tests/data.h"
 #include "test_utils/test.h"
 
 #include <gtest/gtest.h>
 
+using namespace testing;
 using namespace experimental::serde::json;
 
 constexpr std::string_view json_checker_pass1 = R"([
@@ -91,6 +93,14 @@ TEST_CORO(json_test_suite, parse) {
                                           << std::to_underlying(parser.token());
 }
 
+ss::future<> skip_tokens(parser& p, const std::vector<token>& tokens) {
+    for (const auto& t : tokens) {
+        ASSERT_TRUE_CORO(co_await p.next())
+          << "Expected next() to return true for token: " << t;
+        ASSERT_EQ_CORO(p.token(), t) << "Unexpected token, expected: " << t;
+    }
+}
+
 struct token_seq_test_case {
     std::string_view input;
     std::vector<token> expected_tokens;
@@ -98,12 +108,8 @@ struct token_seq_test_case {
 
 ss::future<> run_test_case(const token_seq_test_case& tc) {
     auto parser = experimental::serde::json::parser(iobuf::from(tc.input));
-    for (const auto& expected : tc.expected_tokens) {
-        ASSERT_TRUE_CORO(co_await parser.next())
-          << "Expected next() to return true for input: " << tc.input;
-        ASSERT_EQ_CORO(parser.token(), expected)
-          << "Unexpected token for input: " << tc.input;
-    }
+    ASSERT_NO_FATAL_FAILURE_CORO(
+      co_await skip_tokens(parser, tc.expected_tokens));
     ASSERT_FALSE_CORO(co_await parser.next())
       << "Expected next() to return false after all tokens for input: "
       << tc.input;
@@ -151,4 +157,214 @@ TEST_CORO(json_parser, truncated_json_always_errors) {
 
         ASSERT_EQ_CORO(p.token(), should_error ? token::error : token::eof);
     }
+}
+
+// Common input for skip_value tests
+constexpr std::string_view skip_value_input = R"({
+  "foo": {"a": 1, "b": [{"c": true, "d": null}]},
+  "bar": true
+})";
+
+TEST_CORO(json_parser, skip_value_whole_document) {
+    auto p = experimental::serde::json::parser(iobuf::from(skip_value_input));
+    ASSERT_TRUE_CORO(co_await p.next());
+    ASSERT_EQ_CORO(p.token(), token::start_object);
+    co_await p.skip_value();
+
+    ASSERT_EQ_CORO(p.token(), token::end_object);
+
+    SCOPED_TRACE("After skipping whole document");
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::eof,
+      }));
+}
+
+TEST_CORO(json_parser, skip_value_whole_without_next_call) {
+    auto p = experimental::serde::json::parser(iobuf::from(skip_value_input));
+    co_await p.skip_value();
+
+    SCOPED_TRACE("After skipping whole document");
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::eof,
+      }));
+}
+
+TEST_CORO(json_parser, skip_value_whole_without_next_call_bad_input) {
+    auto p = experimental::serde::json::parser(
+      iobuf::from(R"({"bad", ["input)"));
+    co_await p.skip_value();
+    ASSERT_EQ_CORO(p.token(), token::error);
+}
+
+TEST_CORO(json_parser, skip_value_whole_without_next_call_bad_input_2) {
+    auto p = experimental::serde::json::parser(iobuf::from(R"(["bad input])"));
+    co_await p.skip_value();
+    ASSERT_EQ_CORO(p.token(), token::error);
+}
+
+TEST_CORO(json_parser, skip_value_whole_without_next_call_bad_input_3) {
+    auto p = experimental::serde::json::parser(iobuf::from(R"({"key"})"));
+
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_object,
+        token::key,
+      }));
+
+    co_await p.skip_value();
+
+    ASSERT_EQ_CORO(p.token(), token::error);
+}
+
+TEST_CORO(json_parser, skip_value_key_with_value) {
+    auto p = experimental::serde::json::parser(iobuf::from(skip_value_input));
+
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_object,
+        token::key,
+      }));
+
+    // Skip over the value of "foo".
+    co_await p.skip_value();
+
+    ASSERT_EQ_CORO(p.token(), token::end_object);
+    ASSERT_TRUE_CORO(co_await p.next());
+
+    ASSERT_EQ_CORO(p.token(), token::key);
+    ASSERT_EQ_CORO(p.value_string(), iobuf::from("bar"));
+}
+
+TEST_CORO(json_parser, skip_value_object_value) {
+    auto p = experimental::serde::json::parser(iobuf::from(skip_value_input));
+
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_object,
+        token::key,
+        token::start_object,
+      }));
+
+    // Skip over just the object value.
+    co_await p.skip_value();
+
+    ASSERT_EQ_CORO(p.token(), token::end_object);
+    ASSERT_TRUE_CORO(co_await p.next());
+
+    ASSERT_EQ_CORO(p.token(), token::key);
+    ASSERT_EQ_CORO(p.value_string(), iobuf::from("bar"));
+}
+
+TEST_CORO(json_parser, skip_value_primitive_key_value) {
+    auto p = experimental::serde::json::parser(iobuf::from(skip_value_input));
+
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_object,
+        token::key,
+        token::start_object,
+        token::key,
+      }));
+
+    co_await p.skip_value();
+    ASSERT_EQ_CORO(p.token(), token::value_int);
+    ASSERT_TRUE_CORO(co_await p.next());
+
+    ASSERT_EQ_CORO(p.token(), token::key);
+    ASSERT_EQ_CORO(p.value_string(), iobuf::from("b"));
+}
+
+TEST_CORO(json_parser, skip_value_primitive_value) {
+    auto p = experimental::serde::json::parser(iobuf::from(skip_value_input));
+
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_object,
+        token::key,
+        token::start_object,
+        token::key,
+        token::value_int,
+      }));
+
+    co_await p.skip_value();
+    ASSERT_EQ_CORO(p.token(), token::value_int);
+    ASSERT_TRUE_CORO(co_await p.next());
+
+    ASSERT_EQ_CORO(p.token(), token::key);
+    ASSERT_EQ_CORO(p.value_string(), iobuf::from("b"));
+}
+
+TEST_CORO(json_parser, skip_value_entire_array) {
+    auto p = experimental::serde::json::parser(iobuf::from(R"(
+      [1, 2, [[]], [1, {"a": 1, "b": 2}]]
+    )"));
+
+    ASSERT_TRUE_CORO(co_await p.next());
+    ASSERT_EQ_CORO(p.token(), token::start_array);
+    co_await p.skip_value();
+    ASSERT_EQ_CORO(p.token(), token::end_array);
+    SCOPED_TRACE("After skipping entire array");
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::eof,
+      }));
+}
+
+TEST_CORO(json_parser, skip_value_nested_array) {
+    auto p = experimental::serde::json::parser(iobuf::from(R"(
+      [1, 2, [[[]]], [1, {"a": 1, "b": 2}]]
+    )"));
+
+    SCOPED_TRACE("Skip nested array");
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_array,
+        token::value_int,
+        token::value_int,
+        token::start_array,
+        token::start_array,
+      }));
+
+    SCOPED_TRACE("Skip nested array value");
+    co_await p.skip_value();
+
+    ASSERT_EQ_CORO(p.token(), token::end_array);
+
+    SCOPED_TRACE("After skipping nested array value");
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::end_array,
+        token::start_array,
+        token::value_int,
+      }));
+}
+
+TEST_CORO(json_parser, skip_value_bad_precondition) {
+    auto p = experimental::serde::json::parser(iobuf::from("[]"));
+
+    ASSERT_NO_FATAL_FAILURE_CORO(co_await skip_tokens(
+      p,
+      {
+        token::start_array,
+        token::end_array,
+      }));
+
+    co_await ss::async([&] {
+        EXPECT_THAT(
+          [&]() { p.skip_value().get(); },
+          ThrowsMessage<std::runtime_error>(
+            StrEq("skip_value called with unexpected token: end_array")));
+    });
 }
