@@ -95,6 +95,13 @@ checked<resolved_type, type_resolver::errc> translate_protobuf_schema(
     }
 }
 
+checked<resolved_type, type_resolver::errc> translate_json_schema(
+  const ppsr::json_schema_definition& json_def, ppsr::schema_id id) {
+    (void)json_def;
+    (void)id;
+    return type_resolver::errc::invalid_config;
+}
+
 struct schema_translating_visitor {
     schema_translating_visitor(
       iobuf b, ppsr::schema_id id, shared_schema_t schema)
@@ -137,8 +144,14 @@ struct schema_translating_visitor {
     }
 
     checked<type_and_buf, type_resolver::errc>
-    operator()(const ppsr::json_schema_definition&) {
-        return type_resolver::errc::bad_input;
+    operator()(const ppsr::json_schema_definition& json_def) {
+        auto tr_res = translate_json_schema(json_def, id);
+        if (tr_res.has_error()) {
+            return tr_res.error();
+        }
+        return type_and_buf{
+          .type = std::move(tr_res.value()),
+          .parsable_buf = std::move(buf_no_id)};
     }
 };
 
@@ -169,8 +182,12 @@ struct from_identifier_visitor {
           schema);
     }
     checked<resolved_type, type_resolver::errc>
-    operator()(const ppsr::json_schema_definition&) {
-        return type_resolver::errc::bad_input;
+    operator()(const ppsr::json_schema_definition& json_def) {
+        if (ident.protobuf_offsets) {
+            return type_resolver::errc::bad_input;
+        }
+
+        return translate_json_schema(json_def, ident.schema_id);
     }
 };
 
@@ -416,9 +433,9 @@ latest_subject_schema_resolver::resolve_buf_type(std::optional<iobuf> b) const {
           return translate_avro_schema(
             def, latest_schema.id, std::move(shared_schema));
       },
-      [](const ppsr::json_schema_definition&)
+      [&latest_schema](const ppsr::json_schema_definition& def)
         -> checked<resolved_type, type_resolver::errc> {
-          return type_resolver::errc::invalid_config;
+          return translate_json_schema(def, latest_schema.id);
       }));
     if (resolve_res.has_error()) {
         co_return resolve_res.error();
