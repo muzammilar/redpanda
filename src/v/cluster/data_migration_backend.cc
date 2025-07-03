@@ -574,14 +574,6 @@ ss::future<errc> backend::do_topic_work(
         // delete
         co_return co_await delete_topic(nt, rcn);
     }
-    case state::cancelled: {
-        // Noop, we have it here only because reconciliation logic requires
-        // either topic or partition work. The topic is unmounted and deleted in
-        // cut_over state, which cannot be cancelled. So if we are here we only
-        // need to lift topic restrictions, which is performed by
-        // migrated_resources.
-        co_return errc::success;
-    }
     default:
         vassert(
           false,
@@ -927,7 +919,9 @@ ss::future<> backend::handle_migration_update(id id) {
     if (new_scope.sought_state) {
         vlog(dm_log.debug, "creating migration {} reconciliation state", id);
         auto new_it = _migration_states.emplace_hint(old_it, id, new_scope);
-        if (new_scope.topic_work_needed || new_scope.partition_work_needed) {
+        if (
+          new_scope.topic_work_needed
+          || new_scope.any_partition_work_needed()) {
             if (group_map) {
                 new_it->second.partition_group_map = std::move(*group_map);
             }
@@ -971,11 +965,11 @@ ss::future<> backend::process_delta(cluster::topic_table_ntp_delta&& delta) {
       migration_id);
     auto& mrstate = _migration_states.find(migration_id)->second;
     if (
-      !mrstate.scope.partition_work_needed
+      !mrstate.scope.partition_work_needed(nt)
       && !mrstate.scope.topic_work_needed) {
         co_return;
     }
-    auto& tstate = mrstate.outstanding_topics[nt];
+    auto& tstate = mrstate.outstanding_topics.at(nt);
     clear_tstate_belongings(nt, tstate);
     tstate.clear();
     // We potentially re-enqueue an already coordinated partition here.
@@ -1230,7 +1224,7 @@ ss::future<> backend::reconcile_existing_topic(
       schedule_local_partition_work,
       _is_coordinator);
     auto now = model::timeout_clock::now();
-    if (scope.partition_work_needed) {
+    if (scope.partition_work_needed(nt)) {
         co_await ssx::async_for_each(
           get_topic_assignments(nt, migration),
           [this,
@@ -1375,6 +1369,11 @@ ss::future<> backend::reconcile_topic(
   size_t idx_in_migration,
   const model::topic_namespace& nt,
   migration_reconciliation_state& mrstate) {
+    if (
+      !mrstate.scope.topic_work_needed
+      && !mrstate.scope.partition_work_needed(nt)) {
+        co_return;
+    }
     auto& tstate = mrstate.outstanding_topics[nt];
     tstate.idx_in_migration = idx_in_migration;
     _topic_migration_map.emplace(nt, migration_id);
@@ -1635,15 +1634,15 @@ backend::work_scope backend::get_work_scope(
   const migration_metadata& metadata) {
     switch (metadata.state) {
     case state::preparing:
-        return {state::prepared, false, true};
+        return {state::prepared, false, false, true};
     case state::executing:
-        return {state::executed, false, true};
+        return {state::executed, false, false, true};
     case state::cut_over:
-        return {state::finished, false, true};
+        return {state::finished, false, false, true};
     case state::canceling:
-        return {state::cancelled, false, true};
+        return {state::cancelled, false, false, true};
     default:
-        return {{}, false, false};
+        return {{}, false, false, false};
     };
 }
 
@@ -1652,13 +1651,13 @@ backend::work_scope backend::get_work_scope(
   const migration_metadata& metadata) {
     switch (metadata.state) {
     case state::preparing:
-        return {state::prepared, true, false};
+        return {state::prepared, true, false, false};
     case state::executing:
-        return {state::executed, true, false};
+        return {state::executed, true, true, false};
     case state::cut_over:
-        return {state::finished, false, true};
+        return {state::finished, false, true, true};
     case state::canceling:
-        return {state::cancelled, true, true};
+        return {state::cancelled, true, true, false};
     default:
         return {{}, false, false};
     };

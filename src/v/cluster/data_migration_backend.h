@@ -57,8 +57,18 @@ public:
 private:
     struct work_scope {
         std::optional<state> sought_state;
-        bool partition_work_needed = false;
+        bool data_partition_work_needed = false;
+        bool co_partition_work_needed = false;
         bool topic_work_needed = false;
+
+        bool any_partition_work_needed() const {
+            return data_partition_work_needed || co_partition_work_needed;
+        };
+        bool partition_work_needed(const model::topic_namespace& nt) const {
+            return nt == model::kafka_consumer_offsets_nt
+                     ? co_partition_work_needed
+                     : data_partition_work_needed;
+        };
     };
     struct topic_reconciliation_state {
         // will be invalid for consumer offsets topic
