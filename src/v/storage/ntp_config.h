@@ -82,8 +82,6 @@ public:
         model::iceberg_mode iceberg_mode{default_iceberg_mode};
         bool cloud_topic_enabled{default_cloud_topic_enabled};
 
-        // Should not be enabled at the same time as any other tiered storage
-        // properties.
         tristate<std::chrono::milliseconds> tombstone_retention_ms;
 
         // Controls segment compaction eligiblity.
