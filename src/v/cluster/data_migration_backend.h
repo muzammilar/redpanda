@@ -14,9 +14,12 @@
 #include "cluster/data_migration_group_proxy.h"
 #include "cluster/data_migration_table.h"
 #include "cluster/shard_table.h"
+#include "cluster/types.h"
 #include "container/chunked_hash_map.h"
 #include "data_migration_types.h"
 #include "fwd.h"
+#include "model/fundamental.h"
+#include "model/metadata.h"
 #include "ssx/semaphore.h"
 #include "utils/mutex.h"
 
@@ -58,6 +61,8 @@ private:
         bool topic_work_needed = false;
     };
     struct topic_reconciliation_state {
+        // will be invalid for consumer offsets topic
+        // as it was not explicitly requested in the migration as a topic
         size_t idx_in_migration;
         chunked_hash_map<model::partition_id, std::vector<model::node_id>>
           outstanding_partitions; // for partition scoped ops
@@ -67,11 +72,15 @@ private:
     };
     using topic_map_t
       = chunked_hash_map<model::topic_namespace, topic_reconciliation_state>;
+    using partition_consumer_group_map_t
+      = chunked_hash_map<model::partition_id, chunked_vector<consumer_group>>;
     struct migration_reconciliation_state {
         explicit migration_reconciliation_state(work_scope scope)
           : scope(scope) {}
         work_scope scope;
         topic_map_t outstanding_topics;
+        // may not stay unfilled between scheduling points
+        std::optional<partition_consumer_group_map_t> partition_group_map;
     };
     using migration_reconciliation_states_t
       = absl::flat_hash_map<id, migration_reconciliation_state>;
@@ -255,6 +264,12 @@ private:
     static work_scope get_work_scope(
       migration_direction_tag<outbound_migration>,
       const migration_metadata& metadata);
+
+    // for a normal topic get all assignments,
+    // for __consumer_groups get only those holding migrated groups
+    chunked_vector<partition_assignment>
+    get_topic_assignments(const model::topic_namespace& nt, const id id);
+
     /*
      * Reconciliation-related data.
      *
