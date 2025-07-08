@@ -24,7 +24,9 @@ struct broker_mock : public kafka::client::broker {
       net::unresolved_address addr);
     ss::future<response_t> dispatch(
       request_t,
-      std::optional<std::reference_wrapper<ss::abort_source>> as) override;
+      api_version version = api_version{0},
+      std::optional<std::reference_wrapper<ss::abort_source>>
+      = std::nullopt) override;
 
     model::node_id id() const override { return _id; }
 
@@ -60,8 +62,8 @@ private:
     cluster_mock* _cluster_mock;
 };
 
-using mock_handler
-  = std::function<ss::future<response_t>(model::node_id, request_t)>;
+using mock_handler = std::function<ss::future<response_t>(
+  model::node_id, request_t, api_version)>;
 
 class cluster_mock {
 public:
@@ -81,8 +83,8 @@ public:
             .id = id, .address = std::move(addr), .rack = std::move(rack)});
     }
     void remove_broker(model::node_id id) { _brokers.erase(id); }
-    ss::future<response_t>
-    handle_metadata_request(model::node_id node_id, request_t req);
+    ss::future<response_t> handle_metadata_request(
+      model::node_id node_id, request_t req, api_version version);
 
     ss::future<response_t> handle_api_versions_request(
       model::node_id node_id, request_t req, api_version version);
@@ -101,6 +103,7 @@ private:
     ss::future<response_t> handle(
       model::node_id,
       request_t,
+      api_version version,
       std::optional<std::reference_wrapper<ss::abort_source>>);
 
     struct handlers {
@@ -122,6 +125,7 @@ private:
     ss::future<Ret> do_handle(
       model::node_id,
       request_t,
+      api_version version,
       std::optional<std::reference_wrapper<ss::abort_source>>);
 
     absl::flat_hash_map<model::node_id, broker_info> _brokers;
