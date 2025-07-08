@@ -17,6 +17,7 @@
 #include "cluster/partition_leaders_table.h"
 #include "cluster/types.h"
 #include "cluster_link/model/types.h"
+#include "config/configuration.h"
 #include "model/validation.h"
 #include "rpc/connection_cache.h"
 
@@ -128,7 +129,9 @@ ss::future<errc> frontend::update_mirror_topic_state(
     co_return co_await do_mutation(std::move(c), timeout);
 }
 
-bool frontend::cluster_link_active() const { return true; }
+bool frontend::cluster_link_active() const {
+    return config::shard_local_cfg().development_enable_cluster_link();
+}
 
 frontend::notification_id
 frontend::register_for_updates(notification_callback cb) {
