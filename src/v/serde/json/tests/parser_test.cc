@@ -368,3 +368,32 @@ TEST_CORO(json_parser, skip_value_bad_precondition) {
             StrEq("skip_value called with unexpected token: end_array")));
     });
 }
+
+TEST_CORO(json_parser, invalid_array_missing_comma) {
+    auto p = parser(iobuf::from(R"([42.1"zz"])"));
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::start_array);
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::value_double);
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::error);
+}
+
+TEST_CORO(json_parser, invalid_object_missing_comma) {
+    auto p = parser(iobuf::from(R"({"a": 1 "b": 2})"));
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::start_object);
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::key);
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::value_int);
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::error);
+}

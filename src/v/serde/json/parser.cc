@@ -380,6 +380,8 @@ public:
             ++_buf;                       // consume ']'
             _suspension_stack.pop_back(); // pop the array member state
             co_return suspend_with_token(token::end_array);
+        } else if (expect_separator) {
+            co_return fuse_with_failure();
         }
 
         co_return co_await parse_json_value();
@@ -416,6 +418,8 @@ public:
             ++_buf;                       // consume '}'
             _suspension_stack.pop_back(); // pop the object key state
             co_return suspend_with_token(token::end_object);
+        } else if (expect_separator) {
+            co_return fuse_with_failure();
         }
 
         co_return co_await parse_string(true);
