@@ -19,7 +19,7 @@ import requests
 import socket
 import time
 import random
-from typing import Any, Optional
+from typing import Any, Optional, Sequence, Union
 
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.errors import TimeoutError
@@ -2302,9 +2302,12 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
                                          resource_type, pattern_type, "*",
                                          operation, permission)
 
-    def _post_acl(self, acl):
-        """Grant an ACL to the regular user."""
-        resp = self.sr_client.post_security_acls([acl], auth=self.super_auth)
+    def _post_acl(self, acl: Union[dict, Sequence[dict]]):
+        """Grant one or more ACLs to the regular user."""
+        acl_list = [acl] if isinstance(acl, dict) else acl
+
+        resp = self.sr_client.post_security_acls(acl_list,
+                                                 auth=self.super_auth)
         self.assert_equal(resp.status_code, 201,
                           f"Failed to create ACL: {acl=}")
 
@@ -2313,17 +2316,23 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
             for node in self.redpanda.nodes:
                 resp = self.sr_client.get_security_acls(
                     hostname=node.account.hostname, auth=self.super_auth)
-                self.redpanda.logger.debug(
-                    f"Response: {resp.json()}.\nLooking for: {acl}")
                 self.assert_equal(resp.status_code, 200)
-                self.assert_in(acl, resp.json())
+
+                response_acls = resp.json()
+                for a in acl_list:
+                    self.redpanda.logger.debug(
+                        f"Checking if {a} in response from {node.account.hostname}: {response_acls}"
+                    )
+                    self.assert_in(a, response_acls)
+
             return True
 
-        wait_until(acl_all_observable,
-                   timeout_sec=30,
-                   backoff_sec=1,
-                   retry_on_exc=True,
-                   err_msg="Failed to propagate ACL to all nodes: {acl}")
+        wait_until(
+            acl_all_observable,
+            timeout_sec=30,
+            backoff_sec=1,
+            retry_on_exc=True,
+            err_msg=f"Failed to propagate ACLs to all nodes: {acl_list}")
 
     def _create_schema(self, subject: str) -> int:
         response = self.sr_client.post_subjects_subject_versions(
@@ -2333,7 +2342,8 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
 
     def match_api_record(self,
                          record,
-                         endpoint: ACLTestEndpoint,
+                         path: str,
+                         resources: Union[dict, Sequence[dict]],
                          status_id: Optional[StatusID] = None,
                          operation: Optional[str] = None):
         if record['class_uid'] == ClassUID.API_ACTIVITY and \
@@ -2354,9 +2364,17 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
             )
             return False
 
-        if endpoint.resource() not in record['resources']:
+        expected_resources = ([resources]
+                              if isinstance(resources, dict) else resources)
+
+        actual_resources = record.get('resources', [])
+
+        def normalize(resources: Sequence[dict]) -> set[tuple]:
+            return {tuple(d.items()) for d in resources}
+
+        if normalize(expected_resources) != normalize(actual_resources):
             self.logger.debug(
-                f"Validating api activity record: False (resources): {endpoint.resource()} not in {record['resources']}"
+                f"Validating api activity record: False (resources): {expected_resources} != {actual_resources}"
             )
             return False
 
@@ -2375,20 +2393,36 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
         url_string = record['http_request']['url']['url_string']
         match = regex.match(url_string)
         self.logger.debug(f"Validating api activity record: {url_string}")
-        if match and match.group('handler') == endpoint.path:
+        if match and match.group('handler') == path:
             return True
 
         return False
 
-    def check_matching_api_record(self, endpoint, status_id: StatusID):
-        operation = endpoint.name.lower()
+    def check_matching_api_record_parts(self, path: str,
+                                        resources: Union[dict, Sequence[dict]],
+                                        operation: str, status_id: StatusID):
+
         name = f'sr {operation} call'
         records = self.find_matching_record(
-            lambda record: self.match_api_record(
-                record, endpoint, status_id=status_id, operation=operation),
+            lambda record: self.match_api_record(record,
+                                                 path=path,
+                                                 resources=resources,
+                                                 status_id=status_id,
+                                                 operation=operation),
             lambda record_count: record_count >= 1, name)
         assert self.aggregate_count(records) == 1, \
             f'{name}: Expected one record found for {self.aggregate_count(records)}: {records}'
+
+    def check_matching_api_record(self, endpoint: ACLTestEndpoint,
+                                  status_id: StatusID):
+        return self.check_matching_api_record_parts(
+            path=endpoint.path,
+            resources=endpoint.resource(),
+            operation=endpoint.name.lower(),
+            status_id=status_id)
+
+    def _make_resources(self, subjects: Sequence[str]) -> list[dict]:
+        return [{'name': s, 'type': 'subject'} for s in subjects]
 
     @skip_fips_mode
     @cluster(num_nodes=5)
@@ -2434,6 +2468,103 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
             lambda record: self.match_authn_record(record, StatusID.SUCCESS),
             lambda record_count: record_count == authn_success_count *
             request_ratio, 'authn attempt in sr')
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    def test_sr_audit_authz_get_schemas_ids_id(self):
+        self.setup_cluster()
+
+        endpoint = self.sr_client.get_schemas_ids_id
+        operation = 'get_schemas_ids_id'
+        schema_id = 42
+        authn_success_count = 0
+        # Invalid AuthN — should be denied
+        result = endpoint(schema_id,
+                          auth=(self.user.username, "invalid password"))
+        self.assert_equal(result.status_code, 401)
+        _ = self.find_matching_record(
+            lambda record: self.match_authn_record(record, StatusID.FAILURE),
+            lambda record_count: record_count == 1, 'authn attempt in sr')
+
+        # Create subjects with a schema
+        subjects = [f"test-subject-{i}" for i in range(3)]
+        schema_ids = [self._create_schema(subject) for subject in subjects]
+        assert len(set(schema_ids)) == 1, f"Schema IDs differ: {schema_ids}"
+        schema_id = schema_ids[0]
+
+        # No ACL — should be denied
+        result = endpoint(schema_id, auth=self.user_auth)
+        self.assert_equal(result.status_code, 403)
+        authn_success_count += 1
+        self.check_matching_api_record_parts(
+            path=f"schemas/ids/{schema_id}",
+            resources=self._make_resources(subjects),
+            operation=operation,
+            status_id=StatusID.FAILURE)
+
+        self._post_acl(
+            self._create_acl(subjects[1], "SUBJECT", "LITERAL", "READ"))
+
+        # Try again — should now succeed with the matching resource
+        result = endpoint(schema_id, auth=self.user_auth)
+        authn_success_count += 1
+        self.check_matching_api_record_parts(path=f"schemas/ids/{schema_id}",
+                                             resources=self._make_resources(
+                                                 [subjects[1]]),
+                                             operation=operation,
+                                             status_id=StatusID.SUCCESS)
+
+        _ = self.find_matching_record(
+            lambda record: self.match_authn_record(record, StatusID.SUCCESS),
+            lambda record_count: record_count == authn_success_count,
+            'authn attempt in sr')
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    def test_sr_audit_authz_get_subjects(self):
+        self.setup_cluster()
+
+        endpoint = self.sr_client.get_subjects
+        operation = 'get_subjects'
+        authn_success_count = 0
+
+        # Invalid AuthN — should be denied
+        result = endpoint(auth=(self.user.username, "invalid password"))
+        self.assert_equal(result.status_code, 401)
+        _ = self.find_matching_record(
+            lambda record: self.match_authn_record(record, StatusID.FAILURE),
+            lambda record_count: record_count == 1, 'authn attempt in sr')
+
+        # Create subjects with a schema
+        subjects = [f"test-subject-{i}" for i in range(5)]
+        schema_ids = [self._create_schema(subject) for subject in subjects]
+        assert len(set(schema_ids)) == 1, f"Schema IDs differ: {schema_ids}"
+
+        allowed_subjects = subjects[::2]
+        denied_subjects = subjects[1::2]
+
+        self._post_acl([
+            self._create_acl(subject, "SUBJECT", "LITERAL", "READ")
+            for subject in allowed_subjects
+        ])
+
+        # Try again — should now succeed with the matching resource
+        result = endpoint(auth=self.user_auth)
+        self.assert_equal(result.status_code, 200)
+        authn_success_count += 1
+
+        for subjects, status in [(allowed_subjects, StatusID.SUCCESS),
+                                 (denied_subjects, StatusID.FAILURE)]:
+            self.check_matching_api_record_parts(
+                path="subjects",
+                resources=self._make_resources(subjects),
+                operation=operation,
+                status_id=status)
+
+        _ = self.find_matching_record(
+            lambda record: self.match_authn_record(record, StatusID.SUCCESS),
+            lambda record_count: record_count == authn_success_count,
+            'authn attempt in sr')
 
     @cluster(num_nodes=5)
     @matrix(endpoint_name=[e.name for e in PUBLIC_ENDPOINTS])
