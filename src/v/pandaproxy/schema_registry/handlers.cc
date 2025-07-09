@@ -352,6 +352,7 @@ ss::future<server::reply_t> get_schemas_ids_id(
     auto id = parse::request_param<schema_id>(*rq.req, "id");
     const auto format = parse_output_format(*rq.req);
 
+    co_await rq.service().writer().read_sync();
     auto subjects = co_await rq.service().schema_store().get_schema_subjects(
       id, include_deleted::yes);
 
