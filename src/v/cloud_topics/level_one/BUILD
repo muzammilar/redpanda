@@ -3,6 +3,25 @@ load("//bazel:build.bzl", "redpanda_cc_library")
 package(default_visibility = ["//src/v/cloud_topics/level_one:__subpackages__"])
 
 redpanda_cc_library(
+    name = "control_plane",
+    srcs = [
+        "control_plane.cc",
+    ],
+    hdrs = [
+        "control_plane.h",
+    ],
+    include_prefix = "cloud_topics/level_one",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "//src/v/cloud_topics:logger",
+        "//src/v/cluster",
+        "//src/v/model",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "metastore",
     hdrs = [
         "metastore.h",
