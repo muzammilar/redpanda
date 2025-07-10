@@ -2087,9 +2087,15 @@ void application::wire_up_redpanda_services(
           "cloud topics currently requires archival storage to be enabled");
 
         construct_service(
-          cloud_topics_api, ss::sharded_parameter([this, bucket] {
+          cloud_topics_api,
+          ss::sharded_parameter([this, bucket] {
               return experimental::cloud_topics::make_data_plane(
                 &partition_manager, &cloud_io, &shadow_index_cache, bucket);
+          }),
+          ss::sharded_parameter([this, bucket] {
+              return std::make_unique<
+                experimental::cloud_topics::l1::control_plane>(
+                controller.get());
           }))
           .get();
 

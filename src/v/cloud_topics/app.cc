@@ -12,13 +12,27 @@
 
 namespace experimental::cloud_topics {
 
-app::app(ss::shared_ptr<data_plane_api> ptr)
-  : _impl(std::move(ptr)) {}
+constexpr ss::shard_id control_plane_shard = 0;
 
-seastar::future<> app::start() { return _impl->start(); }
+app::app(
+  ss::shared_ptr<data_plane_api> dp, std::unique_ptr<l1::control_plane> l1_cp)
+  : _data_plane(std::move(dp))
+  , _control_plane(std::move(l1_cp)) {}
 
-seastar::future<> app::stop() { return _impl->stop(); }
+seastar::future<> app::start() {
+    if (ss::this_shard_id() == control_plane_shard) {
+        co_await _control_plane->start();
+    }
+    co_await _data_plane->start();
+}
 
-ss::shared_ptr<data_plane_api> app::get_data_plane_api() { return _impl; }
+seastar::future<> app::stop() {
+    if (ss::this_shard_id() == control_plane_shard) {
+        co_await _control_plane->stop();
+    }
+    co_await _data_plane->stop();
+}
+
+ss::shared_ptr<data_plane_api> app::get_data_plane_api() { return _data_plane; }
 
 } // namespace experimental::cloud_topics
