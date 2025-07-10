@@ -463,3 +463,23 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "direct_consumer_fixture_test",
+    timeout = "short",
+    srcs = [
+        "direct_consumer_fixture_test.cc",
+    ],
+    deps = [
+        "//src/v/cluster/tests:cluster_test_fixture",
+        "//src/v/kafka/client:brokers",
+        "//src/v/kafka/client:cluster",
+        "//src/v/kafka/client/direct_consumer",
+        "//src/v/kafka/protocol",
+        "//src/v/kafka/server/tests:kafka_test_utils",
+        "//src/v/model",
+        "//src/v/redpanda/tests:fixture",
+        "//src/v/test_utils:gtest",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
