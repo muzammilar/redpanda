@@ -187,7 +187,6 @@ SEASTAR_THREAD_TEST_CASE(check_node_comparison) {
 
 SEASTAR_THREAD_TEST_CASE(check_tracing) {
     ss::logger test_log("rtc_test_log");
-
     ss::abort_source as;
     retry_chain_context ctx1("test", as, 0x100);
 
@@ -200,7 +199,7 @@ SEASTAR_THREAD_TEST_CASE(check_tracing) {
     rtc_log1.trace("first message");
 
     auto found = ctx1.get_trace_log().find("first message")
-                 != std::string_view::npos;
+                 != ss::sstring::npos;
     BOOST_REQUIRE(found);
 
     // check that the message is printed even if the logger is
@@ -208,8 +207,7 @@ SEASTAR_THREAD_TEST_CASE(check_tracing) {
     test_log.set_level(ss::log_level::info);
     rtc_log1.trace("second message");
 
-    found = ctx1.get_trace_log().find("second message")
-            != std::string_view::npos;
+    found = ctx1.get_trace_log().find("second message") != ss::sstring::npos;
     BOOST_REQUIRE(found);
 
     std::vector<ss::sstring> actual;
@@ -230,12 +228,12 @@ SEASTAR_THREAD_TEST_CASE(check_tracing) {
     });
 
     found = ctx1.get_trace_log().find("unexpected message")
-            != std::string_view::npos;
+            != ss::sstring::npos;
     BOOST_REQUIRE(!found);
 
     // check that reset works
     ctx1.reset();
-    found = ctx1.get_trace_log().find("message") != std::string_view::npos;
+    found = ctx1.get_trace_log().find("message") != ss::sstring::npos;
     BOOST_REQUIRE(!found);
 
     // check nested rtc
@@ -245,18 +243,188 @@ SEASTAR_THREAD_TEST_CASE(check_tracing) {
 
         rtc_log2.trace("third message");
     }
-    found = ctx1.get_trace_log().find("third message")
-            != std::string_view::npos;
+    found = ctx1.get_trace_log().find("third message") != ss::sstring::npos;
     BOOST_REQUIRE(found);
 
     // check truncation
     for (int i = 0; i < 20; i++) {
         rtc_log1.trace("long message");
     }
-    found = ctx1.get_trace_log().find("truncated") != std::string_view::npos;
-    BOOST_REQUIRE(found);
+    BOOST_REQUIRE(ctx1.truncation_warning());
 
     // check abort source functionality
     ctx1.as().request_abort();
     BOOST_REQUIRE_THROW(rtc1.check_abort(), ss::abort_requested_exception);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_basic_operations) {
+    detail::rtc_circular_buffer buf(3);
+
+    // Test initial state
+    BOOST_REQUIRE(buf.empty());
+    BOOST_REQUIRE_EQUAL(buf.size(), 0);
+    BOOST_REQUIRE_EQUAL(buf.capacity(), 3);
+    BOOST_REQUIRE(!buf.full());
+    BOOST_REQUIRE_EQUAL(buf.overwritten(), 0);
+
+    // Test push_back and access
+    buf.push_back(1);
+    BOOST_REQUIRE_EQUAL(buf.size(), 1);
+    BOOST_REQUIRE_EQUAL(buf[0], 1);
+    BOOST_REQUIRE_EQUAL(buf.front(), 1);
+    BOOST_REQUIRE_EQUAL(buf.back(), 1);
+
+    buf.push_back(2);
+    buf.push_back(3);
+    BOOST_REQUIRE(buf.full());
+    BOOST_REQUIRE_EQUAL(buf.size(), 3);
+    BOOST_REQUIRE_EQUAL(buf[0], 1);
+    BOOST_REQUIRE_EQUAL(buf[1], 2);
+    BOOST_REQUIRE_EQUAL(buf[2], 3);
+    BOOST_REQUIRE_EQUAL(buf.front(), 1);
+    BOOST_REQUIRE_EQUAL(buf.back(), 3);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_wraparound) {
+    detail::rtc_circular_buffer buf(3);
+
+    // Fill buffer
+    buf.push_back(1);
+    buf.push_back(2);
+    buf.push_back(3);
+
+    // Test wraparound - should overwrite oldest element
+    buf.push_back(4);
+    BOOST_REQUIRE_EQUAL(buf.size(), 3);
+    BOOST_REQUIRE_EQUAL(buf.overwritten(), 1);
+    BOOST_REQUIRE_EQUAL(buf[0], 2); // oldest is now 2
+    BOOST_REQUIRE_EQUAL(buf[1], 3);
+    BOOST_REQUIRE_EQUAL(buf[2], 4); // newest is 4
+    BOOST_REQUIRE_EQUAL(buf.front(), 2);
+    BOOST_REQUIRE_EQUAL(buf.back(), 4);
+
+    // Continue wraparound
+    buf.push_back(5);
+    buf.push_back(6);
+    BOOST_REQUIRE_EQUAL(buf.overwritten(), 3);
+    BOOST_REQUIRE_EQUAL(buf[0], 4);
+    BOOST_REQUIRE_EQUAL(buf[1], 5);
+    BOOST_REQUIRE_EQUAL(buf[2], 6);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_bounds_checking) {
+    detail::rtc_circular_buffer buf(2);
+    buf.push_back(1);
+
+    // Valid access
+    BOOST_REQUIRE_EQUAL(buf.at(0), 1);
+
+    // Invalid access should throw
+    BOOST_REQUIRE_THROW(buf.at(1), std::out_of_range);
+    BOOST_REQUIRE_THROW(buf.at(2), std::out_of_range);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_string_view_specialization) {
+    detail::rtc_circular_buffer buf(10);
+
+    // Test empty string view
+    buf.push_back(std::string_view{});
+    BOOST_REQUIRE_EQUAL(buf.size(), 0);
+
+    // Test normal string view
+    ss::sstring test_str = "hello";
+    buf.push_back(std::string_view{test_str});
+    BOOST_REQUIRE_EQUAL(buf.size(), 5);
+
+    // Check iteration
+    std::string result;
+    for (size_t i = 0; i < buf.size(); ++i) {
+        result.push_back(buf[i]);
+    }
+    BOOST_REQUIRE_EQUAL(result, test_str);
+
+    // Test string larger than capacity
+    buf.clear();
+    std::string large_str = "this_is_a_very_long_string";
+    buf.push_back(std::string_view{large_str});
+    BOOST_REQUIRE_EQUAL(buf.size(), buf.capacity());
+
+    // Should contain only the last 'capacity' characters
+    result.clear();
+    for (size_t i = 0; i < buf.size(); ++i) {
+        result.push_back(buf[i]);
+    }
+    BOOST_REQUIRE_EQUAL(
+      result, large_str.substr(large_str.size() - buf.capacity()));
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_string_view_wraparound) {
+    detail::rtc_circular_buffer buf(8);
+
+    // Fill buffer partially
+    buf.push_back(std::string_view{"abc"});
+    BOOST_REQUIRE_EQUAL(buf.size(), 3);
+
+    // Add string that causes wraparound
+    buf.push_back(std::string_view{"redpanda"});
+    BOOST_REQUIRE_EQUAL(buf.size(), 8);
+    BOOST_REQUIRE(buf.overwritten() > 0);
+
+    std::string result;
+    for (size_t i = 0; i < buf.size(); ++i) {
+        result.push_back(buf[i]);
+    }
+    BOOST_REQUIRE_EQUAL(result, "redpanda");
+
+    buf.push_back(std::string_view{"head"});
+    // this is supposed to hit case two: not enough space, need two memcpy calls
+    buf.push_back(std::string_view{"1234567"});
+
+    result.clear();
+    for (size_t i = 0; i < buf.size(); ++i) {
+        result.push_back(buf[i]);
+    }
+    BOOST_REQUIRE_EQUAL(result, "d1234567");
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_clear) {
+    detail::rtc_circular_buffer buf(3);
+
+    buf.push_back(1);
+    buf.push_back(2);
+    buf.push_back(3);
+    buf.push_back(4); // causes overwrite
+
+    BOOST_REQUIRE(!buf.empty());
+    BOOST_REQUIRE(buf.overwritten() > 0);
+
+    buf.clear();
+
+    BOOST_REQUIRE(buf.empty());
+    BOOST_REQUIRE_EQUAL(buf.size(), 0);
+    BOOST_REQUIRE_EQUAL(buf.overwritten(), 0);
+    BOOST_REQUIRE(!buf.full());
+}
+
+SEASTAR_THREAD_TEST_CASE(test_circular_buffer_view) {
+    detail::rtc_circular_buffer buf(5);
+
+    buf.push_back('a');
+    buf.push_back('b');
+    buf.push_back('c');
+
+    auto view = buf.view();
+
+    // Check that view contains correct data
+    std::string result(view.begin(), view.end());
+    BOOST_REQUIRE_EQUAL(result, "abc");
+
+    // Test with wraparound
+    buf.push_back('d');
+    buf.push_back('e');
+    buf.push_back('f'); // should overwrite 'a'
+
+    view = buf.view();
+    result = std::string(view.begin(), view.end());
+    BOOST_REQUIRE_EQUAL(result, "bcdef");
 }

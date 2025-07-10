@@ -396,6 +396,9 @@ void ntp_archiver::log_collected_traces() noexcept {
             _rtclog.error("Diagnostic dump start");
 
             _rtclog.info("[repeat] start");
+            if (_rtctx.truncation_warning()) {
+                _rtclog.info("[truncated]");
+            }
             for (const auto& trace : _rtctx.traces()) {
                 _rtclog.info("[repeat] {}", trace);
             }

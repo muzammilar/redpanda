@@ -154,6 +154,95 @@
 #include <ranges>
 #include <variant>
 
+namespace detail {
+/// A fixed-size circular buffer that behaves like std::vector for basic
+/// operations. When the buffer reaches its maximum capacity, new elements
+/// overwrite the oldest elements in FIFO order.
+class rtc_circular_buffer {
+public:
+    using value_type = char;
+    using reference = char&;
+    using const_reference = const char&;
+
+    /// Create a circular buffer with the specified maximum capacity
+    explicit rtc_circular_buffer(size_t capacity);
+
+    /// Add an element to the buffer. When the buffer is full, the oldest
+    /// element is overwritten.
+    void push_back(value_type value);
+
+    void push_back(std::string_view sv);
+
+    /// Access element at logical index (0 is the oldest element)
+    reference operator[](size_t index);
+
+    /// Access element at logical index (0 is the oldest element)
+    const_reference operator[](size_t index) const;
+
+    /// Access element at logical index with bounds checking
+    reference at(size_t index);
+
+    /// Access element at logical index with bounds checking
+    const_reference at(size_t index) const;
+
+    /// Get the first (oldest) element
+    reference front();
+
+    /// Get the first (oldest) element
+    const_reference front() const;
+
+    /// Get the last (newest) element
+    reference back();
+
+    /// Get the last (newest) element
+    const_reference back() const;
+
+    /// Number of elements currently in the buffer
+    size_t size() const noexcept;
+
+    /// Maximum capacity of the buffer
+    size_t capacity() const noexcept;
+
+    /// Check if the buffer is empty
+    bool empty() const noexcept;
+
+    /// Check if the buffer is at full capacity
+    bool full() const noexcept;
+
+    /// Get the number of elements that were added to the buffer and
+    /// then overwritten and lost. The count is reset if 'clear' is
+    /// called.
+    size_t overwritten() const noexcept;
+
+    /// Clear all elements from the buffer
+    void clear() noexcept;
+
+    /// Return a view of the entire buffer (const version)
+    auto view() const {
+        return std::views::join(std::views::all(std::array{
+          std::span(_data).subspan(
+            _start, _size < _capacity ? _size - _start : _capacity - _start),
+          std::span(_data).subspan(0, _size < _capacity ? 0 : _start)}));
+    }
+
+    /// Return a view of the entire buffer
+    auto view() {
+        return std::views::join(std::views::all(std::array{
+          std::span(_data).subspan(
+            _start, _size < _capacity ? _size - _start : _capacity - _start),
+          std::span(_data).subspan(0, _size < _capacity ? 0 : _start)}));
+    }
+
+private:
+    std::vector<value_type> _data;
+    size_t _capacity;
+    size_t _size{0};
+    size_t _start{0};
+    size_t _total_added{0};
+};
+
+} // namespace detail
+
 /// Represents the context for a retry chain node, capable of collecting trace
 /// messages in memory.
 ///
@@ -184,29 +273,19 @@ public:
       ss::sstring name, ss::abort_source& as, size_t size)
       : _name(std::move(name))
       , _as(as)
-      , _size_limit(size) {}
+      , _size_limit(size)
+      , _buf(size) {}
 
     /// Add a trace to the buffer.
     void add_trace(const ss::sstring& msg) const {
         _last_trace_ts = Clock::now();
-        if (_buf.size() >= _size_limit) {
-            if (!_is_truncated) {
-                // If the buffer is full, we're adding ''truncated''
-                // to the end but only once.
-                _is_truncated = true;
-                fmt::format_to(std::back_inserter(_buf), "[truncated]");
-            }
-            return;
-        }
-        auto bii = std::back_inserter(_buf);
-        std::copy(msg.begin(), msg.end(), bii);
-        bii = '\n';
+        _buf.push_back(std::string_view{msg.data(), msg.size()});
+        _buf.push_back('\n');
     }
 
     /// Returns a view of trace strings that can be iterated
     auto traces() const {
-        auto view = std::string_view(_buf.data(), _buf.size());
-        return std::ranges::split_view(view, '\n')
+        return std::ranges::split_view(_buf.view(), '\n')
                | std::views::transform([](auto&& r) {
                      auto begin = std::ranges::begin(r);
                      auto end = std::ranges::end(r);
@@ -216,18 +295,23 @@ public:
                  [](const ss::sstring& s) { return !s.empty(); });
     }
 
+    bool truncation_warning() const { return _buf.overwritten() > 0; }
+
     /// Get the entire trace log as a string (added for testing).
-    std::string_view get_trace_log() const {
-        return {_buf.data(), _buf.size()};
+    ss::sstring get_trace_log() const {
+        ss::sstring res;
+        for (const auto& trace : traces()) {
+            res += trace;
+            res += "\n";
+        }
+        return res;
     }
 
     auto get_last_trace_time() const noexcept { return _last_trace_ts; }
 
     /// Reset the state of the context and empties the buffer
     void reset() {
-        // Clear the buffer,
-        // 'clear' doesn't free memory.
-        _buf = fmt::memory_buffer();
+        _buf.clear();
         _last_trace_ts = Clock::now();
         _suspended_to = Clock::time_point::min();
     }
@@ -256,10 +340,8 @@ private:
     ss::abort_source& _as;
     /// Trace buffer size limit
     size_t _size_limit;
-    /// Indicates if the buffer is full and traces are truncated.
-    mutable bool _is_truncated{false};
     /// Buffer to store traces
-    mutable fmt::memory_buffer _buf;
+    mutable detail::rtc_circular_buffer _buf;
     /// Last trace timestamp
     mutable Clock::time_point _last_trace_ts;
     Clock::time_point _suspended_to;
