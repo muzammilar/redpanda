@@ -106,6 +106,33 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "round_trip_test",
+    timeout = "short",
+    srcs = [
+        "round_trip_test.cc",
+    ],
+    cpu = 1,
+    memory = "128MiB",
+    deps = [
+        ":test_messages_edition2023_cc_proto",
+        ":test_messages_edition2023_redpanda_proto",
+        "//proto/redpanda/core/testing:example_cc_proto",
+        "//proto/redpanda/core/testing:example_redpanda_proto",
+        "//src/v/base",
+        "//src/v/bytes:iobuf",
+        "//src/v/bytes:iobuf_parser",
+        "//src/v/serde/protobuf:json",
+        "//src/v/test_utils:gtest",
+        "@abseil-cpp//absl/strings",
+        "@fmt",
+        "@googletest//:gtest",
+        "@libprotobuf_mutator",
+        "@protobuf//:differencer",
+        "@protobuf//:json",
+    ],
+)
+
 redpanda_golden_test(
     name = "protogen_golden_conformance_test",
     srcs = {
