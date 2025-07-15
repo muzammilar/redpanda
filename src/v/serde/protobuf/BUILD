@@ -86,3 +86,17 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "rpc",
+    srcs = ["rpc.cc"],
+    hdrs = [
+        "rpc.h",
+    ],
+    include_prefix = "serde/protobuf",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
