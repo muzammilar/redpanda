@@ -419,9 +419,7 @@ static ss::future<> bg_upload_and_replicate(
             [api,
              cache_enabled,
              inp = std::move(rb_copy),
-             ntp = partition->ntp(),
-             term = partition->term()](
-              result<cluster::kafka_result> res) mutable
+             ntp = partition->ntp()](result<cluster::kafka_result> res) mutable
               -> result<raft::replicate_result> {
                 if (res.has_error()) {
                     return res.error();
@@ -432,14 +430,25 @@ static ss::future<> bg_upload_and_replicate(
                     // NOTE: the assumption is that the cached term matches
                     // the actual term. If this is not the case the replication
                     // should fail.
+                    vassert(
+                      res.value().last_term != model::term_id{},
+                      "Term not set");
                     update_batches(
-                      inp, kafka::offset_cast(res.value().last_offset), term);
+                      inp,
+                      kafka::offset_cast(res.value().last_offset),
+                      res.value().last_term);
                     for (const auto& b : inp) {
+                        vlog(
+                          kdlog.trace,
+                          "Putting batch to cache: {}",
+                          b.base_offset(),
+                          b.term());
                         api->cache_put(ntp, b);
                     }
                 }
                 return raft::replicate_result{
-                  kafka::offset_cast(res.value().last_offset)};
+                  kafka::offset_cast(res.value().last_offset),
+                  res.value().last_term};
             });
 
     replicate_fut.forward_to(std::move(op->replicate_finished));
@@ -487,8 +496,13 @@ ss::future<result<model::offset>> cloud_topic_partition::replicate(
     }
     auto ret_offset = model::offset(result.value().last_offset());
     if (!rb_copy.empty()) {
-        update_batches(rb_copy, ret_offset, _partition->term());
+        update_batches(rb_copy, ret_offset, result.value().last_term);
         for (const auto& b : rb_copy) {
+            vlog(
+              kdlog.trace,
+              "Putting batch to cache: {}",
+              b.base_offset(),
+              b.term());
             _ct_api->cache_put(ntp(), b);
         }
     }

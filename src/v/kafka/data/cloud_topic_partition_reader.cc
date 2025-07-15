@@ -103,6 +103,15 @@ cloud_topic_partition_reader_impl::maybe_load_slices_from_cache() {
             // from S3.
             break;
         }
+        vlog(
+          kdlog.trace,
+          "Loaded batch from cache: {}",
+          batch.value().base_offset(),
+          batch.value().term());
+        vassert(
+          batch.value().term() > model::term_id{-1},
+          "Batch without term in the cache: {}",
+          batch.value().header());
         batch_size = batch.value().size_bytes();
         if (
           !ret.empty() && batch_size + materialized_bytes > _config.max_bytes) {
@@ -233,6 +242,7 @@ ss::future<> cloud_topic_partition_reader_impl::materialize_batches(
   model::timeout_clock::time_point deadline) {
     if (_current == state::end_of_stream_state) {
         _current = state::end_of_stream_state;
+        vlog(kdlog.trace, "Materialize batches called while EOS");
         co_return;
     }
     vassert(
@@ -243,6 +253,9 @@ ss::future<> cloud_topic_partition_reader_impl::materialize_batches(
     if (_batches.size() > 0) {
         // We're already materialized.
         _current = state::materialized_state;
+        vlog(
+          kdlog.trace,
+          "Materialize batches call redundant, already materialized");
         co_return;
     }
 
@@ -270,6 +283,13 @@ ss::future<> cloud_topic_partition_reader_impl::materialize_batches(
                 // than the max bytes limit (oversized batch or too small
                 // limit). In this case we don't want to stall the reader
                 // completely.
+                vlog(
+                  kdlog.trace,
+                  "Materialize batches overshot at {} bytes, config: {}, last "
+                  "extent size: {}",
+                  materialize_bytes,
+                  _config,
+                  meta.byte_range_size);
                 break;
             }
             _meta.pop_front();
@@ -278,8 +298,21 @@ ss::future<> cloud_topic_partition_reader_impl::materialize_batches(
             materialize_bytes += meta.byte_range_size;
             to_materialize.push_back(meta);
             to_materialize_headers.push_back(header);
+            vlog(
+              kdlog.trace, "Materialize {} bytes total...", materialize_bytes);
         }
 
+        // we reached max_bytes limit and nothing is collected
+        if (materialize_bytes == 0) {
+            _current = state::end_of_stream_state;
+            co_return;
+        }
+
+        vlog(
+          kdlog.trace,
+          "Invoking 'materialize' for {}, {} bytes to materialize",
+          _underlying->ntp(),
+          materialize_bytes);
         // Ask data layer to bring data from the cloud storage.
         auto mat_res = co_await _ct_api->materialize(
           _underlying->ntp(),
