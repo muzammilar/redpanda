@@ -142,15 +142,9 @@ ss::future<> manager::handle_on_link_change(model::id_t id) {
               new_link, "Link factory returned a null link for id={}", id);
             // Register tasks for the link
             for (auto& task_factory : _task_factories) {
-                auto task = task_factory->create_task();
-                vassert(
-                  task,
-                  "Task factory for task {} returned a null task for link "
-                  "id={}",
-                  task_factory->created_task_name(),
-                  id);
                 try {
-                    auto ec = co_await new_link->register_task(std::move(task));
+                    auto ec = co_await new_link->register_task(
+                      task_factory.get());
                     if (!ec) {
                         vlog(
                           cllog.warn,
@@ -213,13 +207,7 @@ ss::future<> manager::link_task_reconciler() {
                   task_name,
                   link->config().name,
                   link->config().uuid);
-                auto task = task_factory->create_task();
-                vassert(
-                  task,
-                  "Task factory for task {} returned a null task for link {}",
-                  task_name,
-                  link->config().name);
-                auto ec = co_await link->register_task(std::move(task));
+                auto ec = co_await link->register_task(task_factory.get());
                 if (!ec) {
                     vlog(
                       cllog.error,

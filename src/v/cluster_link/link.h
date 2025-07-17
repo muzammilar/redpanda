@@ -41,7 +41,7 @@ public:
     virtual ss::future<> start();
     virtual ss::future<> stop();
 
-    ss::future<result<void>> register_task(std::unique_ptr<task>);
+    ss::future<result<void>> register_task(task_factory*);
 
     void update_config(model::metadata);
 
@@ -74,6 +74,7 @@ private:
     ss::future<>
     do_handle_controller_leadership_change(ntp_leader is_ntp_leader);
     ss::future<> run_task_reconciler();
+    ss::future<result<void>> do_register_task(std::unique_ptr<task>);
 
 private:
     ::model::node_id _self;

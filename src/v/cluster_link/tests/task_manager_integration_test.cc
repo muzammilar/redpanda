@@ -51,9 +51,10 @@ class test_task : public task {
 public:
     static constexpr auto name = "test_task";
     test_task(
+      link* link,
       ss::lowres_clock::duration run_interval,
       is_locked_to_controller is_locked)
-      : task(run_interval, name)
+      : task(link, run_interval, name)
       , _is_locked_to_controller(is_locked) {}
 
     task::is_locked_to_controller
@@ -79,8 +80,9 @@ public:
         return test_task::name;
     }
 
-    std::unique_ptr<task> create_task() override {
-        return std::make_unique<test_task>(100ms, _is_locked_to_controller);
+    std::unique_ptr<task> create_task(link* link) override {
+        return std::make_unique<test_task>(
+          link, 100ms, _is_locked_to_controller);
     }
 
 private:
@@ -470,8 +472,8 @@ public:
         return evil_task::name;
     }
 
-    std::unique_ptr<task> create_task() override {
-        return std::make_unique<evil_task>(100ms, evil_task::name);
+    std::unique_ptr<task> create_task(link* link) override {
+        return std::make_unique<evil_task>(link, 100ms, evil_task::name);
     }
 };
 

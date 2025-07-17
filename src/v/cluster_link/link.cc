@@ -137,53 +137,25 @@ ss::future<> link::stop() {
     vlog(cllog.info, "Stopped link {} ({})", _config.name, _config.uuid);
 }
 
-ss::future<result<void>> link::register_task(std::unique_ptr<task> t) {
+ss::future<result<void>> link::register_task(task_factory* tf) {
     vlog(
       cllog.debug,
-      "Registering task {} for cluster link {} ({})",
-      t->name(),
+      "Registering task factory {} for cluster link {} ({})",
+      tf->created_task_name(),
       _config.name,
       _config.uuid);
-    if (_tasks.contains(t->name())) {
-        auto msg = ssx::sformat(
-          "Task named '{}' already exists for link {}",
-          t->name(),
-          _config.name);
-        vlog(cllog.warn, "{}", msg);
+    auto t = tf->create_task(this);
+
+    if (!t) {
         co_return err_info(
-          errc::task_already_registered_on_link, std::move(msg));
+          errc::task_creation_failed,
+          ssx::sformat(
+            "Failed to create task from factory {} for cluster link {}",
+            tf->created_task_name(),
+            _config.name));
     }
 
-    result<void> res = outcome::success();
-    // Do not need to unregister the task callback as the task lifetime is
-    // managed by the link
-    t->register_for_updates([this](
-                              std::string_view task_name,
-                              task::state_change change) {
-        vlog(
-          cllog.debug, "Task {} reported state change: {}", task_name, change);
-        _task_state_change_notifications.notify(
-          _config.name, task_name, change);
-    });
-    // If we register a task after the link has started, then check to see
-    // if it should start and do so
-    if (_is_running && should_start_task(t.get())) {
-        vlog(cllog.info, "Starting task {}", t->name());
-        res = co_await start_task(t.get());
-        if (!res) {
-            vlog(
-              cllog.error,
-              "Failed to start task {}: {}",
-              t->name(),
-              res.assume_error().message());
-        }
-    }
-    // Even if the task failed to start, still emplace it into the list, the
-    // task reconcilier will re-attempt later
-    auto name = t->name();
-    _tasks.emplace(std::move(name), std::move(t));
-
-    co_return res;
+    co_return co_await do_register_task(std::move(t));
 }
 
 void link::update_config(model::metadata config) {
@@ -385,5 +357,54 @@ ss::future<> link::run_task_reconciler() {
             }
         }
     }
+}
+
+ss::future<result<void>> link::do_register_task(std::unique_ptr<task> t) {
+    vlog(
+      cllog.debug,
+      "Registering task {} for cluster link {} ({})",
+      t->name(),
+      _config.name,
+      _config.uuid);
+    if (_tasks.contains(t->name())) {
+        auto msg = ssx::sformat(
+          "Task named '{}' already exists for link {}",
+          t->name(),
+          _config.name);
+        vlog(cllog.warn, "{}", msg);
+        co_return err_info(
+          errc::task_already_registered_on_link, std::move(msg));
+    }
+
+    result<void> res = outcome::success();
+    // Do not need to unregister the task callback as the task lifetime is
+    // managed by the link
+    t->register_for_updates([this](
+                              std::string_view task_name,
+                              task::state_change change) {
+        vlog(
+          cllog.debug, "Task {} reported state change: {}", task_name, change);
+        _task_state_change_notifications.notify(
+          _config.name, task_name, change);
+    });
+    // If we register a task after the link has started, then check to see
+    // if it should start and do so
+    if (_is_running && should_start_task(t.get())) {
+        vlog(cllog.info, "Starting task {}", t->name());
+        res = co_await start_task(t.get());
+        if (!res) {
+            vlog(
+              cllog.error,
+              "Failed to start task {}: {}",
+              t->name(),
+              res.assume_error().message());
+        }
+    }
+    // Even if the task failed to start, still emplace it into the list, the
+    // task reconcilier will re-attempt later
+    auto name = t->name();
+    _tasks.emplace(std::move(name), std::move(t));
+
+    co_return res;
 }
 } // namespace cluster_link
