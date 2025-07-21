@@ -31,14 +31,39 @@ struct fetch_session_state {
         incremental_fetch,
         needs_close,
     };
-    kafka::fetch_session_id _fetch_session_id{kafka::invalid_fetch_session_id};
-    kafka::fetch_session_epoch _fetch_session_epoch{
-      kafka::initial_fetch_session_epoch};
-
     void update_fetch_session(kafka::fetch_session_id id) {
-        _fetch_session_id = id;
-        _fetch_session_epoch++;
+        session_id = id;
+        session_epoch++;
     }
+    explicit fetch_session_state(
+      fetch_sessions_enabled sessions_enabled = fetch_sessions_enabled::yes);
+    void reset();
+    void toggle(fetch_sessions_enabled enable);
+
+    /**
+     * Paraphrased from KIP-227
+     *
+     * FetchRequest metadata meaning
+     * | ID  | Epoch  | Meaning                                             |
+     * |-----|--------|-----------------------------------------------------|
+     * | 0   | -1     | Make a full fetch that doesn't use sessions         |
+     * | 0   | 0      | Make a full fetch that tries to create a session    |
+     * | $ID | 0      | Close the session w/ $ID and create a new one       |
+     * | $ID | $EPOCH | Make an incremental fetch request                   |
+     * | $ID | -1     | Close the session w/ $ID and don't create a new one |
+     *
+     * FetchResponse metadata meaning
+     * | ID  | Meaning                                                     |
+     * |-----|-------------------------------------------------------------|
+     * | 0   | No fetch session was created                                |
+     * | $ID | The next request can be an incremental fetch with given $ID |
+     */
+    kafka::fetch_session_id session_id;
+    kafka::fetch_session_epoch session_epoch;
+    state session_state;
+
+private:
+    fetch_sessions_enabled _fetch_sessions_enabled;
 };
 
 /**

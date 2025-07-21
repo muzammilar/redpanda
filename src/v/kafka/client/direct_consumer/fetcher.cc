@@ -22,6 +22,37 @@ namespace kafka::client {
 static constexpr model::node_id client_replica_id{-1};
 static constexpr std::chrono::milliseconds error_backoff(200);
 
+fetch_session_state::fetch_session_state(
+  fetch_sessions_enabled sessions_enabled)
+  : _fetch_sessions_enabled(sessions_enabled) {
+    reset();
+}
+void fetch_session_state::reset() {
+    session_id = kafka::invalid_fetch_session_id;
+    if (_fetch_sessions_enabled) {
+        session_epoch = kafka::initial_fetch_session_epoch;
+        session_state = state::need_full_fetch;
+    } else {
+        session_epoch = kafka::final_fetch_session_epoch;
+        session_state = state::none;
+    }
+}
+
+void fetch_session_state::toggle(fetch_sessions_enabled enable) {
+    if (enable == _fetch_sessions_enabled) {
+        return;
+    }
+    if (enable) {
+        session_state = state::need_full_fetch;
+    } else if (session_id != kafka::invalid_fetch_session_id) {
+        session_state = state::needs_close;
+    } else {
+        session_state = state::none;
+    }
+    _fetch_sessions_enabled = enable;
+    update_fetch_session(session_id);
+}
+
 data_queue& fetcher::queue() { return *_parent->_fetched_data_queue; }
 prefix_logger& fetcher::logger() { return _parent->_cluster->logger(); }
 
