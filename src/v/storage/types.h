@@ -285,9 +285,13 @@ struct timequery_config {
     friend std::ostream& operator<<(std::ostream& o, const timequery_config&);
 };
 struct timequery_result {
-    timequery_result(model::offset o, model::timestamp t) noexcept
-      : offset(o)
+    timequery_result(
+      model::term_id term, model::offset o, model::timestamp t) noexcept
+      : term(term)
+      , offset(o)
       , time(t) {}
+
+    model::term_id term;
     model::offset offset;
     model::timestamp time;
 

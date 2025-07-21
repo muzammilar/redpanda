@@ -586,7 +586,7 @@ ss::future<timequery_result> batch_timequery(
           }
       });
 
-    co_return timequery_result{result_o, result_t};
+    co_return timequery_result{batch.term(), result_o, result_t};
 }
 
 } // namespace storage
