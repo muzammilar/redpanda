@@ -10,6 +10,8 @@
  */
 #include "kafka/client/direct_consumer/fetcher.h"
 
+#include "absl/container/flat_hash_set.h"
+#include "base/format_to.h"
 #include "kafka/client/direct_consumer/data_queue.h"
 #include "kafka/client/direct_consumer/direct_consumer.h"
 #include "kafka/client/errors.h"
@@ -17,6 +19,8 @@
 #include "ssx/future-util.h"
 
 #include <seastar/core/sleep.hh>
+
+#include <fmt/format.h>
 
 namespace kafka::client {
 static constexpr model::node_id client_replica_id{-1};
@@ -631,4 +635,37 @@ fetcher::do_list_offsets(list_offsets_request req) {
     }
 }
 
+fmt::iterator fetch_session_state::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
+      "{{id: {}, epoch: {}, state: {}}}",
+      session_id,
+      session_epoch,
+      session_state);
+}
+
 } // namespace kafka::client
+
+namespace fmt {
+auto fmt::formatter<kafka::client::fetch_session_state::state>::format(
+  kafka::client::fetch_session_state::state s, format_context& ctx) const
+  -> format_context::iterator {
+    std::string_view result = "unknown";
+    switch (s) {
+        using enum kafka::client::fetch_session_state::state;
+    case none:
+        result = "fetch_session_state::state::none";
+        break;
+    case need_full_fetch:
+        result = "fetch_session_state::state::need_full_fetch";
+        break;
+    case incremental_fetch:
+        result = "fetch_session_state::state::incremental_fetch";
+        break;
+    case needs_close:
+        result = "fetch_session_state::state::needs_close";
+        break;
+    }
+    return formatter<std::string_view>::format(result, ctx);
+}
+} // namespace fmt

@@ -9,6 +9,7 @@
  * by the Apache License, Version 2.0
  */
 #pragma once
+#include "base/format_to.h"
 #include "container/intrusive_list_helpers.h"
 #include "kafka/client/direct_consumer/api_types.h"
 #include "kafka/client/direct_consumer/data_queue.h"
@@ -21,6 +22,9 @@
 #include <seastar/core/condition-variable.hh>
 #include <seastar/core/gate.hh>
 #include <seastar/core/rwlock.hh>
+
+#include <fmt/format.h>
+
 namespace kafka::client {
 class direct_consumer;
 
@@ -69,6 +73,7 @@ struct fetch_session_state {
 
 private:
     fetch_sessions_enabled _fetch_sessions_enabled;
+    fmt::iterator format_to(fmt::iterator it) const;
 };
 
 /**
@@ -202,3 +207,14 @@ private:
     ss::abort_source _as;
 };
 } // namespace kafka::client
+
+namespace fmt {
+template<>
+struct fmt::formatter<kafka::client::fetch_session_state::state>
+  : formatter<std::string_view> {
+    auto
+    format(kafka::client::fetch_session_state::state, format_context&) const
+      -> iterator;
+};
+
+} // namespace fmt
