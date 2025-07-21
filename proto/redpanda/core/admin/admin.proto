@@ -31,18 +31,18 @@ message GetVersionResponse {
 
 message GetRoutesRequest {}
 message GetRoutesResponse {
-  message Route {
-    // The name of the RPC method.
-    //
-    // For example `redpanda.core.admin.AdminService.GetVersion`
-    string name = 1;
-    // The HTTP route for this RPC method.
-    //
-    // For example `/v2/redpanda.core.admin.AdminService/GetVersion`
-    string http_route = 2;
-  }
-  // All the routes available in the Admin API.
-  repeated Route routes = 1;
+    message Route {
+        // The name of the RPC method.
+        //
+        // For example `redpanda.core.admin.AdminService.GetVersion`
+        string name = 1;
+        // The HTTP route for this RPC method.
+        //
+        // For example `/v2/redpanda.core.admin.AdminService/GetVersion`
+        string http_route = 2;
+    }
+    // All the routes available in the Admin API.
+    repeated Route routes = 1;
 }
 
 // The AdminService is used to get information about the Redpanda cluster.
@@ -56,8 +56,8 @@ service AdminService {
             authz: SUPERUSER,
         };
     }
-    // Return the supported routes for the Admin API. This RPC can be used to determine
-    // what RPCs are available in the Admin API.
+    // Return the supported routes for the Admin API. This RPC can be used to
+    // determine what RPCs are available in the Admin API.
     rpc GetRoutes(GetRoutesRequest) returns (GetRoutesResponse) {
         option (redpanda.pbgen.rpc) = {
             authz: SUPERUSER,

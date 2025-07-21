@@ -344,12 +344,10 @@ admin_server::admin_server(
 void admin_server::add_service(
   std::unique_ptr<serde::pb::rpc::base_service> service) {
     for (auto& route : service->all_routes()) {
-        // TODO: Do we need a real nickname?
-        ss::sstring nickname;
         ss::httpd::path_description path{
           fmt::format("/v2{}", route.path),
           ss::httpd::operation_type::POST,
-          nickname,
+          route.name,
           /*path_parameters=*/{},
           /*mandatory_params=*/{},
         };

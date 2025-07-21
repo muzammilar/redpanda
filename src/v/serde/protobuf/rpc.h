@@ -46,7 +46,12 @@ enum class authz_level : uint8_t {
 // All routes should be POST requests, but the request/reply parsing will be
 // handled by the handler method.
 struct route_descriptor {
+    // Name of the method such as "redpanda.core.admin.AdminService.GetRoutes"
+    ss::sstring name;
+    // Path of the route such as "/redpanda.core.admin.AdminService/GetRoutes"
     ss::sstring path;
+    // The authentication and authorization level required to access this
+    // handler.
     authz_level authz_level;
 
     std::function<ss::future<std::unique_ptr<ss::http::reply>>(

@@ -660,6 +660,7 @@ func (g *implGenerator) generateServiceRoutes(service protoreflect.ServiceDescri
 		for _, path := range paths {
 			w.Println("{")
 			w.Indent()
+			w.Printf(".name = %q,\n", method.FullName())
 			w.Printf(".path = %q,\n", path)
 			w.Printf(".authz_level = serde::pb::rpc::authz_level::%s,\n", rpcAuthzLevel(method))
 			w.Printf(".handler = std::bind_front(&%s::%s_handler_impl, this),\n", cppTypeName(service), pascalToSnakeCase(string(method.Name())))
