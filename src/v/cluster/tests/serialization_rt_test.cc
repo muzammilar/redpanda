@@ -805,7 +805,7 @@ SEASTAR_THREAD_TEST_CASE(serde_reflection_roundtrip) {
 
     roundtrip_test(cluster::get_leadership_request());
 
-    fragmented_vector<cluster::ntp_leader> leaders;
+    chunked_vector<cluster::ntp_leader> leaders;
     leaders.emplace_back(
       model::random_ntp(),
       tests::random_named_int<model::term_id>(),

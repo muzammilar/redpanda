@@ -80,7 +80,7 @@ class role_store {
     using role_accessor = std::pair<
       role_name_view, /* role_name */
       ss::noncopyable_function<const members_store_type&(void)>>;
-    using range_query_container_type = fragmented_vector<role_name_view>;
+    using range_query_container_type = chunked_vector<role_name_view>;
 
 public:
     using roles_range

@@ -2152,7 +2152,7 @@ struct bulk_force_reconfiguration_cmd_data
       = default;
 
     std::vector<model::node_id> from_nodes;
-    fragmented_vector<ntp_with_majority_loss>
+    chunked_vector<ntp_with_majority_loss>
       user_approved_force_recovery_partitions;
 
     auto serde_fields() {

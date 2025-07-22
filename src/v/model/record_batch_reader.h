@@ -338,11 +338,11 @@ record_batch_reader make_record_batch_reader(Args&&... args) {
 record_batch_reader
   make_memory_record_batch_reader(record_batch_reader::storage_t);
 
-record_batch_reader make_fragmented_memory_record_batch_reader(
-  fragmented_vector<model::record_batch>);
+record_batch_reader
+  make_chunked_memory_record_batch_reader(chunked_vector<model::record_batch>);
 
-record_batch_reader make_fragmented_memory_record_batch_reader(
-  chunked_vector<model::record_batch>);
+record_batch_reader
+  make_chunked_memory_record_batch_reader(chunked_vector<model::record_batch>);
 
 inline record_batch_reader
 make_memory_record_batch_reader(model::record_batch b) {
@@ -384,16 +384,16 @@ record_batch_reader make_foreign_memory_record_batch_reader(record_batch);
 record_batch_reader
   make_foreign_memory_record_batch_reader(record_batch_reader::data_t);
 
-record_batch_reader make_foreign_fragmented_memory_record_batch_reader(
-  fragmented_vector<model::record_batch>);
-
-record_batch_reader make_foreign_fragmented_memory_record_batch_reader(
+record_batch_reader make_foreign_chunked_memory_record_batch_reader(
   chunked_vector<model::record_batch>);
 
-record_batch_reader make_foreign_fragmented_memory_record_batch_reader(
+record_batch_reader make_foreign_chunked_memory_record_batch_reader(
+  chunked_vector<model::record_batch>);
+
+record_batch_reader make_chunked_fragmented_memory_record_batch_reader(
   ss::chunked_fifo<model::record_batch>);
 
-record_batch_reader make_fragmented_memory_record_batch_reader(
+record_batch_reader make_chunked_memory_record_batch_reader(
   ss::chunked_fifo<model::record_batch>);
 
 record_batch_reader make_generating_record_batch_reader(
@@ -402,7 +402,7 @@ record_batch_reader make_generating_record_batch_reader(
 ss::future<record_batch_reader::data_t> consume_reader_to_memory(
   record_batch_reader, timeout_clock::time_point timeout);
 
-ss::future<fragmented_vector<model::record_batch>>
+ss::future<chunked_vector<model::record_batch>>
 consume_reader_to_fragmented_memory(
   record_batch_reader, timeout_clock::time_point timeout);
 

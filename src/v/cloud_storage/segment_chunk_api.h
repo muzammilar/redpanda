@@ -138,7 +138,7 @@ private:
 
     uint64_t _max_hydrated_chunks;
     ss::condition_variable _bg_cvar;
-    fragmented_vector<ss::future<segment_chunk::handle_t>> _prefetches;
+    chunked_vector<ss::future<segment_chunk::handle_t>> _prefetches;
 };
 
 class chunk_eviction_strategy {

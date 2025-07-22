@@ -102,7 +102,7 @@ ss::future<> ntp_path_hashes::load_hashes(ss::input_stream<char>& stream) {
         chunk.append(co_await stream.read_exactly(chunk_size));
 
         auto chunk_parser = iobuf_parser{std::move(chunk)};
-        auto hashes = serde::read<fragmented_vector<uint64_t>>(chunk_parser);
+        auto hashes = serde::read<chunked_vector<uint64_t>>(chunk_parser);
         vlog(_ctxlog.trace, "read {} path hashes from disk", hashes.size());
 
         for (auto hash : hashes) {

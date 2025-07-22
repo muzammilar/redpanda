@@ -5007,7 +5007,7 @@ public:
       , _size(segment_size) {}
 
     size_t max_step_size() const {
-        fragmented_vector<size_t> diffs;
+        chunked_vector<size_t> diffs;
         chunked_vector<uint64_t> pos
           = _index._state.index.copy_position_index();
         diffs.reserve(pos.size() + 1);

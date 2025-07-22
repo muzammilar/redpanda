@@ -214,7 +214,7 @@ public:
     std::optional<kafka::offset> lowest_pinned_data_offset() const override {
         return std::nullopt;
     }
-    ss::future<fragmented_vector<model::tx_range>>
+    ss::future<chunked_vector<model::tx_range>>
       aborted_tx_ranges(model::offset, model::offset) override;
 
     ss::future<> apply(

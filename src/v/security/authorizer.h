@@ -233,8 +233,8 @@ public:
       const acl_principal& principal,
       const acl_host& host) const;
 
-    ss::future<fragmented_vector<acl_binding>> all_bindings() const;
-    ss::future<> reset_bindings(const fragmented_vector<acl_binding>& bindings);
+    ss::future<chunked_vector<acl_binding>> all_bindings() const;
+    ss::future<> reset_bindings(const chunked_vector<acl_binding>& bindings);
 
     acl_store& store() &;
     const acl_store& store() const&;

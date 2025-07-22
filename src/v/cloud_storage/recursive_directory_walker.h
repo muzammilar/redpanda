@@ -33,8 +33,8 @@ struct file_list_item {
 struct walk_result {
     uint64_t cache_size{0};
     size_t filtered_out_files{0};
-    fragmented_vector<file_list_item> regular_files;
-    fragmented_vector<ss::sstring> empty_dirs;
+    chunked_vector<file_list_item> regular_files;
+    chunked_vector<ss::sstring> empty_dirs;
     size_t tmp_files_size{0};
 };
 

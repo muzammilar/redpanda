@@ -29,7 +29,7 @@ struct offsets_lookup_request
     model::node_id node_id;
 
     // List of NTPs being looked up.
-    fragmented_vector<model::ntp> ntps;
+    chunked_vector<model::ntp> ntps;
 
     auto serde_fields() { return std::tie(node_id, ntps); }
 
@@ -66,7 +66,7 @@ struct offsets_lookup_reply
     model::node_id node_id;
 
     // Kakfa end offsets per NTP.
-    fragmented_vector<ntp_offset> ntp_and_offset;
+    chunked_vector<ntp_offset> ntp_and_offset;
 
     auto serde_fields() { return std::tie(node_id, ntp_and_offset); }
 

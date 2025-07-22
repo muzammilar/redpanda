@@ -224,7 +224,7 @@ struct tx_range_manifest_json_handler {
     // User data.
     int version{-1};
     int compat_version{-1};
-    fragmented_vector<model::tx_range> ranges;
+    chunked_vector<model::tx_range> ranges;
 };
 
 remote_manifest_path generate_remote_tx_path(const remote_segment_path& path) {
@@ -232,7 +232,7 @@ remote_manifest_path generate_remote_tx_path(const remote_segment_path& path) {
 }
 
 tx_range_manifest::tx_range_manifest(
-  remote_segment_path spath, fragmented_vector<model::tx_range> range)
+  remote_segment_path spath, chunked_vector<model::tx_range> range)
   : _path(std::move(spath))
   , _ranges(std::move(range)) {}
 

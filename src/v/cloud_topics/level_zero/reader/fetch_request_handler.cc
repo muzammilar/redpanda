@@ -103,7 +103,7 @@ ss::future<> fetch_handler::process_single_request(l0::read_request<>* req) {
         req->set_value(errc::unexpected_failure);
     });
     std::optional<model::record_batch_reader> prepared;
-    std::optional<fragmented_vector<model::tx_range>> aborted_tx;
+    std::optional<chunked_vector<model::tx_range>> aborted_tx;
     try {
         auto meta = std::move(req->query.meta);
 

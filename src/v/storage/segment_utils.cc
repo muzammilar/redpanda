@@ -664,7 +664,7 @@ ss::future<compaction_result> do_self_compact_segment(
 ss::future<> build_compaction_index(
   model::record_batch_reader rdr,
   ss::lw_shared_ptr<storage::stm_manager> stm_manager,
-  fragmented_vector<model::tx_range> aborted_txs,
+  chunked_vector<model::tx_range> aborted_txs,
   segment_full_path p,
   compaction_config cfg,
   storage_resources& resources) {

@@ -592,8 +592,8 @@ void tm_stm::upsert_transaction(tx_metadata tx) {
     _transactions_lru.push_back(tx_it->second);
 }
 
-fragmented_vector<tx_metadata> tm_stm::get_transactions_list() const {
-    fragmented_vector<tx_metadata> ret;
+chunked_vector<tx_metadata> tm_stm::get_transactions_list() const {
+    chunked_vector<tx_metadata> ret;
     ret.reserve(_transactions.size());
     for (const auto& [_, wrapper] : _transactions) {
         ret.push_back(wrapper.tx);

@@ -27,7 +27,7 @@ struct null_t {
 class value;
 
 using json_object = chunked_hash_map<iobuf, value>;
-using json_array = fragmented_vector<value>;
+using json_array = chunked_vector<value>;
 
 constexpr null_t null_value{};
 

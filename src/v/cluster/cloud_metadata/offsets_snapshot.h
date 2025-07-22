@@ -47,13 +47,13 @@ struct group_offsets
           serde::version<0>,
           serde::compat_version<0>> {
         using rpc_adl_exempt = std::true_type;
-        topic_partitions(model::topic t, fragmented_vector<partition_offset> ps)
+        topic_partitions(model::topic t, chunked_vector<partition_offset> ps)
           : topic(std::move(t))
           , partitions(std::move(ps)) {}
         topic_partitions() = default;
 
         model::topic topic;
-        fragmented_vector<partition_offset> partitions;
+        chunked_vector<partition_offset> partitions;
 
         auto serde_fields() { return std::tie(topic, partitions); }
         friend bool operator==(const topic_partitions&, const topic_partitions&)
@@ -64,7 +64,7 @@ struct group_offsets
     ss::sstring group_id;
 
     // Data partitions and their committed offsets.
-    fragmented_vector<topic_partitions> offsets;
+    chunked_vector<topic_partitions> offsets;
 
     auto serde_fields() { return std::tie(group_id, offsets); }
 
@@ -83,7 +83,7 @@ struct group_offsets_snapshot
     model::partition_id offsets_topic_pid;
 
     // Consumer groups and their offsets.
-    fragmented_vector<group_offsets> groups;
+    chunked_vector<group_offsets> groups;
 
     auto serde_fields() { return std::tie(offsets_topic_pid, groups); }
 

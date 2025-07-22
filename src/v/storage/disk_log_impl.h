@@ -185,7 +185,7 @@ public:
      * across all partitions.
      */
     auto& gate() { return _compaction_housekeeping_gate; }
-    fragmented_vector<ss::lw_shared_ptr<segment>> cloud_gc_eligible_segments();
+    chunked_vector<ss::lw_shared_ptr<segment>> cloud_gc_eligible_segments();
     void set_cloud_gc_offset(model::offset) override;
 
     ss::future<reclaimable_offsets>

@@ -26,7 +26,7 @@ namespace cloud_storage::inventory {
 ss::future<> flush_ntp_hashes(
   std::filesystem::path root,
   model::ntp ntp,
-  fragmented_vector<uint64_t> hashes,
+  chunked_vector<uint64_t> hashes,
   uint64_t file_name);
 
 } // namespace cloud_storage::inventory

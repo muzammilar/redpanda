@@ -804,8 +804,8 @@ SEASTAR_THREAD_TEST_CASE(fragmented_vector_test) {
 
     for (auto i : sizes) {
         // build input
-        fragmented_vector<int> v_in;
-        fragmented_vector<int> v_in_copy;
+        chunked_vector<int> v_in;
+        chunked_vector<int> v_in_copy;
         for (int j = 0; j < i; ++j) {
             v_in.push_back(j);
             v_in_copy.push_back(j);
@@ -817,7 +817,7 @@ SEASTAR_THREAD_TEST_CASE(fragmented_vector_test) {
         iobuf b;
         serde::write(b, std::move(v_in));
         iobuf_parser parser{std::move(b)};
-        const auto v_out = serde::read<fragmented_vector<int>>(parser);
+        const auto v_out = serde::read<chunked_vector<int>>(parser);
 
         BOOST_REQUIRE_EQUAL(v_out.size(), v_in_copy.size());
         BOOST_REQUIRE_EQUAL_COLLECTIONS(
@@ -1109,7 +1109,7 @@ SEASTAR_THREAD_TEST_CASE(collections_interop) {
     auto vector = tests::random_vector(
       []() { return random_generators::gen_alphanum_string(32); }, 1024);
     ss::chunked_fifo<ss::sstring> fifo;
-    fragmented_vector<ss::sstring> f_vector;
+    chunked_vector<ss::sstring> f_vector;
     std::copy(vector.begin(), vector.end(), std::back_inserter(fifo));
     std::copy(vector.begin(), vector.end(), std::back_inserter(f_vector));
 

@@ -64,7 +64,7 @@ public:
     ~inventory_consumer() = default;
 
 private:
-    ss::future<> process_paths(fragmented_vector<ss::sstring> paths);
+    ss::future<> process_paths(chunked_vector<ss::sstring> paths);
 
     // Checks if the path belongs to one of the NTPs whose leadership belongs to
     // this node. If so, the path is hashed and added to current NTP flush
@@ -89,7 +89,7 @@ private:
 
     struct flush_state {
         uint64_t next_file_name{0};
-        fragmented_vector<uint64_t> hashes{};
+        chunked_vector<uint64_t> hashes{};
     };
     // Mapping of hash vectors per NTP, populated as paths from inventory are
     // processed.

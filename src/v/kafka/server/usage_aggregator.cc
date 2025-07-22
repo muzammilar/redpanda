@@ -27,7 +27,7 @@ static constexpr std::string_view buckets_key{"buckets"};
 struct persisted_state {
     std::chrono::seconds configured_period;
     size_t configured_windows;
-    fragmented_vector<usage_window> current_state;
+    chunked_vector<usage_window> current_state;
 };
 
 static ss::future<>
@@ -78,7 +78,7 @@ restore_from_disk(storage::kvstore& kvstore) {
       .configured_period = serde::from_iobuf<std::chrono::seconds>(
         std::move(*period)),
       .configured_windows = serde::from_iobuf<size_t>(std::move(*windows)),
-      .current_state = serde::from_iobuf<fragmented_vector<usage_window>>(
+      .current_state = serde::from_iobuf<chunked_vector<usage_window>>(
         std::move(*data))};
 }
 
@@ -377,7 +377,7 @@ void usage_aggregator<clock_type>::close_window() {
 
 template<typename clock_type>
 void usage_aggregator<clock_type>::reset_state(
-  fragmented_vector<usage_window> buckets) {
+  chunked_vector<usage_window> buckets) {
     /// called after restart to determine which bucket is the 'current' bucket
     _current_window = 0;
     if (!buckets.empty()) {

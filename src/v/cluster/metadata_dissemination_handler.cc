@@ -79,7 +79,7 @@ namespace {
 ss::future<get_leadership_reply>
 make_get_leadership_reply(const partition_leaders_table& leaders) {
     try {
-        fragmented_vector<ntp_leader> ret;
+        chunked_vector<ntp_leader> ret;
         co_await leaders.for_each_leader([&ret](
                                            model::topic_namespace_view tp_ns,
                                            model::partition_id pid,

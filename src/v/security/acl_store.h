@@ -57,8 +57,8 @@ public:
 
     // NOTE: the following functions assume that acl_store doesn't change across
     // yield points.
-    ss::future<fragmented_vector<acl_binding>> all_bindings() const;
-    ss::future<> reset_bindings(const fragmented_vector<acl_binding>& bindings);
+    ss::future<chunked_vector<acl_binding>> all_bindings() const;
+    ss::future<> reset_bindings(const chunked_vector<acl_binding>& bindings);
 
 private:
     /*

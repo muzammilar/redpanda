@@ -58,9 +58,9 @@ static model::record_batch make_random_batch(
     return std::move(builder).build();
 }
 
-static fragmented_vector<model::record_batch>
+static chunked_vector<model::record_batch>
 generate_random_record_batches(int num, int cardinality) {
-    fragmented_vector<model::record_batch> result;
+    chunked_vector<model::record_batch> result;
     std::vector<std::optional<ss::sstring>> keys;
     std::vector<std::optional<ss::sstring>> values;
     std::vector<model::record_batch_type> types{
@@ -126,7 +126,7 @@ struct ot_state_consumer {
 /// segment arrangement. The arrangement is defined
 /// by the set of segment base offset values.
 ss::future<ot_state> arrange_and_compact(
-  const fragmented_vector<model::record_batch>& batches,
+  const chunked_vector<model::record_batch>& batches,
   std::deque<model::offset> arrangement,
   bool simulate_internal_topic_compaction = false) {
     std::sort(arrangement.begin(), arrangement.end());
@@ -185,7 +185,7 @@ ss::future<ot_state> arrange_and_compact(
 /// This function generates random alignment based on the set of batches
 /// that will be written into the log.
 std::deque<model::offset> generate_random_arrangement(
-  const fragmented_vector<model::record_batch>& batches, size_t num_segments) {
+  const chunked_vector<model::record_batch>& batches, size_t num_segments) {
     EXPECT_LE(num_segments, batches.size());
     std::deque<model::offset> arr;
     // User reservoir sample to produce num_segments

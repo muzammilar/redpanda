@@ -187,13 +187,13 @@ struct get_leadership_reply
       serde::compat_version<0>> {
     using rpc_adl_exempt = std::true_type;
     using is_success = ss::bool_class<struct glr_tag>;
-    fragmented_vector<ntp_leader> leaders;
+    chunked_vector<ntp_leader> leaders;
     is_success success = is_success::yes;
 
     get_leadership_reply() noexcept = default;
 
     explicit get_leadership_reply(
-      fragmented_vector<ntp_leader> leaders, is_success success)
+      chunked_vector<ntp_leader> leaders, is_success success)
       : leaders(std::move(leaders))
       , success(success) {}
 

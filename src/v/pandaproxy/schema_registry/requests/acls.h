@@ -92,7 +92,7 @@ class acl_handler : public json::base_handler<Encoding> {
 public:
     using require_fields = ss::bool_class<struct require_fields_tag>;
     using Ch = typename json::base_handler<Encoding>::Ch;
-    using rjson_parse_result = fragmented_vector<acl>;
+    using rjson_parse_result = chunked_vector<acl>;
 
     explicit acl_handler(require_fields require_fields)
       : json::base_handler<Encoding>{json::serialization_format::none}

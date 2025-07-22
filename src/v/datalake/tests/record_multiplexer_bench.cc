@@ -36,8 +36,8 @@ namespace {
 std::string generate_nested_proto_internal(size_t total_depth) {
     constexpr auto proto_template = R"(
     message Foo{} {{
-        {} 
-        string a{} = {}; 
+        {}
+        string a{} = {};
         {}
     }})";
 
@@ -308,7 +308,7 @@ public:
     }
 
     ss::future<size_t> run_bench() {
-        auto reader = model::make_fragmented_memory_record_batch_reader(
+        auto reader = model::make_chunked_memory_record_batch_reader(
           share_batches(_batch_data));
         auto consumer = counting_consumer{.mux = create_mux(), .as = _as};
 
