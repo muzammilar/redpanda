@@ -283,7 +283,7 @@ class BaseCase:
                 conf[cname] = val
         conf['redpanda.remote.recovery'] = 'true'
         conf['redpanda.remote.write'] = 'true'
-        conf['redpanda.remote.read'] = 'false'
+        conf['redpanda.remote.read'] = 'true'
         conf.update(overrides)
         self.logger.info(f"Confg: {conf}")
         self._rpk.create_topic(topic, npart, nrepl, conf)
