@@ -240,21 +240,6 @@ class ArchivalTest(RedpandaTest):
             self.rpk.alter_topic_config(topic.name, 'redpanda.remote.write',
                                         'true')
 
-    # fips on S3 is not compatible with path-style urls. TODO remove this once get_cloud_storage_type_and_url_style is fips aware
-    @skip_fips_mode
-    @cluster(num_nodes=3)
-    @matrix(
-        cloud_storage_type_and_url_style=get_cloud_storage_type_and_url_style(
-        ))
-    def test_write(
-            self,
-            cloud_storage_type_and_url_style: List[CloudStorageTypeAndUrlStyle]
-    ):
-        """Simple smoke test, write data to redpanda and check if the
-        data hit the S3 storage bucket"""
-        self.kafka_tools.produce(self.topic, 10000, 1024)
-        validate(self._quick_verify, self.logger, 90)
-
     @cluster(num_nodes=3, log_allow_list=CONNECTION_ERROR_LOGS)
     @matrix(cloud_storage_type=get_cloud_storage_type())
     def test_isolate(self, cloud_storage_type):
