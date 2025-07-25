@@ -27,7 +27,7 @@ message StartStressFiberRequest {
     int32 stack_depth = 3;
     int32 min_ms_per_scheduling_point = 4;
     int32 max_ms_per_scheduling_point = 5;
-    int32 num_fibers = 6;
+    int32 fiber_count = 6;
 }
 
 message StartStressFiberResponse {}

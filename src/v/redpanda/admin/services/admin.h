@@ -23,11 +23,11 @@ public:
     explicit admin_service_impl(
       std::vector<std::unique_ptr<serde::pb::rpc::base_service>>* services);
 
-    ss::future<proto::admin::get_version_response>
-      get_version(proto::admin::get_version_request) override;
+    ss::future<proto::admin::build_info>
+      get_build_info(proto::admin::get_build_info_request) override;
 
-    ss::future<proto::admin::get_routes_response>
-      get_routes(proto::admin::get_routes_request) override;
+    ss::future<proto::admin::list_rpc_routes_response>
+      list_rpc_routes(proto::admin::list_rpc_routes_request) override;
 
 private:
     std::vector<std::unique_ptr<serde::pb::rpc::base_service>>* _services;

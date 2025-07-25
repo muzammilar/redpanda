@@ -74,8 +74,8 @@ debug_service_impl::start_stress_fiber(proto::start_stress_fiber_request req) {
     stress_config cfg{
       .num_fibers = 1,
     };
-    if (req.get_num_fibers() > 0) {
-        cfg.num_fibers = req.get_num_fibers();
+    if (req.get_fiber_count() > 0) {
+        cfg.num_fibers = req.get_fiber_count();
     }
     if (req.get_stack_depth() > 0) {
         cfg.stack_depth = req.get_stack_depth();
