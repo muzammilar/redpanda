@@ -30,17 +30,24 @@ machine CommitProtocol {
   // holds the next request id
   var request_id: int;
 
+  // holds the epoch for the L0 object
+  var epoch: int;
+
   start state Init {
     entry (input: (storage: Storage, epoch_service: EpochService, requests: seq[produce_request])) {
       storage = input.storage;
       epoch_service = input.epoch_service;
       requests = input.requests;
+      epoch = -1;
       goto Commit;
     }
   }
 
   state Commit {
     entry {
+      get_epoch();
+      assert epoch >= 0;
+
       build_L0();
       upload_L0();
       append_placeholders();
@@ -63,6 +70,25 @@ machine CommitProtocol {
         request_id = request.request_id,
         offset = response.offset);
     }
+  }
+
+  // Get the epoch for the L0 object. This is done by sampling the epoch
+  // service directly. In a real system we will cache the epoch instead of
+  // performing RPC for every operation. The model captures this property
+  // because the epoch service does not increment the epoch on every read.
+  fun get_epoch() {
+    send epoch_service, get_epoch_request_event, (
+      source = this,
+      request_id = request_id);
+
+    receive {
+      case get_epoch_response_event: (response: get_epoch_response) {
+        assert response.request_id == request_id;
+        epoch = response.epoch;
+      }
+    }
+
+    request_id = request_id + 1;
   }
 
   // Build the L0 object from the input produce requests. Batches in the L0
@@ -93,9 +119,10 @@ machine CommitProtocol {
   // storage service, rather than the broker, generates a globally unique
   // identifier for the object.
   fun upload_L0() {
-    send storage, put_request_event, (
+    send storage, put_group_request_event, (
       source = this,
       request_id = request_id,
+      group = epoch,
       object = object);
 
     receive {
