@@ -43,6 +43,11 @@ test tcMultiPartitionProduce [main=MultiPartitionProduceTest]:
 // This test case should not normally be run when checking the model. It is not
 // expected to pass nor fail, but rather it is used as a tool for debugging and
 // development. See `SelectStorageConfiguration` for more information.
+//
+// The way to do this is check the model with the tcFindConfiguration test case
+// like this `p check -tc tcFindConfiguration -s 1000` and then if the test finds
+// a failure (and the failure is this spec ending in the hot state) then the target
+// configuration was found in some schedule.
 test tcFindConfiguration [main=MultiPartitionProduceTest]:
   assert ProduceRequestResponse, SelectStorageConfiguration in
   (union System, { MultiPartitionProduceTest });
