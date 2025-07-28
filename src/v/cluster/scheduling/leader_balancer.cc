@@ -177,6 +177,26 @@ void leader_balancer::on_maintenance_change(
     }
 }
 
+void leader_balancer::handle_node_health_report(
+  const node_health_report& report,
+  std::optional<node_health_report_ptr> previous_report) {
+    if (!can_schedule_sooner()) {
+        return;
+    }
+
+    // Do not schedule a tick if the report was already present for current
+    // node.
+    if (previous_report) {
+        return;
+    }
+
+    vlog(
+      clusterlog.trace,
+      "node {} health report appeared, scheduling balance",
+      report.id);
+    schedule_sooner(node_status_changed_delay);
+}
+
 void leader_balancer::handle_topic_deltas(
   const chunked_vector<topic_table_topic_delta>& deltas) {
     if (!can_schedule_sooner()) {
@@ -285,6 +305,9 @@ ss::future<> leader_balancer::start() {
       std::bind_front(
         std::mem_fn(&leader_balancer::handle_topic_deltas), this));
 
+    _health_monitor_handle = _health_monitor.register_node_callback(
+      std::bind_front(
+        std::mem_fn(&leader_balancer::handle_node_health_report), this));
     /*
      * register_leadership_notification above may run callbacks synchronously
      * during registration, so make sure the timer is unarmed before arming.
@@ -311,6 +334,7 @@ ss::future<> leader_balancer::stop() {
     _members.unregister_maintenance_state_change_notification(
       _maintenance_state_notify_handle);
     _topics.unregister_topic_delta_notification(_topic_deltas_handle);
+    _health_monitor.unregister_node_callback(_health_monitor_handle);
     _timer.cancel();
     return _gate.close();
 }
