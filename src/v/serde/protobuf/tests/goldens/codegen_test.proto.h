@@ -169,41 +169,6 @@ private:
   a a_;
 };
 
-class duration {
-public:
-  duration() noexcept;
-  duration(const duration&) = delete;
-  duration& operator=(const duration&) = delete;
-  duration(duration&&) noexcept;
-  duration& operator=(duration&&) noexcept;
-  ~duration() noexcept;
-  
-  bool operator==(const duration&) const;  
-  // Serializes google.protobuf.Duration into a protocol buffer, in a way that will not cause stalls for large messages.
-  seastar::future<iobuf> to_proto() const;
-  // Serializes google.protobuf.Duration into proto3 JSON, in a way that will not cause stalls for large messages.
-  seastar::future<iobuf> to_json() const;
-  // Deserializes google.protobuf.Duration from a protocol buffer, in a way that will not cause stalls for large messages.
-  static seastar::future<duration> from_proto(iobuf);
-  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
-  // Use the iobuf version instead.
-  static seastar::future<> from_proto(serde::pb::wire_format_parser*, duration*);
-  // Deserializes google.protobuf.Duration from json, in a way that will not cause stalls for large messages.
-  static seastar::future<duration> from_json(iobuf);
-  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
-  // Use the iobuf version instead.
-  static seastar::future<> from_json(serde::pb::json::peekable_parser*, duration*);
-  
-  int64_t get_seconds() const;
-  void set_seconds(int64_t v);
-  int32_t get_nanos() const;
-  void set_nanos(int32_t v);
-
-private:
-  int64_t seconds_{};
-  int32_t nanos_{};
-};
-
 class well_known_protos {
 public:
   well_known_protos() noexcept;

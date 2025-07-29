@@ -1899,18 +1899,23 @@ func collectDescriptors(parent protoreflect.Descriptor) (msgs []protoreflect.Mes
 }
 
 func sortMessages(msgs []protoreflect.MessageDescriptor) []protoreflect.MessageDescriptor {
+	// Don't add external dependencies to the graph, only internal messages.
+	internal := map[protoreflect.FullName]bool{}
+	for _, msg := range msgs {
+		internal[msg.FullName()] = true
+	}
 	return sortCyclicalGraph(msgs, func(m protoreflect.MessageDescriptor) []protoreflect.MessageDescriptor {
 		var children []protoreflect.MessageDescriptor
 		for i := range m.Fields().Len() {
 			f := m.Fields().Get(i)
 			if f.IsMap() {
-				if child := f.MapKey().Message(); child != nil {
+				if child := f.MapKey().Message(); child != nil && internal[child.FullName()] {
 					children = append(children, child)
 				}
-				if child := f.MapValue().Message(); child != nil {
+				if child := f.MapValue().Message(); child != nil && internal[child.FullName()] {
 					children = append(children, child)
 				}
-			} else if child := f.Message(); child != nil {
+			} else if child := f.Message(); child != nil && internal[child.FullName()] {
 				children = append(children, child)
 			}
 		}
