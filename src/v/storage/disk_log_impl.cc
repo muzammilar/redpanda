@@ -1090,7 +1090,7 @@ ss::future<compaction_result> disk_log_impl::do_compact_adjacent_segments(
     }
 
     vlog(
-      gclog.debug,
+      gclog.info,
       "Compacting {} adjacent segments over range: [{}:{}]",
       segments.size(),
       segments.front()->filename(),
