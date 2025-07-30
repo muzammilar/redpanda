@@ -38,6 +38,7 @@ redpanda_cc_library(
         ":metastore",
         ":state",
         "//src/v/base",
+        "//src/v/cloud_topics/level_one/common:object_id",
         "@seastar",
     ],
 )
