@@ -23,14 +23,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/util"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/worker"
-	"github.com/redpanda-data/kgo-verifier/pkg/worker/verifier"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker/verifier"
 )
 
 var (

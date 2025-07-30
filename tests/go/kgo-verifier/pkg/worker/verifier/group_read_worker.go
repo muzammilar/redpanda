@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	worker "github.com/redpanda-data/kgo-verifier/pkg/worker"
+	worker "github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker"
 	log "github.com/sirupsen/logrus"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"golang.org/x/time/rate"

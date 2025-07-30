@@ -3,7 +3,7 @@ package util_test
 import (
 	"testing"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/util"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/util"
 )
 
 func TestLoopStateDefault(t *testing.T) {

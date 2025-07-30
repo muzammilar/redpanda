@@ -32,8 +32,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"golang.org/x/time/rate"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/util"
-	worker "github.com/redpanda-data/kgo-verifier/pkg/worker"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/util"
+	worker "github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker"
 )
 
 type MessageBody struct {

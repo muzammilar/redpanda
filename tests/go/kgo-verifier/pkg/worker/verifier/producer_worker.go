@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rcrowley/go-metrics"
-	"github.com/redpanda-data/kgo-verifier/pkg/util"
-	worker "github.com/redpanda-data/kgo-verifier/pkg/worker"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/util"
+	worker "github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker"
 	log "github.com/sirupsen/logrus"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"golang.org/x/sync/semaphore"

@@ -1,4 +1,4 @@
-module github.com/redpanda-data/kgo-verifier
+module github.com/redpanda-data/redpanda/tests/go/kgo-verifier
 
 go 1.23.8
 

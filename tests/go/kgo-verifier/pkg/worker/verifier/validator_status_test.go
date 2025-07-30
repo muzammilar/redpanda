@@ -3,7 +3,7 @@ package verifier_test
 import (
 	"testing"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/worker/verifier"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker/verifier"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/twmb/franz-go/pkg/kgo"

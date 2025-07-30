@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/util"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/twmb/franz-go/pkg/kgo"
 )

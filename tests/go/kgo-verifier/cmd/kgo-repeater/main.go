@@ -18,9 +18,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/redpanda-data/kgo-verifier/pkg/util"
-	worker "github.com/redpanda-data/kgo-verifier/pkg/worker"
-	repeater "github.com/redpanda-data/kgo-verifier/pkg/worker/repeater"
+	"github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/util"
+	worker "github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker"
+	repeater "github.com/redpanda-data/redpanda/tests/go/kgo-verifier/pkg/worker/repeater"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
