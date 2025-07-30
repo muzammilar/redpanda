@@ -1225,7 +1225,7 @@ ss::future<compaction_result> concatenate_and_rebuild_target_segment(
       feature_table,
       kvs,
       true);
-    vlog(gclog.debug, "Final compacted segment {}", replacement);
+    vlog(gclog.info, "Final compacted segment {}", replacement);
 
     /*
      * remove index files (ignoring failures if they do not exist). they will be
