@@ -14,8 +14,8 @@ redpanda_cc_library(
         "aggregator.h",
     ],
     implementation_deps = [
-        "//src/v/cloud_topics:extent_meta",
         "//src/v/cloud_topics:logger",
+        "//src/v/cloud_topics/level_zero/common:extent_meta",
         "//src/v/cloud_topics/level_zero/pipeline:serializer",
         "//src/v/container:chunked_circular_buffer",
         "//src/v/storage:record_batch_builder",
@@ -44,9 +44,9 @@ redpanda_cc_library(
     implementation_deps = [
         ":aggregator",
         "//src/v/cloud_io:remote",
-        "//src/v/cloud_topics:extent_meta",
         "//src/v/cloud_topics:logger",
         "//src/v/cloud_topics:object_utils",
+        "//src/v/cloud_topics/level_zero/common:extent_meta",
         "//src/v/cloud_topics/level_zero/pipeline:serializer",
         "//src/v/ssx:sformat",
         "//src/v/utils:human",

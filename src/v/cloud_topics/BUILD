@@ -47,22 +47,6 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "placeholder",
-    hdrs = [
-        "dl_placeholder.h",
-    ],
-    include_prefix = "cloud_topics",
-    deps = [
-        ":types",
-        "//src/v/serde",
-        "//src/v/serde:named_type",
-        "//src/v/serde:uuid",
-        "//src/v/utils:named_type",
-        "//src/v/utils:uuid",
-    ],
-)
-
-redpanda_cc_library(
     name = "data_plane_api",
     hdrs = [
         "data_plane_api.h",
@@ -76,7 +60,7 @@ redpanda_cc_library(
     ],
     deps = [
         "//src/v/base",
-        "//src/v/cloud_topics:extent_meta",
+        "//src/v/cloud_topics/level_zero/common:extent_meta",
         "//src/v/container:fragmented_vector",
         "//src/v/model",
         "//src/v/storage",
@@ -103,9 +87,8 @@ redpanda_cc_library(
     deps = [
         "//src/v/base",
         "//src/v/cloud_topics:data_plane_api",
-        "//src/v/cloud_topics:extent_meta",
         "//src/v/cloud_topics/level_one/domain:domain_supervisor",
-        "//src/v/container:chunked_circular_buffer",
+        "//src/v/cloud_topics/level_zero/common:extent_meta",
         "//src/v/container:fragmented_vector",
         "//src/v/model",
         "//src/v/storage",
@@ -141,19 +124,6 @@ redpanda_cc_library(
     visibility = ["//src/v/redpanda:__pkg__"],
     deps = [
         "@seastar",
-    ],
-)
-
-redpanda_cc_library(
-    name = "extent_meta",
-    hdrs = [
-        "extent_meta.h",
-    ],
-    include_prefix = "cloud_topics",
-    deps = [
-        ":types",
-        "//src/v/model",
-        "@fmt",
     ],
 )
 
