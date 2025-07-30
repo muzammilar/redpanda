@@ -397,15 +397,15 @@ seastar::future<iobuf> well_known_protos::to_proto() const {
 seastar::future<iobuf> well_known_protos::to_json() const {
   serde::json::writer w;
   w.begin_object();
-  w.key("single_duration");
+  w.key("singleDuration");
   w.append_raw_json(serde::pb::json::wellknown::duration_to_json(get_single_duration()));
-  w.key("repeated_duration");
+  w.key("repeatedDuration");
   w.begin_array();
   for (const auto& e : get_repeated_duration()) {
     w.append_raw_json(serde::pb::json::wellknown::duration_to_json(e));
   }
   w.end_array();
-  w.key("duration_map");
+  w.key("durationMap");
   w.begin_object();
   for (const auto& [key, value] : get_duration_map()) {
     w.key(key);

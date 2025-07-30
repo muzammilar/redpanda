@@ -921,10 +921,10 @@ func (g *implGenerator) generateMessageWriteJson(msg protoreflect.MessageDescrip
 	for i := range msg.Fields().Len() {
 		f := msg.Fields().Get(i)
 		if f.IsList() {
-			w.Printf("w.key(%q);\n", f.Name())
+			w.Printf("w.key(%q);\n", f.JSONName())
 			g.generateRepeatedFieldWriteJson(f, w)
 		} else if f.IsMap() {
-			w.Printf("w.key(%q);\n", f.Name())
+			w.Printf("w.key(%q);\n", f.JSONName())
 			g.generateMapFieldWriteJson(f, w)
 		} else if oneof := f.ContainingOneof(); oneof != nil {
 			if oneofs[oneof.Name()] {
@@ -933,7 +933,7 @@ func (g *implGenerator) generateMessageWriteJson(msg protoreflect.MessageDescrip
 			oneofs[oneof.Name()] = true
 			g.generateOneofFieldWriteJson(oneof, w)
 		} else {
-			w.Printf("w.key(%q);\n", f.Name())
+			w.Printf("w.key(%q);\n", f.JSONName())
 			g.generateSingularFieldWriteJson(f, w)
 		}
 	}
@@ -1082,7 +1082,7 @@ func (g *implGenerator) generateOneofFieldWriteJson(o protoreflect.OneofDescript
 			w.Indent()
 			defer w.Dedent()
 			defer w.Println("break;")
-			w.Printf("w.key(%q);\n", f.Name())
+			w.Printf("w.key(%q);\n", f.JSONName())
 			g.generateSingularFieldWriteJson(f, w)
 		}()
 	}
