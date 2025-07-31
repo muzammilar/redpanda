@@ -385,7 +385,10 @@ void application::shutdown() {
             return mgr.invoke_on_all(&datalake::credential_manager::stop);
         });
     }
-
+    if (cloud_topics_api.local_is_initialized()) {
+        shutdown_with_watchdog(
+          cloud_topics_api, [](auto& ct) { return ct.stop(); });
+    }
     // Stop all partitions before destructing the subsystems (transaction
     // coordinator, etc). This interrupts ongoing replication requests,
     // allowing higher level state machines to shutdown cleanly.
