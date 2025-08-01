@@ -67,28 +67,24 @@ struct mount_tamalpais
 namespace echo {
 struct echo_req
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
     auto serde_fields() { return std::tie(str); }
 };
 
 struct echo_resp
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
     auto serde_fields() { return std::tie(str); }
 };
 
 struct cnt_req
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     uint64_t expected;
     auto serde_fields() { return std::tie(expected); }
 };
 
 struct cnt_resp
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     uint64_t expected;
     uint64_t current;
     auto serde_fields() { return std::tie(expected, current); }
@@ -96,14 +92,12 @@ struct cnt_resp
 
 struct sleep_req
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     uint64_t secs;
     auto serde_fields() { return std::tie(secs); }
 };
 
 struct sleep_resp
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
     auto serde_fields() { return std::tie(str); }
 };
@@ -112,14 +106,12 @@ enum class failure_type { throw_exception, exceptional_future, none };
 
 struct throw_req
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     failure_type type;
     auto serde_fields() { return std::tie(type); }
 };
 
 struct throw_resp
   : serde::envelope<echo_req, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring reply;
 
     auto serde_fields() { return std::tie(reply); }
@@ -130,7 +122,6 @@ struct echo_req_serde_only
       echo_req_serde_only,
       serde::version<1>,
       serde::compat_version<1>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
 
     void serde_write(iobuf& out) const {
@@ -152,7 +143,6 @@ struct echo_resp_serde_only
       echo_resp_serde_only,
       serde::version<1>,
       serde::compat_version<1>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
 
     void serde_write(iobuf& out) const {
@@ -169,10 +159,6 @@ struct echo_resp_serde_only
     }
 };
 
-// serde-only type needs to be example from adl
-static_assert(rpc::is_rpc_adl_exempt<echo_req_serde_only>);
-static_assert(rpc::is_rpc_adl_exempt<echo_resp_serde_only>);
-
 } // namespace echo
 
 namespace echo_v2 {
@@ -188,7 +174,6 @@ namespace echo_v2 {
 /// servers
 struct echo_req
   : serde::envelope<echo_req, serde::version<2>, serde::compat_version<1>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
     ss::sstring str_two;
 
@@ -213,7 +198,6 @@ struct echo_req
 
 struct echo_resp
   : serde::envelope<echo_resp, serde::version<2>, serde::compat_version<1>> {
-    using rpc_adl_exempt = std::true_type;
     ss::sstring str;
     ss::sstring str_two;
 
@@ -235,8 +219,5 @@ struct echo_resp
         }
     }
 };
-
-static_assert(rpc::is_rpc_adl_exempt<echo_req>);
-static_assert(rpc::is_rpc_adl_exempt<echo_resp>);
 
 } // namespace echo_v2

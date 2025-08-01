@@ -24,7 +24,6 @@
 
 struct envelope_pod
   : serde::envelope<envelope_pod, serde::version<0>, serde::compat_version<0>> {
-    using rpc_adl_exempt = std::true_type;
     int16_t x = 1;
     int32_t y = 2;
     int64_t z = 3;
