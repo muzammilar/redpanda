@@ -38,6 +38,7 @@ redpanda_cc_library(
         "//src/v/base",
         "//src/v/cloud_io:remote",
         "//src/v/cloud_storage",
+        "//src/v/cloud_storage_clients",
         "//src/v/cloud_topics:object_utils",
         "//src/v/cloud_topics:types",
         "//src/v/cloud_topics/level_one/common:object_utils",

@@ -1289,3 +1289,20 @@ redpanda_cc_btest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "epoch_service_test",
+    timeout = "short",
+    srcs = [
+        "epoch_service_test.cc",
+    ],
+    cpu = 2,
+    deps = [
+        "//src/v/cluster",
+        "//src/v/ssx:abort_source",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
