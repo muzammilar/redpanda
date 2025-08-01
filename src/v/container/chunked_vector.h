@@ -562,13 +562,13 @@ private:
     friend class chunked_vector_validator;
     fragmented_vector(const fragmented_vector&) noexcept = default;
 
-    template<typename TT, size_t SS>
-    friend seastar::future<void>
-    fragmented_vector_fill_async(fragmented_vector<TT, SS>&, const TT&);
+    template<typename TT>
+    friend seastar::future<void> chunked_vector_fill_async(
+      fragmented_vector<TT, std::dynamic_extent>&, const TT&);
 
-    template<typename TT, size_t SS>
+    template<typename TT>
     friend seastar::future<void>
-    fragmented_vector_clear_async(fragmented_vector<TT, SS>&);
+    chunked_vector_clear_async(fragmented_vector<TT, std::dynamic_extent>&);
 
     size_t _size{0};
     size_t _capacity{0};
