@@ -92,6 +92,12 @@ class UsageStats:
     disk_bytes_written: int = 0
     batches_read: int = 0
     batches_written: int = 0
+    internal_rpc_bytes_recv: int = 0
+    internal_rpc_bytes_sent: int = 0
+    # Number of PUT operations
+    cloud_storage_puts: int = 0
+    # Number of GET operations
+    cloud_storage_gets: int = 0
 
 
 class CloudStorageCleanupStrategy(enum.Enum):
@@ -4226,10 +4232,8 @@ class RedpandaService(RedpandaServiceBase):
         def _metrics_sum(name: str) -> int:
             try:
                 samples = self.metrics_sample(name, [node])
-
                 if samples is None:
                     return 0
-
                 return sum(s.value for s in samples.samples)
             except Exception as e:
                 self.logger.warning(f"Cannot check metrics - {e}")
@@ -4245,6 +4249,14 @@ class RedpandaService(RedpandaServiceBase):
 
         self._usage_stats.batches_written += _metrics_sum(
             "vectorized_storage_log_batches_written")
+        self._usage_stats.internal_rpc_bytes_sent += _metrics_sum(
+            "vectorized_internal_rpc_sent_bytes")
+        self._usage_stats.internal_rpc_bytes_recv += _metrics_sum(
+            "vectorized_internal_rpc_received_bytes")
+        self._usage_stats.cloud_storage_puts += _metrics_sum(
+            "vectorized_cloud_client_total_uploads")
+        self._usage_stats.cloud_storage_gets += _metrics_sum(
+            "vectorized_cloud_client_total_downloads")
 
     def stop_node(self, node, timeout=None, forced=False):
         # collect usage stats before the node is stopped, the usage stats
