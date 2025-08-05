@@ -90,11 +90,9 @@ public:
     model::offset start_offset() const final {
         throw std::runtime_error("unimplemented");
     }
-    model::offset high_watermark() const final {
-        throw std::runtime_error("unimplemented");
-    }
+    model::offset high_watermark() const final { return model::offset(102); }
     checked<model::offset, kafka::error_code> last_stable_offset() const final {
-        throw std::runtime_error("unimplemented");
+        return model::offset(101);
     }
     kafka::leader_epoch leader_epoch() const final {
         throw std::runtime_error("unimplemented");
