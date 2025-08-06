@@ -313,7 +313,6 @@ struct link_configuration
  */
 struct link_state
   : serde::envelope<link_state, serde::version<0>, serde::compat_version<0>> {
-    /// The set of topics that are being mirrored by this link and their state
     link_state() noexcept = default;
     link_state(link_state&&) noexcept = default;
     link_state(const link_state&) = delete;
