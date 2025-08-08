@@ -74,3 +74,22 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "file_io",
+    srcs = ["file_io.cc"],
+    hdrs = ["file_io.h"],
+    include_prefix = "cloud_topics/level_one/common",
+    deps = [
+        ":abstract_io",
+        ":object_id",
+        ":object_utils",
+        "//src/v/cloud_io:io_result",
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage:cache",
+        "//src/v/cloud_storage_clients",
+        "//src/v/cloud_topics:logger",
+        "//src/v/model",
+        "@seastar",
+    ],
+)
