@@ -17,16 +17,162 @@
 #include "config/configuration.h"
 #include "kafka/client/client.h"
 #include "kafka/data/record_batcher.h"
+#include "kafka/data/rpc/client.h"
 #include "kafka/protocol/topic_properties.h"
 #include "security/audit/audit_log_manager.h"
 #include "security/audit/logger.h"
 #include "utils/retry.h"
 
 #include <algorithm>
+#include <chrono>
 
 namespace security::audit {
 
 namespace internal {
+
+class rpc_client_impl final : public audit_client {
+public:
+    rpc_client_impl(
+      audit_sink* sink,
+      cluster::controller* controller,
+      kafka::data::rpc::client* rpc_client)
+      : audit_client(sink, controller)
+      , _rpc_client(rpc_client) {}
+    rpc_client_impl(const rpc_client_impl&) = delete;
+    rpc_client_impl& operator=(const rpc_client_impl&) = delete;
+    rpc_client_impl(rpc_client_impl&&) = delete;
+    rpc_client_impl& operator=(rpc_client_impl&&) = delete;
+    ~rpc_client_impl() final = default;
+
+    ss::future<> do_produce(
+      model::record_batch batch,
+      model::partition_id pid,
+      audit_probe& probe,
+      ss::timer<>::time_point timeout) final {
+        constexpr auto map_ec = [](cluster::errc ec) -> kafka::error_code {
+            vlog(adtlog.debug, "Error producing audit data: {}", ec);
+            if (ec == cluster::errc::success) {
+                return kafka::error_code::none;
+            }
+            return kafka::error_code::unknown_server_error;
+        };
+
+        std::optional<kafka::error_code> ec;
+        while (!as().abort_requested() && ss::timer<>::clock::now() < timeout) {
+            auto r = co_await _rpc_client->produce(
+              model::topic_partition{model::kafka_audit_logging_topic, pid},
+              batch.copy());
+            ec.emplace(map_ec(r));
+            if (ec.value() == kafka::error_code::none) {
+                break;
+            }
+        }
+
+        // report unknown server error if we aborted before making any attempt
+        if (auto errc = ec.value_or(kafka::error_code::unknown_server_error);
+            errc != kafka::error_code::none) {
+            vlog(
+              adtlog.warn,
+              "{} audit records dropped, shutting down. Last error: {}",
+              batch.record_count(),
+              errc);
+            probe.audit_error();
+        } else {
+            probe.audit_event();
+        }
+    }
+    ss::future<> client_shutdown() final {
+        /// Nothing to do for the rpc client
+        return ss::now();
+    }
+    ss::future<> create_internal_topic() {
+        constexpr auto seven_days = 604800000ms;
+        using namespace std::chrono_literals;
+
+        int16_t replication_factor
+          = config::shard_local_cfg().audit_log_replication_factor().value_or(
+            controller()->internal_topic_replication());
+        vlog(
+          adtlog.debug,
+          "Attempting to create internal topic (replication={})",
+          replication_factor);
+
+        cluster::topic_properties audit_topic_props;
+        audit_topic_props.retention_bytes = tristate<size_t>{};
+        audit_topic_props.retention_duration
+          = tristate<std::chrono::milliseconds>{seven_days};
+        audit_topic_props.cleanup_policy_bitflags
+          = model::cleanup_policy_bitflags::deletion;
+        vlog(
+          adtlog.info,
+          "Creating audit log topic with settings: {}",
+          audit_topic_props);
+        const auto ec = co_await _rpc_client->create_topic(
+          model::kafka_audit_logging_nt,
+          std::move(audit_topic_props),
+          config::shard_local_cfg().audit_log_num_partitions(),
+          replication_factor);
+        if (ec == cluster::errc::success) {
+            vlog(
+              adtlog.debug,
+              "Auditing: created audit log topic: {}",
+              model::kafka_audit_logging_topic);
+        } else if (ec == cluster::errc::topic_already_exists) {
+            vlog(adtlog.debug, "Auditing: topic already exists");
+        } else {
+            if (ec == cluster::errc::topic_invalid_replication_factor) {
+                vlog(
+                  adtlog.warn,
+                  "Auditing: invalid replication factor on audit topic, "
+                  "check/modify settings, then disable and re-enable "
+                  "'audit_enabled'");
+            }
+            throw std::runtime_error(
+              fmt::format(
+                "Error creating audit log topic - error_code: {}", ec));
+        }
+    }
+
+    ss::future<> do_configure() final {
+        co_await create_internal_topic();
+        // TODO: may want to configure retries on the rpc client
+    }
+
+private:
+    kafka::data::rpc::client* _rpc_client;
+};
+
+class rpc_sink_impl final : public audit_sink {
+public:
+    rpc_sink_impl(
+      audit_log_manager* audit_mgr,
+      cluster::controller* controller,
+      kafka::data::rpc::client* rpc_client)
+      : audit_sink(
+          audit_mgr, controller, true) /* rpc sink is active on every shard */
+      , _rpc_client(rpc_client) {}
+
+    rpc_sink_impl(const rpc_sink_impl&) = delete;
+    rpc_sink_impl& operator=(const rpc_sink_impl&) = delete;
+    rpc_sink_impl(rpc_sink_impl&&) = delete;
+    rpc_sink_impl& operator=(rpc_sink_impl&&) = delete;
+    ~rpc_sink_impl() final = default;
+
+    void make_client() final {
+        _client = std::make_unique<rpc_client_impl>(
+          this, controller(), _rpc_client);
+    }
+
+    audit_client* client() final { return _client.get(); }
+    void reset_client() final { _client.reset(nullptr); }
+
+    ss::future<> pause() final { return manager()->pause(); }
+    ss::future<> resume() final { return manager()->resume(); }
+
+private:
+    kafka::data::rpc::client* _rpc_client;
+    std::unique_ptr<rpc_client_impl> _client;
+};
 
 class kafka_sink_impl;
 
@@ -648,6 +794,11 @@ ss::future<> kafka_client_impl::update_status(kafka::error_code errc) {
 } // namespace internal
 
 audit_sink::~audit_sink() = default;
+
+std::unique_ptr<audit_sink> audit_sink::make_rpc_sink(
+  audit_log_manager* m, cluster::controller* c, kafka::data::rpc::client* r) {
+    return std::make_unique<internal::rpc_sink_impl>(m, c, r);
+}
 
 std::unique_ptr<audit_sink> audit_sink::make_kafka_sink(
   audit_log_manager* m,

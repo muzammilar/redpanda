@@ -12,6 +12,7 @@
 #include "cluster/fwd.h"
 #include "container/chunked_vector.h"
 #include "kafka/client/fwd.h"
+#include "kafka/data/rpc/fwd.h"
 #include "model/fundamental.h"
 #include "model/record.h"
 #include "security/audit/client_probe.h"
@@ -69,12 +70,14 @@ public:
     bool active() { return _active; }
 
     using update_auth_fn = ss::noncopyable_function<ss::future<>(bool)>;
-
     static std::unique_ptr<audit_sink> make_kafka_sink(
       audit_log_manager*,
       cluster::controller*,
       kafka::client::configuration&,
       update_auth_fn);
+
+    static std::unique_ptr<audit_sink> make_rpc_sink(
+      audit_log_manager*, cluster::controller*, kafka::data::rpc::client*);
 
 protected:
     ss::future<>
