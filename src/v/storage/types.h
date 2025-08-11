@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "compaction/key_offset_map.h"
 #include "container/chunked_vector.h"
 #include "model/fundamental.h"
 #include "model/record.h"
@@ -18,7 +19,6 @@
 #include "model/timestamp.h"
 #include "storage/file_sanitizer_types.h"
 #include "storage/fwd.h"
-#include "storage/key_offset_map.h"
 #include "storage/scoped_file_tracker.h"
 
 #include <seastar/core/abort_source.hh>
@@ -446,7 +446,7 @@ struct compaction_config {
       std::optional<ntp_sanitizer_config> san_cfg = std::nullopt,
       std::optional<size_t> max_keys = std::nullopt,
       std::chrono::milliseconds min_lag_ms = std::chrono::milliseconds{0},
-      hash_key_offset_map* key_map = nullptr,
+      compaction::hash_key_offset_map* key_map = nullptr,
       scoped_file_tracker::set_t* to_clean = nullptr)
       : max_removable_local_log_offset(max_collect_offset)
       , tombstone_retention_ms(tombstone_ret_ms)
@@ -496,7 +496,7 @@ struct compaction_config {
     std::chrono::milliseconds min_lag_ms;
 
     // Hash key-offset map to reuse across compactions.
-    hash_key_offset_map* hash_key_map;
+    compaction::hash_key_offset_map* hash_key_map;
 
     // Set of intermediary files added by compactions that need to be removed,
     // e.g. because they were leftover from an aborted compaction.
@@ -524,7 +524,7 @@ struct housekeeping_config {
       std::chrono::milliseconds min_lag_ms,
       ss::abort_source& as,
       std::optional<ntp_sanitizer_config> san_cfg = std::nullopt,
-      hash_key_offset_map* key_map = nullptr)
+      compaction::hash_key_offset_map* key_map = nullptr)
       : compact(
           max_collect_offset,
           tombstone_retention_ms,

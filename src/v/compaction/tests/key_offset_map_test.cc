@@ -9,7 +9,7 @@
  * by the Apache License, Version 2.0
  */
 #include "base/units.h"
-#include "storage/key_offset_map.h"
+#include "compaction/key_offset_map.h"
 
 #include <gtest/gtest.h>
 
@@ -32,13 +32,14 @@ public:
  * helper to default-initialize the map in the typed test suite. since
  * allocations are futurized we don't want to bake it into constructor.
  */
-class default_sized_hash_key_offset_map : public storage::hash_key_offset_map {
+class default_sized_hash_key_offset_map
+  : public compaction::hash_key_offset_map {
 public:
     default_sized_hash_key_offset_map() { initialize(1_MiB).get(); }
 };
 
 using test_types = ::testing::
-  Types<storage::simple_key_offset_map, default_sized_hash_key_offset_map>;
+  Types<compaction::simple_key_offset_map, default_sized_hash_key_offset_map>;
 
 TYPED_TEST_SUITE(KeyOffsetMapTest, test_types);
 
@@ -192,7 +193,7 @@ TYPED_TEST(KeyOffsetMapTest, UpdateSucceedsWhenFull) {
 }
 
 TEST(HashKeyOffsetMapTest, HitRate) {
-    storage::hash_key_offset_map map;
+    compaction::hash_key_offset_map map;
     map.initialize(20_MiB).get();
 
     int i = 0;
@@ -209,7 +210,7 @@ TEST(HashKeyOffsetMapTest, HitRate) {
 }
 
 TEST(HashKeyOffsetMapTest, Initialize) {
-    storage::hash_key_offset_map map;
+    compaction::hash_key_offset_map map;
     map.initialize(1_MiB).get();
 
     // fill it up with keys with offset 100
@@ -263,16 +264,16 @@ TEST(HashKeyOffsetMapTest, Initialize) {
 }
 
 TEST(HashKeyOffsetMapTest, Capacity) {
-    storage::hash_key_offset_map map_1b;
+    compaction::hash_key_offset_map map_1b;
     map_1b.initialize(1).get();
 
-    storage::hash_key_offset_map map_1kb;
+    compaction::hash_key_offset_map map_1kb;
     map_1kb.initialize(1_KiB).get();
 
-    storage::hash_key_offset_map map_1mb;
+    compaction::hash_key_offset_map map_1mb;
     map_1mb.initialize(1_MiB).get();
 
-    storage::hash_key_offset_map map_10mb;
+    compaction::hash_key_offset_map map_10mb;
     map_10mb.initialize(10_MiB).get();
 
     ASSERT_LT(map_1b.capacity(), map_1kb.capacity());

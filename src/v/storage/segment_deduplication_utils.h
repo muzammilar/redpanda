@@ -9,8 +9,8 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "compaction/fwd.h"
 #include "model/fundamental.h"
-#include "storage/fwd.h"
 #include "storage/index_state.h"
 #include "storage/segment_set.h"
 
@@ -22,7 +22,9 @@ class stm_manager;
 // true if the entire reader was successfully indexed, false if the index was
 // full before reaching the end of the segment.
 ss::future<bool> build_offset_map_for_segment(
-  const compaction_config& cfg, const segment& seg, key_offset_map& m);
+  const compaction_config& cfg,
+  const segment& seg,
+  compaction::key_offset_map& m);
 
 // Builds a map from key to latest offset from the last segment to the
 // earliest segment in 'segs'.
@@ -45,13 +47,13 @@ ss::future<model::offset> build_offset_map(
   ss::lw_shared_ptr<storage::stm_manager> stm_manager,
   storage::storage_resources&,
   storage::probe&,
-  key_offset_map&);
+  compaction::key_offset_map&);
 
 // Rewrites 'seg' according to the parameters in 'cfg' to 'appender' and
 // 'cmp_idx_writer', deduplicating with latest offsets per key from 'map'.
 ss::future<index_state> deduplicate_segment(
   const compaction_config& cfg,
-  const key_offset_map& map,
+  const compaction::key_offset_map& map,
   ss::lw_shared_ptr<storage::segment> seg,
   segment_appender& appender,
   compacted_index_writer& cmp_idx_writer,
@@ -69,7 +71,7 @@ ss::future<index_state> deduplicate_segment(
 ss::future<bool> index_chunk_of_segment_for_map(
   const compaction_config& compact_cfg,
   ss::lw_shared_ptr<segment> seg,
-  key_offset_map& map,
+  compaction::key_offset_map& map,
   probe& pb,
   model::offset& last_indexed_offset);
 
@@ -79,6 +81,7 @@ ss::future<bool> index_chunk_of_segment_for_map(
 ss::future<bool> segment_needs_rewrite_with_offset_map(
   const compaction_config& cfg,
   ss::lw_shared_ptr<segment> seg,
-  const key_offset_map& map);
+  const compaction::key_offset_map& map);
+
 
 } // namespace storage

@@ -10,6 +10,7 @@
  */
 
 #pragma once
+#include "compaction/key_offset_map.h"
 #include "model/record_batch_reader.h"
 #include "model/record_batch_types.h"
 #include "storage/compacted_index.h"

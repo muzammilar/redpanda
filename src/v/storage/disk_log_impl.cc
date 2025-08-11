@@ -11,6 +11,7 @@
 
 #include "base/vassert.h"
 #include "base/vlog.h"
+#include "compaction/key_offset_map.h"
 #include "config/configuration.h"
 #include "model/adl_serde.h"
 #include "model/fundamental.h"
@@ -28,7 +29,6 @@
 #include "storage/disk_log_appender.h"
 #include "storage/exceptions.h"
 #include "storage/fwd.h"
-#include "storage/key_offset_map.h"
 #include "storage/kvstore.h"
 #include "storage/log_manager.h"
 #include "storage/log_reader.h"
@@ -730,16 +730,17 @@ ss::future<bool> disk_log_impl::sliding_window_compact(
       segs.back()->filename());
 
     // TODO: add configuration to use simple_key_offset_map.
-    std::unique_ptr<simple_key_offset_map> simple_map;
+    std::unique_ptr<compaction::simple_key_offset_map> simple_map;
     if (cfg.hash_key_map) {
         co_await cfg.hash_key_map->reset();
     } else {
-        simple_map = std::make_unique<simple_key_offset_map>(
+        simple_map = std::make_unique<compaction::simple_key_offset_map>(
           cfg.key_offset_map_max_keys);
     }
-    key_offset_map& map = cfg.hash_key_map
-                            ? dynamic_cast<key_offset_map&>(*cfg.hash_key_map)
-                            : dynamic_cast<key_offset_map&>(*simple_map);
+    compaction::key_offset_map& map
+      = cfg.hash_key_map
+          ? dynamic_cast<compaction::key_offset_map&>(*cfg.hash_key_map)
+          : dynamic_cast<compaction::key_offset_map&>(*simple_map);
     model::offset idx_start_offset;
     bool needs_chunked_sliding_window_compact = false;
     try {
@@ -1414,7 +1415,7 @@ ss::future<> disk_log_impl::do_compact(
 ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
   const compaction_config& compact_cfg,
   const segment_set& segs,
-  key_offset_map& map) {
+  compaction::key_offset_map& map) {
     // The last segment in the segment set is the first segment we attempted and
     // failed to index (the "unindexed" segment)
     auto seg = segs.back();
@@ -1545,7 +1546,7 @@ ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
 ss::future<> disk_log_impl::rewrite_segment_with_offset_map(
   const compaction_config& cfg,
   ss::lw_shared_ptr<segment> seg,
-  key_offset_map& map,
+  compaction::key_offset_map& map,
   bool is_finished_window_compaction,
   bool is_clean_compacted) {
     if (seg->offsets().get_base_offset() > map.max_offset()) {

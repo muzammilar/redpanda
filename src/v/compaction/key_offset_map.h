@@ -6,6 +6,7 @@
 // As of the Change Date specified in that file, in accordance with
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
+
 #pragma once
 
 #include "absl/container/btree_map.h"
@@ -17,7 +18,7 @@
 
 #include <seastar/core/future.hh>
 
-namespace storage {
+namespace compaction {
 
 /**
  * Map containing the latest offsets of each key.
@@ -200,4 +201,4 @@ private:
     mutable size_t probe_count_{0};
 };
 
-} // namespace storage
+} // namespace compaction

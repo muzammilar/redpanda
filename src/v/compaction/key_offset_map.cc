@@ -8,11 +8,11 @@
  * the Business Source License, use of this software will be governed
  * by the Apache License, Version 2.0
  */
-#include "storage/key_offset_map.h"
+#include "compaction/key_offset_map.h"
 
 #include "container/chunked_vector_async.h"
 
-namespace storage {
+namespace compaction {
 
 simple_key_offset_map::simple_key_offset_map(std::optional<size_t> max_keys)
   : _memory_tracker(ss::make_shared<util::mem_tracker>("simple_key_offset_map"))
@@ -266,4 +266,4 @@ hash_key_offset_map::hash_key(const compaction::compaction_key& key) const {
     }
 }
 
-} // namespace storage
+} // namespace compaction

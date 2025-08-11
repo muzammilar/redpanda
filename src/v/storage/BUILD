@@ -139,26 +139,6 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "key_offset_map",
-    srcs = [
-        "key_offset_map.cc",
-    ],
-    hdrs = [
-        "key_offset_map.h",
-    ],
-    include_prefix = "storage",
-    deps = [
-        "//src/v/compaction:key",
-        "//src/v/container:chunked_vector",
-        "//src/v/hashing:secure",
-        "//src/v/model",
-        "//src/v/utils:tracking_allocator",
-        "@abseil-cpp//absl/container:btree",
-        "@seastar",
-    ],
-)
-
-redpanda_cc_library(
     name = "chunk_cache",
     srcs = [
         "chunk_cache.cc",
@@ -363,7 +343,6 @@ redpanda_cc_library(
         ":chunk_cache",
         ":disk",
         ":index_state",
-        ":key_offset_map",
         ":logger",
         ":parser_utils",
         ":record_batch_builder",
@@ -375,7 +354,9 @@ redpanda_cc_library(
         "//src/v/bytes:iobuf",
         "//src/v/bytes:iobuf_parser",
         "//src/v/bytes:iostream",
+        "//src/v/compaction",
         "//src/v/compaction:key",
+        "//src/v/compaction:key_offset_map",
         "//src/v/compression",
         "//src/v/config",
         "//src/v/container:chunked_circular_buffer",

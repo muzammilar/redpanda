@@ -297,20 +297,6 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
-    name = "key_offset_map_test",
-    timeout = "short",
-    srcs = [
-        "key_offset_map_test.cc",
-    ],
-    deps = [
-        "//src/v/base",
-        "//src/v/storage:key_offset_map",
-        "//src/v/test_utils:gtest",
-        "@googletest//:gtest",
-    ],
-)
-
-redpanda_cc_gtest(
     name = "kvstore_test",
     timeout = "short",
     srcs = [
@@ -546,13 +532,13 @@ redpanda_cc_gtest(
     deps = [
         ":disk_log_builder",
         ":disk_log_builder_fixture",
+        "//src/v/compaction:key_offset_map",
         "//src/v/config",
         "//src/v/model",
         "//src/v/model/tests:random",
         "//src/v/random:generators",
         "//src/v/storage",
         "//src/v/storage:chunk_cache",
-        "//src/v/storage:key_offset_map",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
         "@seastar",
@@ -856,9 +842,9 @@ redpanda_cc_gtest(
     ],
     cpu = 1,
     deps = [
+        "//src/v/compaction:key_offset_map",
         "//src/v/model",
         "//src/v/storage",
-        "//src/v/storage:key_offset_map",
         "//src/v/storage/tests:batch_generators",
         "//src/v/storage/tests:storage_test_fixture",
         "//src/v/test_utils:gtest",

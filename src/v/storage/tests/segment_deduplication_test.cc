@@ -7,6 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "compaction/key_offset_map.h"
 #include "config/configuration.h"
 #include "gmock/gmock.h"
 #include "model/fundamental.h"
@@ -16,7 +17,6 @@
 #include "random/generators.h"
 #include "storage/chunk_cache.h"
 #include "storage/disk_log_impl.h"
-#include "storage/key_offset_map.h"
 #include "storage/segment_deduplication_utils.h"
 #include "storage/segment_utils.h"
 #include "storage/tests/disk_log_builder_fixture.h"
@@ -366,7 +366,7 @@ TEST(BuildOffsetMap, TestBuildSimpleMap) {
     }
 
     // Now configure a map to index some segments.
-    simple_key_offset_map partial_map(15);
+    compaction::simple_key_offset_map partial_map(15);
     auto partial_o = build_offset_map(
                        cfg,
                        segs,
@@ -378,7 +378,7 @@ TEST(BuildOffsetMap, TestBuildSimpleMap) {
     ASSERT_GT(partial_o(), 0);
 
     // Now make it large enough to index all segments.
-    simple_key_offset_map all_segs_map(100);
+    compaction::simple_key_offset_map all_segs_map(100);
     auto all_segs_o = build_offset_map(
                         cfg,
                         segs,
@@ -406,7 +406,7 @@ TEST(BuildOffsetMap, TestBuildMapWithMissingCompactedIndex) {
     // Proceed to window compaction without building any compacted indexes.
     // When building the map, we should attempt to rebuild the index if it
     // doesn't exist.
-    simple_key_offset_map missing_index_map(100);
+    compaction::simple_key_offset_map missing_index_map(100);
     auto o = build_offset_map(
                cfg,
                segs,
@@ -440,7 +440,7 @@ TEST(DeduplicateSegmentsTest, TestBadReader) {
     // Build an offset map for our log.
     compaction_config cfg(
       model::offset{0}, std::nullopt, std::nullopt, never_abort);
-    simple_key_offset_map all_segs_map(50);
+    compaction::simple_key_offset_map all_segs_map(50);
     auto map_start_offset = build_offset_map(
                               cfg,
                               segs,
@@ -502,7 +502,7 @@ TEST(DeduplicateSegmentsTest, SegmentNeedsRewriteNoCompactedIndex) {
     auto& seg = segs[0];
     compaction_config cfg(
       model::offset{0}, std::nullopt, std::nullopt, never_abort);
-    simple_key_offset_map map(50);
+    compaction::simple_key_offset_map map(50);
 
     // When the .compaction_index file doesn't exist, the segment should assume
     // it needs rewriting.
