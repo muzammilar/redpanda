@@ -590,6 +590,18 @@ TEST(ChunkedVector, FromRangeCopy) {
     auto vec = chunked_vector<int>(std::from_range, src);
 }
 
+struct adl_range_t {
+    std::vector<int> data{1, 2, 3};
+};
+auto begin(const adl_range_t& r) { return r.data.begin(); }
+auto end(const adl_range_t& r) { return r.data.end(); }
+
+TEST(ChunkedVector, FromRangeADL) {
+    adl_range_t r;
+    auto vec = chunked_vector<int>(std::from_range, r);
+    EXPECT_THAT(vec, ElementsAreArray(r.data));
+}
+
 TEST(ChunkedVector, InPlaceSingleElement) {
     auto v = chunked_vector<std::pair<ss::sstring, int32_t>>::single("a2", 3);
     ASSERT_THAT(v, ElementsAre(std::make_pair("a2", 3)));

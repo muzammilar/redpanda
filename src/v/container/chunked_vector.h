@@ -128,7 +128,10 @@ public:
     chunked_vector(std::from_range_t, Range&& range)
       : chunked_vector() {
         reserve(std::ranges::size(range));
-        std::copy(range.begin(), range.end(), std::back_inserter(*this));
+        std::copy(
+          std::ranges::begin(range),
+          std::ranges::end(range),
+          std::back_inserter(*this));
     }
 
     chunked_vector& operator=(chunked_vector&& other) noexcept {
