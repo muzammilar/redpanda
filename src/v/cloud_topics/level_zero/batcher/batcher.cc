@@ -39,7 +39,7 @@ batcher<Clock>::batcher(
   write_pipeline<Clock>::stage stage,
   cloud_storage_clients::bucket_name bucket,
   cloud_io::remote_api<Clock>& remote_api,
-  cluster_services* cluster_services)
+  experimental::cloud_topics::cluster_services* cluster_services)
   : _cluster_services(cluster_services)
   , _remote(remote_api)
   , _bucket(std::move(bucket))

@@ -173,10 +173,9 @@ static void update_batches(
 } // namespace
 
 frontend::frontend(
-  ss::lw_shared_ptr<cluster::partition> p,
-  ss::shared_ptr<experimental::cloud_topics::data_plane_api> app) noexcept
+  ss::lw_shared_ptr<cluster::partition> p, data_plane_api* app) noexcept
   : _partition(std::move(p))
-  , _data_plane(std::move(app)) {}
+  , _data_plane(app) {}
 
 const model::ntp& frontend::ntp() const { return _partition->ntp(); }
 
@@ -341,7 +340,7 @@ struct upload_and_replicate_stages {
 };
 
 static ss::future<> bg_upload_and_replicate(
-  ss::shared_ptr<experimental::cloud_topics::data_plane_api> api,
+  data_plane_api* api,
   ss::lw_shared_ptr<cluster::partition> partition,
   model::record_batch_header header,
   ss::lw_shared_ptr<upload_and_replicate_stages> op,

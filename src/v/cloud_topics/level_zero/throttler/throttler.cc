@@ -33,6 +33,12 @@ throttler<Clock>::throttler(
   , _my_stage(std::move(s)) {}
 
 template<class Clock>
+throttler<Clock>::throttler(
+  size_t tput_limit, ss::sharded<l0::write_pipeline<Clock>>& pipeline)
+  : _write_tput_tb(tput_limit, "ct:throttler")
+  , _my_stage(pipeline.local().register_write_pipeline_stage()) {}
+
+template<class Clock>
 ss::future<> throttler<Clock>::start() {
     ssx::spawn_with_gate(
       _gate, [this] { return bg_throttle_write_pipeline(); });

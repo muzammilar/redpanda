@@ -17,6 +17,7 @@
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/core/lowres_clock.hh>
+#include <seastar/core/sharded.hh>
 #include <seastar/core/weak_ptr.hh>
 
 namespace experimental::cloud_topics::l0 {
@@ -38,6 +39,8 @@ class throttler {
 public:
     // TODO: add config properties for limits
     explicit throttler(size_t tput_limit, l0::write_pipeline<Clock>::stage s);
+    explicit throttler(
+      size_t tput_limit, ss::sharded<l0::write_pipeline<Clock>>& pipeline);
 
     ss::future<> start();
     ss::future<> stop();
