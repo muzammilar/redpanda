@@ -426,6 +426,28 @@ redpanda_cc_library(
     ],
 )
 
+redpanda_cc_library(
+    name = "file_sanitizer_types",
+    srcs = [
+        "file_sanitizer_types.cc",
+    ],
+    hdrs = [
+        "file_sanitizer_types.h",
+    ],
+    implementation_deps = [
+        ":logger",
+        "//src/v/strings:string_switch",
+        "//src/v/utils:file_io",
+    ],
+    include_prefix = "storage",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/json",
+        "//src/v/model",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@seastar",
+    ],
+)
 
 redpanda_cc_library(
     name = "scoped_file_tracker",
