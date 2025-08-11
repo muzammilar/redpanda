@@ -14,8 +14,8 @@
 #include <gtest/gtest.h>
 
 namespace {
-storage::compaction_key k(std::string_view key) {
-    return storage::compaction_key(
+compaction::compaction_key k(std::string_view key) {
+    return compaction::compaction_key(
       bytes(reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 }
 
@@ -127,7 +127,7 @@ TYPED_TEST(KeyOffsetMapTest, ManyEntries) {
 
     for (int i = 0; i < test_size; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         EXPECT_TRUE(map.put(ck, model::offset(i)).get()) << fmt::format(
           "Inserting key {} offset {} size {} capacity {}",
           key,
@@ -141,7 +141,7 @@ TYPED_TEST(KeyOffsetMapTest, ManyEntries) {
       << fmt::format("map size {} capacity {}", map.size(), map.capacity());
 
     for (const auto& [key, val] : truth) {
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         const auto maybe_val = map.get(ck).get();
         ASSERT_TRUE(maybe_val.has_value());
         EXPECT_EQ(maybe_val.value(), model::offset(val));
@@ -155,7 +155,7 @@ TYPED_TEST(KeyOffsetMapTest, UpdateSucceedsWhenFull) {
     int count = 0;
     while (true) {
         const auto key = fmt::format("key-{}", count);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         if (!map.put(ck, model::offset(count)).get()) {
             break;
         }
@@ -167,7 +167,7 @@ TYPED_TEST(KeyOffsetMapTest, UpdateSucceedsWhenFull) {
     // none of the values should be equal to `count`
     for (int i = 0; i < count; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         const auto val = map.get(ck).get();
         ASSERT_TRUE(val.has_value());
         ASSERT_NE(val.value(), model::offset(count));
@@ -177,14 +177,14 @@ TYPED_TEST(KeyOffsetMapTest, UpdateSucceedsWhenFull) {
     // here we make all the values equal to `count`.
     for (int i = 0; i < count; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         ASSERT_TRUE(map.put(ck, model::offset(count)).get());
     }
 
     // all of the values should be equal to `count`
     for (int i = 0; i < count; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         const auto val = map.get(ck).get();
         ASSERT_TRUE(val.has_value());
         ASSERT_EQ(val.value(), model::offset(count));
@@ -198,7 +198,7 @@ TEST(HashKeyOffsetMapTest, HitRate) {
     int i = 0;
     while (true) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         if (!map.put(ck, model::offset(i)).get()) {
             break;
         }
@@ -215,7 +215,7 @@ TEST(HashKeyOffsetMapTest, Initialize) {
     // fill it up with keys with offset 100
     for (int i = 0;; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         if (!map.put(ck, model::offset(100)).get()) {
             break;
         }
@@ -226,14 +226,14 @@ TEST(HashKeyOffsetMapTest, Initialize) {
     // we'll try to overwrite with 99
     for (size_t i = 0; i < orig_size; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         ASSERT_TRUE(map.put(ck, model::offset(99)).get());
     }
 
     // but it won't work cause they are still in the map
     for (size_t i = 0; i < orig_size; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         const auto val = map.get(ck).get();
         ASSERT_TRUE(val.has_value());
         ASSERT_EQ(val.value(), model::offset(100));
@@ -247,7 +247,7 @@ TEST(HashKeyOffsetMapTest, Initialize) {
     // now try to write the 99 offsets
     for (size_t i = 0; i < orig_size; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         EXPECT_TRUE(map.put(ck, model::offset(99)).get());
     }
     EXPECT_EQ(map.size(), orig_size);
@@ -255,7 +255,7 @@ TEST(HashKeyOffsetMapTest, Initialize) {
     // and we'll see the offset = 99 entries
     for (size_t i = 0; i < orig_size; ++i) {
         const auto key = fmt::format("key-{}", i);
-        storage::compaction_key ck(bytes(key.begin(), key.end()));
+        compaction::compaction_key ck(bytes(key.begin(), key.end()));
         const auto val = map.get(ck).get();
         ASSERT_TRUE(val.has_value());
         ASSERT_EQ(val.value(), model::offset(99));

@@ -838,6 +838,7 @@ redpanda_cc_gtest(
         "compaction_reducer_test.cc",
     ],
     deps = [
+        "//src/v/compaction:key",
         "//src/v/random:generators",
         "//src/v/storage",
         "//src/v/storage:logger",
@@ -1011,6 +1012,7 @@ redpanda_cc_bench(
     name = "storage_rpbench",
     srcs = ["compaction_idx_bench.cc"],
     deps = [
+        "//src/v/compaction:key",
         "//src/v/model",
         "//src/v/random:generators",
         "//src/v/storage",

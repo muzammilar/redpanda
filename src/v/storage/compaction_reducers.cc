@@ -10,13 +10,13 @@
 #include "storage/compaction_reducers.h"
 
 #include "base/vlog.h"
+#include "compaction/key.h"
 #include "compression/compression.h"
 #include "model/record.h"
 #include "model/record_batch_types.h"
 #include "model/record_utils.h"
 #include "random/generators.h"
 #include "storage/compacted_index.h"
-#include "storage/compaction.h"
 #include "storage/index_state.h"
 #include "storage/logger.h"
 #include "storage/parser_utils.h"
@@ -458,7 +458,7 @@ ss::future<ss::stop_iteration> map_building_reducer::maybe_index_record_in_map(
     }
 
     auto key_view = iobuf_to_bytes(r.key());
-    auto key = enhance_key(type, is_control, key_view);
+    auto key = compaction::enhance_key(type, is_control, key_view);
     bool success = co_await _map->put(key, offset);
 
     if (success) {
