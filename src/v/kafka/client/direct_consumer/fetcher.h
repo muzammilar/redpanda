@@ -148,7 +148,7 @@ private:
  */
 class fetcher {
 public:
-    fetcher(direct_consumer* parent, model::node_id id);
+    fetcher(direct_consumer* parent, model::node_id id, fetch_sessions_enabled);
     void start();
 
     ss::future<> stop();
@@ -171,6 +171,8 @@ public:
       unassign_partition(model::topic_partition_view);
 
     bool is_idle() const { return _partitions.empty(); }
+
+    void toggle_sessions(fetch_sessions_enabled);
 
 private:
     using assignment_epoch = named_type<uint64_t, struct fetcher_epoch_tag>;

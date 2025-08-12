@@ -95,9 +95,11 @@ void fetch_session_state::toggle(fetch_sessions_enabled enable) {
 data_queue& fetcher::queue() { return *_parent->_fetched_data_queue; }
 prefix_logger& fetcher::logger() { return _parent->_cluster->logger(); }
 
-fetcher::fetcher(direct_consumer* parent, model::node_id id)
+fetcher::fetcher(
+  direct_consumer* parent, model::node_id id, fetch_sessions_enabled sessions)
   : _parent(parent)
   , _id(id)
+  , _session_state(sessions)
   , _state_lock("fetcher/state") {}
 
 void fetcher::start() {
@@ -629,6 +631,10 @@ fetcher::unassign_partition(model::topic_partition_view tp_v) {
 
     _partitions_updated.signal();
     co_return fetch_offset;
+}
+
+void fetcher::toggle_sessions(fetch_sessions_enabled v) {
+    _session_state.toggle(v);
 }
 
 ss::future<kafka_result<chunked_vector<topic_partition_offsets>>>
