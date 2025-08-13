@@ -812,6 +812,7 @@ redpanda_cc_gtest(
         "//src/v/bytes:iobuf",
         "//src/v/bytes:iostream",
         "//src/v/storage",
+        "//src/v/storage:file_sanitizer_types",
         "//src/v/test_utils:fixture",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
