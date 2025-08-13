@@ -31,6 +31,7 @@ class api;
 } // namespace storage
 
 namespace experimental::cloud_topics {
+class data_plane_api;
 
 class app : public ssx::sharded_service_container {
 public:
@@ -40,7 +41,7 @@ public:
     app& operator=(const app&) = delete;
     app(app&&) noexcept = delete;
     app& operator=(app&&) noexcept = delete;
-    ~app() = default;
+    ~app();
 
     ss::future<> construct(
       model::node_id,
@@ -67,6 +68,8 @@ public:
     // TODO: add 'get_control_plane_api' etc
 
 private:
+    ss::sstring _logger_name;
+    std::unique_ptr<data_plane_api> data_plane;
     ss::sharded<state_accessors> state;
     ss::sharded<reconciler::reconciler> reconciler;
     ss::sharded<l1::domain_supervisor> domain_supervisor;
