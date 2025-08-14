@@ -280,6 +280,11 @@ ss::future<expected<std::monostate>> catalog_client::maybe_add_bearer_auth(
         // AWS SigV4 signing will be handled after build() is called
         break;
     }
+    case config::datalake_catalog_auth_mode::gcp: {
+        // GCP credentials are handled by the credential manager and will be
+        // applied after build() is called
+        break;
+    }
     }
     co_return std::monostate{};
 }
