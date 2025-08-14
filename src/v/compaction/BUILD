@@ -81,3 +81,20 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "reducer",
+    srcs = [
+        "reducer.cc",
+    ],
+    hdrs = [
+        "reducer.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":types",
+        "//src/v/bytes",
+        "//src/v/model",
+        "@seastar",
+    ],
+)
