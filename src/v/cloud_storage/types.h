@@ -16,6 +16,7 @@
 #include "cloud_io/io_result.h"
 #include "cloud_io/transfer_details.h"
 #include "model/fundamental.h"
+#include "model/record_batch_types.h"
 #include "model/timestamp.h"
 #include "ssx/semaphore.h"
 #include "utils/named_type.h"

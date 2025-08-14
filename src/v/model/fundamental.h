@@ -507,6 +507,8 @@ using opt_abort_source_t
 
 using opt_client_address_t = std::optional<client_address_t>;
 
+using translate_offsets = ss::bool_class<struct translate_tag>;
+
 enum class fips_mode_flag : uint8_t {
     // FIPS mode disabled
     disabled = 0,

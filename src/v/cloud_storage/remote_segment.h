@@ -372,7 +372,7 @@ class remote_segment_batch_reader final {
 public:
     remote_segment_batch_reader(
       ss::lw_shared_ptr<remote_segment>,
-      const storage::log_reader_config& config,
+      const cloud_storage::cloud_log_reader_config& config,
       partition_probe& probe,
       ts_read_path_probe& ts_probe,
       ssx::semaphore_units) noexcept;
@@ -396,8 +396,10 @@ public:
 
     ss::future<> stop();
 
-    const storage::log_reader_config& config() const { return _config; }
-    storage::log_reader_config& config() { return _config; }
+    const cloud_storage::cloud_log_reader_config& config() const {
+        return _config;
+    }
+    cloud_storage::cloud_log_reader_config& config() { return _config; }
 
     /// Get max offset (redpanda offset)
     model::offset max_rp_offset() const { return _seg->get_max_rp_offset(); }
@@ -441,7 +443,7 @@ private:
     size_t produce(model::record_batch batch);
 
     ss::lw_shared_ptr<remote_segment> _seg;
-    storage::log_reader_config _config;
+    cloud_storage::cloud_log_reader_config _config;
     partition_probe& _probe;
     ts_read_path_probe& _ts_probe;
     chunked_circular_buffer<model::record_batch> _ringbuf;

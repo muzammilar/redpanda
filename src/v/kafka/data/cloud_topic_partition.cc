@@ -138,9 +138,10 @@ kafka::leader_epoch cloud_topic_partition::leader_epoch() const {
 }
 
 ss::future<storage::translating_reader> cloud_topic_partition::make_reader(
-  storage::log_reader_config cfg,
+  kafka::log_reader_config cfg,
   std::optional<model::timeout_clock::time_point> deadline) {
-    return _fe->make_reader(cfg, deadline);
+    auto config = kafka_to_cloud_topic_log_reader_config(cfg);
+    return _fe->make_reader(config, deadline);
 }
 
 ss::future<std::vector<cluster::tx::tx_range>>

@@ -1232,7 +1232,7 @@ public:
     using stop_parser = storage::batch_consumer::stop_parser;
 
     remote_segment_batch_consumer(
-      storage::log_reader_config& conf,
+      cloud_storage::cloud_log_reader_config& conf,
       remote_segment_batch_reader& parent,
       model::term_id term,
       const model::ntp& ntp,
@@ -1266,8 +1266,8 @@ public:
 
         if (header.type == model::record_batch_type::raft_data) {
             auto next = rp_to_kafka(header.last_offset()) + model::offset(1);
-            if (kafka::offset_cast(next) > _config.start_offset) {
-                _config.start_offset = kafka::offset_cast(next);
+            if (next > _config.start_offset) {
+                _config.start_offset = next;
             }
         }
     }
@@ -1281,9 +1281,7 @@ public:
           header,
           _seg_reader._cur_delta);
 
-        if (
-          rp_to_kafka(header.base_offset)
-          > model::offset_cast(_config.max_offset)) {
+        if (rp_to_kafka(header.base_offset) > _config.max_offset) {
             vlog(
               _ctxlog.debug,
               "[{}] accept_batch_start stop parser because {} > {}(kafka "
@@ -1310,8 +1308,7 @@ public:
         // The segment can be scanned from the begining so we should skip
         // irrelevant batches.
         if (unlikely(
-              rp_to_kafka(header.last_offset())
-              < model::offset_cast(_config.start_offset))) {
+              rp_to_kafka(header.last_offset()) < _config.start_offset)) {
             vlog(
               _ctxlog.debug,
               "[{}] accept_batch_start skip because "
@@ -1440,7 +1437,7 @@ public:
     }
 
 private:
-    storage::log_reader_config& _config;
+    cloud_storage::cloud_log_reader_config& _config;
     remote_segment_batch_reader& _seg_reader;
     model::record_batch_header _header;
     iobuf _records;
@@ -1452,7 +1449,7 @@ private:
 
 remote_segment_batch_reader::remote_segment_batch_reader(
   ss::lw_shared_ptr<remote_segment> s,
-  const storage::log_reader_config& config,
+  const cloud_storage::cloud_log_reader_config& config,
   partition_probe& probe,
   ts_read_path_probe& ts_probe,
   ssx::semaphore_units units) noexcept
@@ -1542,8 +1539,8 @@ remote_segment_batch_reader::init_parser() {
       _config.client_address);
 
     auto stream_off = co_await _seg->offset_data_stream(
-      model::offset_cast(_config.start_offset),
-      model::offset_cast(_config.max_offset),
+      _config.start_offset,
+      _config.max_offset,
       _config.first_timestamp,
       _config.abort_source);
 

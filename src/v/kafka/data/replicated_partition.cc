@@ -13,6 +13,7 @@
 #include "cloud_storage/types.h"
 #include "cluster/partition.h"
 #include "cluster/rm_stm.h"
+#include "kafka/data/log_reader_config.h"
 #include "kafka/protocol/errors.h"
 #include "kafka/server/errors.h"
 #include "logger.h"
@@ -203,7 +204,7 @@ kafka::leader_epoch replicated_partition::leader_epoch() const {
 
 // TODO: use previous translation speed up lookup
 ss::future<storage::translating_reader> replicated_partition::make_reader(
-  storage::log_reader_config cfg,
+  kafka::log_reader_config cfg,
   std::optional<model::timeout_clock::time_point> debounce_deadline) {
     if (
       _partition->is_read_replica_mode_enabled()
@@ -211,23 +212,26 @@ ss::future<storage::translating_reader> replicated_partition::make_reader(
         // No need to translate the offsets in this case since all fetch
         // requestS in read replica are served via remote_partition which
         // does its own translation.
-        co_return co_await _partition->make_cloud_reader(cfg);
+        auto config = kafka_to_cloud_log_reader_config(cfg);
+        co_return co_await _partition->make_cloud_reader(config);
     }
 
     if (
-      may_read_from_cloud(model::offset_cast(cfg.start_offset))
-      && cfg.start_offset >= _partition->start_cloud_offset()) {
-        cfg.type_filter = {model::record_batch_type::raft_data};
+      may_read_from_cloud(cfg.start_offset)
+      && cfg.start_offset
+           >= model::offset_cast(_partition->start_cloud_offset())) {
+        auto config = kafka_to_cloud_log_reader_config(cfg);
+        config.type_filter = {model::record_batch_type::raft_data};
         co_return co_await _partition->make_cloud_reader(
-          cfg, debounce_deadline);
+          config, debounce_deadline);
     }
 
-    cfg.start_offset = _translator->to_log_offset(cfg.start_offset);
-    cfg.max_offset = _translator->to_log_offset(cfg.max_offset);
-    cfg.type_filter = {model::record_batch_type::raft_data};
+    auto config = kafka_to_local_log_reader_config(cfg, _translator);
+    config.type_filter = {model::record_batch_type::raft_data};
+    config.translate_offsets = model::translate_offsets::yes;
 
-    cfg.translate_offsets = storage::translate_offsets::yes;
-    auto rdr = co_await _partition->make_reader(cfg, debounce_deadline);
+    auto rdr = co_await _partition->make_local_reader(
+      std::move(config), debounce_deadline);
     co_return storage::translating_reader(std::move(rdr), _translator);
 }
 
