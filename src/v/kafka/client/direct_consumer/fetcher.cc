@@ -769,7 +769,7 @@ ss::future<> fetcher::assign_partition(
       .partition_id = tp.partition,
       .fetch_offset = offset,
       .assignment_epoch = next_epoch(),
-    };
+      .incremental_include = true};
 
     _partitions_updated.signal();
     co_return;
