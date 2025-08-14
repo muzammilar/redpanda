@@ -144,7 +144,7 @@ src/v/base/format_to.h.
   partitions, topics or segments. Instead prefer `ss::max_concurrent_for_each` to
   limit concurrency. Think about how much concurrency is needed to adequately hide
   latency. See our
-  [docs](https://redpandadata.atlassian.net/wiki/spaces/CORE/pages/1331232769/Writing+scalable+and+high+performance+code#Managing-Concurrency-in-the-system)
+  [docs](https://redpandadata.atlassian.net/wiki/x/AQBZTw#Managing-Concurrency-in-the-system)
   for more background.
 
 
