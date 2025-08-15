@@ -1,4 +1,22 @@
-load("//bazel:test.bzl", "redpanda_cc_gtest")
+load("//bazel:test.bzl", "redpanda_cc_gtest", "redpanda_test_cc_library")
+
+redpanda_test_cc_library(
+    name = "simple_reducer",
+    hdrs = [
+        "simple_reducer.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/bytes",
+        "//src/v/compaction:filter",
+        "//src/v/compaction:key",
+        "//src/v/compaction:key_offset_map",
+        "//src/v/compaction:reducer",
+        "//src/v/compaction:utils",
+        "//src/v/model",
+        "@seastar",
+    ],
+)
 
 redpanda_cc_gtest(
     name = "key_offset_map_test",
