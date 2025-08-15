@@ -565,20 +565,44 @@ fetcher::process_fetch_response(
           "partitions, not both");
 
         if (!included.empty()) {
-            auto tp_it = _partitions.find(topic);
-            if (tp_it == _partitions.end()) {
+            // _partitions maps topic -> parition map
+            // partition map maps partition -> subscription info
+            // get an iterator to the topic map
+            auto topic_iterator = _partitions.find(topic);
+            if (topic_iterator == _partitions.end()) {
                 continue;
             }
+
             auto errs_it = dirty_partitions.find(topic);
             bool topic_err = errs_it != dirty_partitions.end();
-            auto& ps = tp_it->second;
+
+            auto& partition_map = topic_iterator->second;
+
             for (const auto& p : included) {
                 bool partition_err = topic_err
                                      && errs_it->second.contains(
                                        p.partition_id);
-                auto p_it = ps.find(p.partition_id);
-                if (p_it != ps.end() && !partition_err) {
-                    p_it->second.incremental_include = false;
+                auto partition_iterator = partition_map.find(p.partition_id);
+                if (
+                  partition_iterator != partition_map.end() && !partition_err) {
+                    // compare the epochs before we make an edit
+                    const auto current_epoch
+                      = partition_iterator->second.assignment_epoch;
+                    const auto fetched_epoch
+                      = epochs.find(topic)->second.find(p.partition_id)->second;
+
+                    if (current_epoch == fetched_epoch) {
+                        partition_iterator->second.incremental_include = false;
+                    } else {
+                        vlog(
+                          logger().trace,
+                          "disclusion epoch mismatch on ntp: {}, "
+                          "fetched_epoch, {}, current_epoch: {}",
+                          topic,
+                          p.partition_id,
+                          fetched_epoch,
+                          current_epoch);
+                    }
                 }
             }
         }
