@@ -271,6 +271,9 @@ copy_data_segment_reducer::filter(model::record_batch batch) {
     new_hdr.first_timestamp = first_time;
     new_hdr.max_timestamp = last_time;
     new_hdr.record_count = rec_count;
+    // Remove compression bit, as this batch isn't compressed. If the original
+    // batch is compressed, the caller will re-compress.
+    new_hdr.attrs.remove_compression();
     new_hdr.reset_size_checksum_metadata(ret);
     auto new_batch = model::record_batch(
       new_hdr, std::move(ret), model::record_batch::tag_ctor_ng{});
