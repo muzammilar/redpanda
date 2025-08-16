@@ -180,6 +180,10 @@ public:
     get_end_offset_for_term(const model::topic_id_partition&, model::term_id)
       = 0;
 
+    // Returns the partition term in which the given offset was added.
+    virtual ss::future<std::expected<model::term_id, errc>>
+    get_term_for_offset(const model::topic_id_partition&, kafka::offset) = 0;
+
     // Compaction metadata updates per partition
     //
     // Kafka compaction works by taking "dirty" ranges of data, collecting the

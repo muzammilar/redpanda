@@ -1164,3 +1164,57 @@ TEST(SimpleMetastoreTest, TestEndOffsetForEpoch) {
     EXPECT_FALSE(res.has_value());
     EXPECT_EQ(metastore::errc::missing_ntp, res.error());
 }
+
+TEST(SimpleMetastoreTest, TestEpochForOffset) {
+    simple_metastore m;
+    auto ometa
+      = om_builder(oid1, 200).add(tid_a, 0_o, 9_o, 2000_t, 0, 99).build();
+    auto add_res = m.add_objects(
+                      om_list_t::single(std::move(ometa)),
+                      terms_builder()
+                        .add(tid_a, 1_tm, 0_o)
+                        .add(tid_a, 2_tm, 3_o)
+                        .add(tid_a, 5_tm, 5_o)
+                        .add(tid_a, 6_tm, 7_o)
+                        .add(tid_a, 7_tm, 9_o)
+                        .build())
+                     .get();
+    ASSERT_TRUE(add_res.has_value());
+    ASSERT_EQ(0, add_res->corrected_next_offsets.size());
+
+    auto tp = model::topic_id_partition::from(tid_a);
+    const auto assert_term_eq = [&](kafka::offset o, model::term_id t) {
+        auto res = m.get_term_for_offset(tp, o).get();
+        EXPECT_TRUE(res.has_value()) << "offset: " << o;
+        EXPECT_EQ(res.value(), t) << "offset: " << o;
+    };
+    assert_term_eq(0_o, 1_tm);
+    assert_term_eq(1_o, 1_tm);
+    assert_term_eq(2_o, 1_tm);
+    assert_term_eq(3_o, 2_tm);
+    assert_term_eq(4_o, 2_tm);
+    assert_term_eq(5_o, 5_tm);
+    assert_term_eq(6_o, 5_tm);
+    assert_term_eq(7_o, 6_tm);
+    assert_term_eq(8_o, 6_tm);
+    assert_term_eq(9_o, 7_tm);
+
+    // At next.
+    assert_term_eq(10_o, 7_tm);
+
+    // Below start.
+    auto res = m.get_term_for_offset(tp, kafka::offset{-1}).get();
+    EXPECT_FALSE(res.has_value());
+    EXPECT_EQ(metastore::errc::out_of_range, res.error());
+
+    // Above next.
+    res = m.get_term_for_offset(tp, 11_o).get();
+    EXPECT_FALSE(res.has_value());
+    EXPECT_EQ(metastore::errc::out_of_range, res.error());
+
+    // Missing NTP.
+    res = m.get_term_for_offset(model::topic_id_partition::from(tid_b), 1_o)
+            .get();
+    EXPECT_FALSE(res.has_value());
+    EXPECT_EQ(metastore::errc::missing_ntp, res.error());
+}
