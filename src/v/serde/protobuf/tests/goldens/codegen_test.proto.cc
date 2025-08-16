@@ -22,10 +22,12 @@ a::a() noexcept = default;
 a::a(a&&) noexcept = default;
 a& a::operator=(a&&) noexcept = default;
 a::~a() noexcept = default;
-bool a::operator==(const a&) const = default;
 c& a::get_c() { return c_; }
 const c& a::get_c() const { return c_; }
 void a::set_c(c&& v) { c_ = std::move(v); }
+bool a::operator==(const a& other) const {
+  return (c_ == other.c_);
+}
 fmt::iterator a::format_to(fmt::iterator it) const {
   return fmt::format_to(it, "{{c: {}}}", c_);
 }
@@ -113,13 +115,15 @@ b::b() noexcept = default;
 b::b(b&&) noexcept = default;
 b& b::operator=(b&&) noexcept = default;
 b::~b() noexcept = default;
-bool b::operator==(const b&) const = default;
 c& b::get_c() { return c_; }
 const c& b::get_c() const { return c_; }
 void b::set_c(c&& v) { c_ = std::move(v); }
 a& b::get_a() { return a_; }
 const a& b::get_a() const { return a_; }
 void b::set_a(a&& v) { a_ = std::move(v); }
+bool b::operator==(const b& other) const {
+  return (c_ == other.c_) && (a_ == other.a_);
+}
 fmt::iterator b::format_to(fmt::iterator it) const {
   return fmt::format_to(it, "{{c: {}, a: {}}}", c_, a_);
 }
@@ -234,7 +238,10 @@ c::c() noexcept = default;
 c::c(c&&) noexcept = default;
 c& c::operator=(c&&) noexcept = default;
 c::~c() noexcept = default;
-bool c::operator==(const c&) const = default;
+bool c::operator==(const c& other) const {
+  std::ignore = other;
+  return true;
+}
 fmt::iterator c::format_to(fmt::iterator it) const {
   return fmt::format_to(it, "{{}}");
 }
@@ -296,10 +303,12 @@ super_duper_secret::super_duper_secret() noexcept = default;
 super_duper_secret::super_duper_secret(super_duper_secret&&) noexcept = default;
 super_duper_secret& super_duper_secret::operator=(super_duper_secret&&) noexcept = default;
 super_duper_secret::~super_duper_secret() noexcept = default;
-bool super_duper_secret::operator==(const super_duper_secret&) const = default;
 ss::sstring& super_duper_secret::get_value() { return value_; }
 const ss::sstring& super_duper_secret::get_value() const { return value_; }
 void super_duper_secret::set_value(ss::sstring&& v) { value_ = std::move(v); }
+bool super_duper_secret::operator==(const super_duper_secret& other) const {
+  return (value_ == other.value_);
+}
 fmt::iterator super_duper_secret::format_to(fmt::iterator it) const {
   return fmt::format_to(it, "{{value: {}}}", "<redacted>");
 }
@@ -376,7 +385,6 @@ well_known_protos::well_known_protos() noexcept = default;
 well_known_protos::well_known_protos(well_known_protos&&) noexcept = default;
 well_known_protos& well_known_protos::operator=(well_known_protos&&) noexcept = default;
 well_known_protos::~well_known_protos() noexcept = default;
-bool well_known_protos::operator==(const well_known_protos&) const = default;
 absl::Duration& well_known_protos::get_single_duration() { return single_duration_; }
 const absl::Duration& well_known_protos::get_single_duration() const { return single_duration_; }
 void well_known_protos::set_single_duration(absl::Duration&& v) { single_duration_ = std::move(v); }
@@ -404,6 +412,9 @@ void well_known_protos::set_repeated_timestamp(chunked_vector<absl::Time>&& v) {
 chunked_hash_map<ss::sstring, absl::Time>& well_known_protos::get_timestamp_map() { return timestamp_map_; }
 const chunked_hash_map<ss::sstring, absl::Time>& well_known_protos::get_timestamp_map() const { return timestamp_map_; }
 void well_known_protos::set_timestamp_map(chunked_hash_map<ss::sstring, absl::Time>&& v) { timestamp_map_ = std::move(v); }
+bool well_known_protos::operator==(const well_known_protos& other) const {
+  return (single_duration_ == other.single_duration_) && (repeated_duration_ == other.repeated_duration_) && (duration_map_ == other.duration_map_) && (single_field_mask_ == other.single_field_mask_) && (repeated_field_mask_ == other.repeated_field_mask_) && (field_mask_map_ == other.field_mask_map_) && (single_timestamp_ == other.single_timestamp_) && (repeated_timestamp_ == other.repeated_timestamp_) && (timestamp_map_ == other.timestamp_map_);
+}
 fmt::iterator well_known_protos::format_to(fmt::iterator it) const {
   return fmt::format_to(it, "{{single_duration: {}, repeated_duration: {}, duration_map: {}, single_field_mask: {}, repeated_field_mask: {}, field_mask_map: {}, single_timestamp: {}, repeated_timestamp: {}, timestamp_map: {}}}", single_duration_, repeated_duration_, duration_map_, single_field_mask_, repeated_field_mask_, field_mask_map_, single_timestamp_, repeated_timestamp_, timestamp_map_);
 }

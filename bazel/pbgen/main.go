@@ -1625,11 +1625,11 @@ func (g *implGenerator) generateMessage(msg protoreflect.MessageDescriptor, w *c
 	w.Printf("%s::%s(%s&&) noexcept = default;\n", parentType, parentType, parentType)
 	w.Printf("%s& %s::operator=(%s&&) noexcept = default;\n", parentType, parentType, parentType)
 	w.Printf("%s::~%s() noexcept = default;\n", parentType, parentType)
-	w.Printf("bool %s::operator==(const %s&) const = default;\n", parentType, parentType)
 	type FmtField struct {
 		displayName string
 		argValue    string
 	}
+	eqFields := []string{}
 	fmtFields := []FmtField{}
 	oneofs := map[protoreflect.Name]bool{}
 	for i := range msg.Fields().Len() {
@@ -1638,6 +1638,7 @@ func (g *implGenerator) generateMessage(msg protoreflect.MessageDescriptor, w *c
 		if oneof := field.ContainingOneof(); oneof != nil {
 			if !oneofs[oneof.Name()] {
 				oneofs[oneof.Name()] = true
+				eqFields = append(eqFields, fmt.Sprintf("(%s_ == other.%s_)", oneof.Name(), oneof.Name()))
 				fmtFields = append(fmtFields, FmtField{
 					displayName: string(oneof.Name()),
 					argValue:    fmt.Sprintf("%s_", oneof.Name()),
@@ -1654,6 +1655,11 @@ func (g *implGenerator) generateMessage(msg protoreflect.MessageDescriptor, w *c
 				w.Printf("void %s::set_%s(%s&& v) { %s_.emplace<%d>(std::move(v)); }\n", parentType, field.Name(), fieldType, oneof.Name(), idx)
 			}
 		} else {
+			if isPtr(field) {
+				eqFields = append(eqFields, fmt.Sprintf("((!%s_ || !other.%s_ ) ? !%s_ == !other.%s_ : *%s_ == *other.%s_)", slices.Repeat([]any{field.Name()}, 6)...))
+			} else {
+				eqFields = append(eqFields, fmt.Sprintf("(%s_ == other.%s_)", field.Name(), field.Name()))
+			}
 			argValue := fmt.Sprintf("%s_", field.Name())
 			if isDebugRedacted(field) {
 				argValue = `"<redacted>"`
@@ -1672,6 +1678,16 @@ func (g *implGenerator) generateMessage(msg protoreflect.MessageDescriptor, w *c
 			}
 		}
 	}
+	w.Printf("bool %s::operator==(const %s& other) const {\n", parentType, parentType)
+	w.Indent()
+	if len(eqFields) == 0 {
+		w.Println("std::ignore = other;")
+		w.Println("return true;")
+	} else {
+		w.Printf("return %s;\n", strings.Join(eqFields, " && "))
+	}
+	w.Dedent()
+	w.Println("}")
 	w.Printf("fmt::iterator %s::format_to(fmt::iterator it) const {\n", parentType)
 	defer w.Println("}")
 	w.Indent()
