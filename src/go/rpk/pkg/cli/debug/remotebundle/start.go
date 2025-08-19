@@ -10,6 +10,7 @@
 package remotebundle
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -36,10 +37,11 @@ type startResponse struct {
 
 func newStartCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	var (
-		noConfirm bool
-		jobID     string
-		opts      remoteBundleOptions
-		wait      bool
+		noConfirm   bool
+		jobID       string
+		opts        remoteBundleOptions
+		wait        bool
+		waitTimeout time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -152,20 +154,40 @@ A debug bundle collection is already in process. To cancel it, run:
 The debug bundle collection process has started with Job-ID %v.
 Waiting for collection to complete...
 `, jobID)
+				ctx, cancel := context.WithTimeout(cmd.Context(), waitTimeout)
+				defer cancel()
 
-				for {
-					time.Sleep(10 * time.Second)
-					status, _, _, _ := executeBundleStatus(cmd.Context(), fs, p)
-					ready, errorred := filterCompletedBrokers(status)
-					if len(ready)+len(errorred) == len(status) {
-						if len(ready) == 0 {
-							fmt.Printf(`
-The debug bundle collection process has completed with Job-ID %v, but no bundles were successfully created.
+				statusCR := "\n"
+				if !noConfirm {
+					// Only use CRs if we've been launched interactively, so we don't break logging redirection for scripts
+					statusCR = "\r"
+				}
+
+				var done bool
+				for !done {
+					select {
+					case <-ctx.Done():
+						// Context canceled or timed out
+						out.Die("%s", ctx.Err())
+					case <-time.After(10 * time.Second):
+						status, _, _, _ := executeBundleStatus(ctx, fs, p)
+						ready, errorred := filterCompletedBrokers(status)
+						// Print in all cases, even if we're about to follow with a completion, to ensure the last print of the CR'd line is correct
+						fmt.Printf("%sJob-ID %v status: %v/%v ready (%v errored)...", statusCR, jobID, len(ready), len(status), len(errorred))
+						if len(ready)+len(errorred) == len(status) {
+							if len(ready) == 0 {
+								out.Die(`
+The debug bundle collection process with Job-ID %v has completed, but no bundles were successfully created.
 To check the status, run:
-  rpk debug remote-bundle status
+	rpk debug remote-bundle status
 `, jobID)
+							}
+							fmt.Printf(`
+The debug bundle collection process with Job-ID %v has completed. To download the bundles, run:
+  rpk debug remote-bundle download
+`, jobID)
+							done = true
 						}
-						break
 					}
 				}
 			} else if anyOK {
@@ -181,6 +203,8 @@ status, run:
 	f.StringVar(&jobID, "job-id", "", "Custom UUID to assign to the job that generates the debug bundle")
 	f.BoolVar(&noConfirm, "no-confirm", false, "Disable confirmation prompt")
 	f.BoolVar(&wait, "wait", false, "Wait for completion of remote bundle before returning")
+	f.DurationVar(&waitTimeout, "wait-timeout", 300*time.Second, "How long to wait locally for remote-bundle completion if --wait is specified. Collection on cluster will continue regardless.")
+
 	// Debug bundle options:
 	opts.InstallFlags(f)
 
