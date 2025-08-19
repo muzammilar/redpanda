@@ -95,6 +95,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <ranges>
 #include <vector>
 
 namespace kafka {
@@ -115,6 +116,10 @@ security::audit::authentication_event_options make_auth_event_options(
       .uid = mtls_state.subject().value_or("")
     }
   };
+}
+
+model::topic_namespace as_tp_ns(model::topic tp) {
+    return {model::kafka_namespace, std::move(tp)};
 }
 
 model::topic_namespace_view as_tp_ns_view(const model::topic& tp) {
@@ -1295,27 +1300,26 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     request.decode(ctx.reader(), ctx.header().version);
     log_request(ctx.header(), request);
 
-    auto unauthorized_it = std::partition(
-      request.data.topic_names.begin(),
-      request.data.topic_names.end(),
-      [&ctx](const model::topic& topic) {
+    auto unauthorized = std::ranges::partition(
+      request.data.topic_names, [&ctx](const model::topic& topic) {
           return ctx.authorized(security::acl_operation::remove, topic);
       });
 
     if (!ctx.audit()) {
         delete_topics_response resp;
-        std::transform(
-          request.data.topic_names.begin(),
-          request.data.topic_names.end(),
+        resp.data.responses.reserve(
+          request.data.topic_names.size() + request.data.topics.size());
+
+        std::ranges::transform(
+          request.data.topic_names,
           std::back_inserter(resp.data.responses),
           [](const model::topic& t) {
               return deletable_topic_result{
                 .name = t, .error_code = error_code::broker_not_available};
           });
 
-        std::transform(
-          request.data.topics.begin(),
-          request.data.topics.end(),
+        std::ranges::transform(
+          request.data.topics,
           std::back_inserter(resp.data.responses),
           [](const delete_topic_state& t) {
               return deletable_topic_result{
@@ -1327,11 +1331,8 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
         co_return co_await ctx.respond(std::move(resp));
     }
 
-    std::vector<model::topic> unauthorized(
-      std::make_move_iterator(unauthorized_it),
-      std::make_move_iterator(request.data.topic_names.end()));
-
-    request.data.topic_names.erase_to_end(unauthorized_it);
+    auto valid_topic_names = std::ranges::subrange(
+      request.data.topic_names.begin(), unauthorized.begin());
 
     auto kafka_nodelete_topics
       = config::shard_local_cfg().kafka_nodelete_topics();
@@ -1341,30 +1342,20 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     if (config::shard_local_cfg().data_transforms_enabled()) {
         kafka_nodelete_topics.push_back(model::transform_log_internal_topic());
     }
-    auto nodelete_it = std::partition(
-      request.data.topic_names.begin(),
-      request.data.topic_names.end(),
-      [&kafka_nodelete_topics](const model::topic& topic) {
-          return std::find(
-                   kafka_nodelete_topics.begin(),
-                   kafka_nodelete_topics.end(),
-                   topic)
-                 == kafka_nodelete_topics.end();
+
+    auto nodelete_topics = std::ranges::partition(
+      valid_topic_names, [&kafka_nodelete_topics](const model::topic& topic) {
+          return !std::ranges::contains(kafka_nodelete_topics, topic);
       });
-    std::vector<model::topic> nodelete_topics(
-      std::make_move_iterator(nodelete_it),
-      std::make_move_iterator(request.data.topic_names.end()));
-
-    request.data.topic_names.erase_to_end(nodelete_it);
-
-    std::vector<cluster::topic_result> res;
+    valid_topic_names = std::ranges::subrange(
+      valid_topic_names.begin(), nodelete_topics.begin());
 
     // Measure the partition mutation rate
     auto resp_delay = 0ms;
     const auto now = quota_manager::clock::now();
     auto quota_exceeded_it = co_await ssx::partition(
-      request.data.topic_names.begin(),
-      request.data.topic_names.end(),
+      valid_topic_names.begin(),
+      valid_topic_names.end(),
       [&ctx, &resp_delay, now](const model::topic& t) {
           const auto cfg = ctx.metadata_cache().get_topic_cfg(as_tp_ns_view(t));
           const auto mutations = cfg ? cfg->partition_count : 0;
@@ -1378,49 +1369,37 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
             });
       });
 
-    std::vector<model::topic> quota_exceeded(
-      std::make_move_iterator(quota_exceeded_it),
-      std::make_move_iterator(request.data.topic_names.end()));
+    std::ranges::subrange quota_exceeded(
+      quota_exceeded_it, valid_topic_names.end());
+    valid_topic_names = std::ranges::subrange(
+      valid_topic_names.begin(), quota_exceeded.begin());
 
-    request.data.topic_names.erase_to_end(quota_exceeded_it);
-
-    if (!request.data.topic_names.empty()) {
+    std::vector<cluster::topic_result> do_delete_res;
+    if (!valid_topic_names.empty()) {
         // construct namespaced topic set from request
-        std::vector<model::topic_namespace> topics;
-        topics.reserve(request.data.topic_names.size());
-        std::transform(
-          std::begin(request.data.topic_names),
-          std::end(request.data.topic_names),
-          std::back_inserter(topics),
-          [](model::topic& tp) {
-              return model::topic_namespace(
-                model::kafka_namespace, std::move(tp));
-          });
+        auto topics = valid_topic_names | std::views::as_rvalue
+                      | std::views::transform(&as_tp_ns);
         auto tout = request.data.timeout_ms + model::timeout_clock::now();
-        res = co_await ctx.topics_frontend().delete_topics(
-          std::move(topics), tout);
+        do_delete_res = co_await ctx.topics_frontend().delete_topics(
+          std::ranges::to<std::vector>(topics), tout);
     }
 
-    // initialize response with topic placeholders
     delete_topics_response resp;
-    resp.data.responses.reserve(res.size());
-    std::transform(
-      res.begin(),
-      res.end(),
-      std::back_inserter(resp.data.responses),
-      [](cluster::topic_result tr) {
-          return deletable_topic_result{
-            .name = std::move(tr.tp_ns.tp),
-            .error_code = map_topic_error_code(tr.ec)};
-      });
-
+    resp.data.responses.reserve(
+      request.data.topic_names.size() + request.data.topics.size());
     resp.data.throttle_time_ms = resp_delay;
-    for (auto& topic : unauthorized) {
+
+    for (auto& tr : do_delete_res) {
         resp.data.responses.push_back(
-          deletable_topic_result{
-            .name = std::move(topic),
-            .error_code = error_code::topic_authorization_failed,
-          });
+          {.name = std::move(tr.tp_ns.tp),
+           .error_code = map_topic_error_code(tr.ec)});
+    }
+
+    for (auto& topic : unauthorized) {
+        resp.data.responses.push_back({
+          .name = std::move(topic),
+          .error_code = error_code::topic_authorization_failed,
+        });
     }
 
     for (auto& topic : quota_exceeded) {
@@ -1431,10 +1410,9 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
                           ? error_code::throttling_quota_exceeded
                           : error_code::unknown_server_error;
         resp.data.responses.push_back(
-          deletable_topic_result{
-            .name = std::move(topic),
-            .error_code = ec,
-            .error_message = "Too many partition mutations requested"});
+          {.name = std::move(topic),
+           .error_code = ec,
+           .error_message = "Too many partition mutations requested"});
     }
 
     co_return co_await ctx.respond(std::move(resp));
