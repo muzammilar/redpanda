@@ -18,6 +18,7 @@
 #include "config/broker_authn_endpoint.h"
 #include "config/configuration.h"
 #include "config/node_config.h"
+#include "container/chunked_hash_map.h"
 #include "features/enterprise_feature_messages.h"
 #include "features/feature_table.h"
 #include "kafka/protocol/errors.h"
@@ -59,6 +60,7 @@
 #include "kafka/server/usage_manager.h"
 #include "model/record.h"
 #include "net/connection.h"
+#include "random/generators.h"
 #include "security/acl.h"
 #include "security/audit/schemas/iam.h"
 #include "security/audit/schemas/utils.h"
@@ -1300,10 +1302,148 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     request.decode(ctx.reader(), ctx.header().version);
     log_request(ctx.header(), request);
 
-    auto unauthorized = std::ranges::partition(
-      request.data.topic_names, [&ctx](const model::topic& topic) {
-          return ctx.authorized(security::acl_operation::remove, topic);
-      });
+    // Determine the names and IDs that have been provided, and detect
+    // duplicates.
+    chunked_hash_set<model::topic> provided_names;
+    chunked_hash_set<model::topic> duplicate_provided_names;
+    chunked_hash_set<model::topic_id> provided_ids;
+    chunked_hash_set<model::topic_id> duplicate_provided_ids;
+
+    // Ensure that the value exists either in provided or in duplicates
+    constexpr auto add_provided =
+      [](auto& provided, auto& duplicates, const auto& t) {
+          if (duplicates.contains(t)) {
+              provided.erase(t);
+          } else {
+              auto [it, inserted] = provided.insert(t);
+              if (!inserted) {
+                  provided.erase(it);
+                  duplicates.insert(t);
+              }
+          }
+      };
+
+    delete_topics_response resp;
+    resp.data.responses.reserve(
+      request.data.topic_names.size() + request.data.topics.size());
+
+    for (const auto& name : request.data.topic_names) {
+        add_provided(provided_names, duplicate_provided_names, name);
+    }
+
+    for (const auto& t : request.data.topics) {
+        if (!t.name.has_value()) {
+            if (t.topic_id == model::topic_id{}) {
+                resp.data.responses.push_back(
+                  {.error_code = error_code::invalid_request,
+                   .error_message
+                   = "Neither topic name nor id were specified."});
+            } else {
+                add_provided(provided_ids, duplicate_provided_ids, t.topic_id);
+            }
+        } else {
+            if (t.topic_id == model::topic_id{}) {
+                add_provided(
+                  provided_names, duplicate_provided_names, t.name.value());
+            } else {
+                resp.data.responses.push_back(
+                  {.name = t.name,
+                   .topic_id = t.topic_id,
+                   .error_code = error_code::invalid_request,
+                   .error_message
+                   = "You may not specify both topic name and topic id."});
+            }
+        }
+    }
+
+    for (auto& topic : duplicate_provided_names) {
+        resp.data.responses.push_back(
+          {.name = topic,
+           .error_code = error_code::invalid_request,
+           .error_message = "Duplicate topic name."});
+    }
+    duplicate_provided_names.clear();
+
+    for (const auto& id : duplicate_provided_ids) {
+        resp.data.responses.push_back(
+          {.topic_id = id,
+           .error_code = error_code::invalid_request,
+           .error_message = "Duplicate topic id."});
+    }
+    duplicate_provided_ids.clear();
+
+    chunked_vector<model::topic> to_authenticate(
+      std::make_move_iterator(provided_names.begin()),
+      std::make_move_iterator(provided_names.end()));
+
+    chunked_hash_map<model::topic_id, model::topic> id_to_name;
+    for (const auto& id : provided_ids) {
+        auto tp_ns = ctx.metadata_cache().get_name_by_id(id);
+        if (!tp_ns.has_value() || tp_ns->ns != model::kafka_namespace) {
+            resp.data.responses.push_back(
+              {.topic_id = id,
+               .error_code = error_code::unknown_topic_id,
+               .error_message = "This server does not host this topic ID."});
+        } else {
+            to_authenticate.push_back(tp_ns->tp);
+            id_to_name.emplace(id, std::move(tp_ns->tp));
+        }
+    }
+    provided_ids.clear();
+
+    for (auto it = id_to_name.begin(); it != id_to_name.end(); ++it) {
+        const auto& [id, name] = *it;
+        if (!ctx.authorized(security::acl_operation::remove, name)) {
+            if (ctx.authorized(security::acl_operation::describe, name)) {
+                resp.data.responses.push_back(
+                  {.name = name,
+                   .topic_id = id,
+                   .error_code = error_code::topic_authorization_failed});
+            } else {
+                resp.data.responses.push_back(
+                  {.topic_id = id,
+                   .error_code = error_code::topic_authorization_failed});
+            }
+            id_to_name.erase(it);
+        }
+    }
+
+    for (const auto& name : provided_names) {
+        auto tp_ns{as_tp_ns_view(name)};
+        const auto cfg = ctx.metadata_cache().get_topic_metadata_ref(tp_ns);
+        const auto id = cfg ? cfg->get().get_configuration().tp_id
+                            : std::nullopt;
+
+        if (!ctx.authorized(security::acl_operation::describe, name)) {
+            resp.data.responses.push_back(
+              {.name = name,
+               .error_code = error_code::topic_authorization_failed});
+        } else if (!id) {
+            resp.data.responses.push_back(
+              {.name = name,
+               .error_code = error_code::unknown_topic_or_partition,
+               .error_message
+               = "This server does not host this topic-partition."});
+        } else if (ctx.authorized(security::acl_operation::remove, name)) {
+            auto failed = duplicate_provided_ids.contains(*id)
+                          || !id_to_name.insert_or_assign(*id, name).second;
+            if (failed) {
+                duplicate_provided_ids.emplace(*id);
+                id_to_name.erase(*id);
+                resp.data.responses.push_back(
+                  {.name = name,
+                   .topic_id = *id,
+                   .error_code = error_code::invalid_request,
+                   .error_message = "The provided topic name maps to an ID "
+                                    "that was already supplied."});
+            }
+        } else {
+            resp.data.responses.push_back(
+              {.name = name,
+               .error_code = error_code::topic_authorization_failed});
+        }
+    }
+    provided_names.clear();
 
     if (!ctx.audit()) {
         delete_topics_response resp;
@@ -1324,6 +1464,7 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
           [](const delete_topic_state& t) {
               return deletable_topic_result{
                 .name = t.name,
+                .topic_id = t.topic_id,
                 .error_code = error_code::broker_not_available,
               };
           });
@@ -1331,8 +1472,14 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
         co_return co_await ctx.respond(std::move(resp));
     }
 
+    chunked_vector<model::topic> topic_names;
+    topic_names.reserve(id_to_name.size());
+    for (auto&& [_, name] : id_to_name) {
+        topic_names.push_back(std::move(name));
+    }
+    id_to_name.clear();
     auto valid_topic_names = std::ranges::subrange(
-      request.data.topic_names.begin(), unauthorized.begin());
+      topic_names.begin(), topic_names.end());
 
     auto kafka_nodelete_topics
       = config::shard_local_cfg().kafka_nodelete_topics();
@@ -1374,34 +1521,6 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     valid_topic_names = std::ranges::subrange(
       valid_topic_names.begin(), quota_exceeded.begin());
 
-    std::vector<cluster::topic_result> do_delete_res;
-    if (!valid_topic_names.empty()) {
-        // construct namespaced topic set from request
-        auto topics = valid_topic_names | std::views::as_rvalue
-                      | std::views::transform(&as_tp_ns);
-        auto tout = request.data.timeout_ms + model::timeout_clock::now();
-        do_delete_res = co_await ctx.topics_frontend().delete_topics(
-          std::ranges::to<std::vector>(topics), tout);
-    }
-
-    delete_topics_response resp;
-    resp.data.responses.reserve(
-      request.data.topic_names.size() + request.data.topics.size());
-    resp.data.throttle_time_ms = resp_delay;
-
-    for (auto& tr : do_delete_res) {
-        resp.data.responses.push_back(
-          {.name = std::move(tr.tp_ns.tp),
-           .error_code = map_topic_error_code(tr.ec)});
-    }
-
-    for (auto& topic : unauthorized) {
-        resp.data.responses.push_back({
-          .name = std::move(topic),
-          .error_code = error_code::topic_authorization_failed,
-        });
-    }
-
     for (auto& topic : quota_exceeded) {
         /// The throttling_quota_exceeded code is only respected by newer
         /// clients, older clients will observe a different failure and be
@@ -1414,6 +1533,26 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
            .error_code = ec,
            .error_message = "Too many partition mutations requested"});
     }
+
+    std::vector<cluster::topic_result> do_delete_res;
+    if (!valid_topic_names.empty()) {
+        // construct namespaced topic set from request
+        auto topics = valid_topic_names | std::views::as_rvalue
+                      | std::views::transform(&as_tp_ns);
+        auto tout = request.data.timeout_ms + model::timeout_clock::now();
+        do_delete_res = co_await ctx.topics_frontend().delete_topics(
+          std::ranges::to<std::vector>(topics), tout);
+    }
+
+    resp.data.throttle_time_ms = resp_delay;
+
+    for (auto& tr : do_delete_res) {
+        resp.data.responses.push_back(
+          {.name = std::move(tr.tp_ns.tp),
+           .error_code = map_topic_error_code(tr.ec)});
+    }
+
+    std::ranges::shuffle(resp.data.responses, random_generators::internal::gen);
 
     co_return co_await ctx.respond(std::move(resp));
 }
