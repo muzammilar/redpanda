@@ -167,7 +167,7 @@ std::expected<std::monostate, stm_update_error> add_objects_update::can_apply(
         // First do a basic check that the incoming term entries can be
         // appended to our state without violating ordering requirements.
         if (p_state.has_value() && !p_state->get().term_starts.empty()) {
-            auto p_last_entry = p_state->get().term_starts.back();
+            auto p_last_entry = *p_state->get().term_starts.rbegin();
             auto req_first_entry = req_entries.begin();
 
             // NOTE: it's valid for the first requested term to be equal to the
@@ -267,15 +267,12 @@ add_objects_update::apply(state& state) {
             if (
               !p_state.term_starts.empty()
               && req_terms.begin()->term_id
-                   <= p_state.term_starts.back().term_id) {
+                   <= p_state.term_starts.rbegin()->term_id) {
                 // If the first added term matches the back of the latest
                 // tracked term, it isn't a new term.
                 ++new_term_it;
             }
-            std::copy(
-              new_term_it,
-              req_terms.end(),
-              std::back_inserter(p_state.term_starts));
+            p_state.term_starts.insert(new_term_it, req_terms.end());
         } else {
             // The incoming extents don't align with the next position. "Drop"
             // them all.

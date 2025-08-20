@@ -57,6 +57,7 @@ struct term_start
       envelope<term_start, serde::version<0>, serde::compat_version<0>> {
     friend bool operator==(const term_start&, const term_start&) = default;
     auto serde_fields() { return std::tie(term_id, start_offset); }
+    auto operator<=>(const term_start&) const = default;
 
     model::term_id term_id;
     kafka::offset start_offset;
@@ -209,7 +210,7 @@ struct partition_state
     // information to return a value for the start_offset, even when the log
     // has been prefix truncated to be empty. I.e. this list should never be
     // empty once there has been data in the log.
-    chunked_vector<term_start> term_starts;
+    absl::btree_set<term_start> term_starts;
 };
 
 // Tracks the state managed for each partition of a Kafka topic.
