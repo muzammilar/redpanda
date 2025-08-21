@@ -193,6 +193,17 @@ cluster_link_manager_test_fixture::await_status_report(
     co_return std::nullopt;
 }
 
+ss::future<bool> cluster_link_manager_test_fixture::wait_for_report_to_match(
+  ss::lowres_clock::duration timeout,
+  ss::lowres_clock::duration backoff,
+  std::function<bool(const model::cluster_link_task_status_report&)>
+    predicate) {
+    return await_status_report(timeout, backoff, std::move(predicate))
+      .then([](std::optional<model::cluster_link_task_status_report> report) {
+          return report.has_value();
+      });
+}
+
 void cluster_link_manager_test_fixture::set_topic_config(
   cluster::topic_configuration cfg) {
     _tmc->set_topic_config(std::move(cfg));

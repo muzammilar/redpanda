@@ -471,6 +471,12 @@ public:
         return _consumer_group_router;
     }
 
+    ss::future<bool> wait_for_report_to_match(
+      ss::lowres_clock::duration timeout,
+      ss::lowres_clock::duration backoff,
+      std::function<bool(const model::cluster_link_task_status_report&)>
+        predicate);
+
 private:
     void setup_cluster_mock();
 
