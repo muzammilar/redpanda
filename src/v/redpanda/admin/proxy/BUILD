@@ -60,11 +60,11 @@ redpanda_cc_library(
         "service.h",
     ],
     implementation_deps = [
-        ":proxy_rpc",
         "//src/v/rpc",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":proxy_rpc",
         ":types",
         "//src/v/base",
         "//src/v/bytes:iobuf",

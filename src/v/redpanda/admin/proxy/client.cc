@@ -13,6 +13,7 @@
 
 #include "base/vlog.h"
 #include "redpanda/admin/proxy/proxy_service.h"
+#include "redpanda/admin/proxy/types.h"
 #include "rpc/connection_cache.h"
 #include "serde/protobuf/rpc.h"
 

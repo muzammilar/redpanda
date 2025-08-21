@@ -505,6 +505,27 @@ void admin_server::add_service(
     _services.push_back(std::move(service));
 }
 
+ss::future<iobuf>
+admin_server::handle_rpc_request(serde::pb::rpc::context ctx, iobuf buf) {
+    auto it = std::ranges::find(
+      _services,
+      ctx.service_name,
+      [](const std::unique_ptr<serde::pb::rpc::base_service>& service) {
+          return service->name();
+      });
+    if (it == _services.end()) {
+        throw serde::pb::rpc::unimplemented_exception(
+          fmt::format("Service {} not found", ctx.service_name));
+    }
+    for (const auto& route : (*it)->all_routes()) {
+        if (route.method_name == ctx.method_name) {
+            return route.handler(std::move(ctx), std::move(buf));
+        }
+    }
+    throw serde::pb::rpc::unimplemented_exception(
+      fmt::format("Method {}.{} not found", ctx.service_name, ctx.method_name));
+}
+
 ss::future<> admin_server::start() {
     co_await _debug_bundle_file_handler.start();
 

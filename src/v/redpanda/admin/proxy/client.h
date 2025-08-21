@@ -14,7 +14,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "bytes/iobuf.h"
 #include "model/fundamental.h"
-#include "redpanda/admin/proxy/types.h"
 #include "rpc/connection_cache.h"
 #include "serde/protobuf/rpc.h"
 
@@ -33,6 +32,36 @@ public:
       , _conn_cache(conn_cache)
       , _all_node_ids_fn(std::move(all_node_ids_fn)) {}
 
+    // Create an RPC client for the given node, which can be used to
+    // proxy requests to that node.
+    template<typename ProtobufServiceClient>
+    ProtobufServiceClient make_client_for_node(model::node_id node) {
+        return ProtobufServiceClient(
+          [this, node](serde::pb::rpc::context ctx, iobuf payload) {
+              return send(node, std::move(ctx), std::move(payload));
+          });
+    }
+
+    // Create an RPC client for every other node in the cluster.
+    template<typename ProtobufServiceClient>
+    absl::flat_hash_map<model::node_id, ProtobufServiceClient>
+    make_clients_for_other_nodes() {
+        auto node_ids = _all_node_ids_fn();
+        absl::flat_hash_map<model::node_id, ProtobufServiceClient> clients;
+        clients.reserve(node_ids.size() - 1);
+        for (const auto& node : node_ids) {
+            if (node == _self) {
+                continue;
+            }
+            clients.emplace(
+              node, make_client_for_node<ProtobufServiceClient>(node));
+        }
+        return clients;
+    }
+
+    model::node_id self_node_id() const noexcept { return _self; }
+
+private:
     // Send a request to the target node, using the provided context.
     //
     // Returns the response as an iobuf, or a failed future if there was an
@@ -43,7 +72,6 @@ public:
       serde::pb::rpc::context ctx,
       iobuf payload) noexcept;
 
-private:
     model::node_id _self;
     ss::sharded<rpc::connection_cache>* _conn_cache;
     std::function<std::vector<model::node_id>()> _all_node_ids_fn;
