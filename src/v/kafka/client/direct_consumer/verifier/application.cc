@@ -96,7 +96,7 @@ ss::future<> consumer_runner::do_fetch() {
             }
 
             vlog(
-              v_logger.trace,
+              v_logger.info,
               "found data for ntp: {}/{}",
               fetched_topic_data.topic,
               fetched_partition_data.partition_id);
@@ -124,11 +124,28 @@ ss::future<> consumer_runner::do_fetch() {
               fetched_partition_data.data.back().last_offset());
 
             vlog(
-              v_logger.trace,
+              v_logger.info,
               "fetched ntp: {}/{}, offset: {}",
               fetched_topic_data.topic,
               fetched_partition_data.partition_id,
               last_fetched_offset);
+
+            auto first_fetched_offset = model::offset_cast(
+              fetched_partition_data.data.front().last_offset());
+            if (first_fetched_offset <= partition_stats.last_fetched_offset) {
+                // this is legal but too much of this is undesirable
+                vlog(
+                  v_logger.info,
+                  "[client: {}] duplicate offsets detected for topic: {}, "
+                  "partition: {}, fetched start: {}, fetched end: {}, "
+                  "application last fetched offset: {}",
+                  _id,
+                  fetched_topic_data.topic,
+                  fetched_partition_data.partition_id,
+                  first_fetched_offset,
+                  last_fetched_offset,
+                  partition_stats.last_fetched_offset);
+            }
 
             if (last_fetched_offset <= partition_stats.last_fetched_offset) {
                 _non_monotonic_fetches++;
