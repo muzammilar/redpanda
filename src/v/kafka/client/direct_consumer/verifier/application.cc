@@ -94,6 +94,13 @@ ss::future<> consumer_runner::do_fetch() {
             if (fetched_partition_data.data.empty()) {
                 continue; // no data to process
             }
+
+            vlog(
+              v_logger.trace,
+              "found data for ntp: {}/{}",
+              fetched_topic_data.topic,
+              fetched_partition_data.partition_id);
+
             auto& partition_stats = _stats[fetched_topic_data.topic]
                                           [fetched_partition_data.partition_id];
             if (fetched_partition_data.error != kafka::error_code::none) {
@@ -115,6 +122,14 @@ ss::future<> consumer_runner::do_fetch() {
             _total_records += totals.count;
             auto last_fetched_offset = model::offset_cast(
               fetched_partition_data.data.back().last_offset());
+
+            vlog(
+              v_logger.trace,
+              "fetched ntp: {}/{}, offset: {}",
+              fetched_topic_data.topic,
+              fetched_partition_data.partition_id,
+              last_fetched_offset);
+
             if (last_fetched_offset <= partition_stats.last_fetched_offset) {
                 _non_monotonic_fetches++;
                 vlog(
