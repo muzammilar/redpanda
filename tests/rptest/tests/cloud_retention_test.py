@@ -42,9 +42,9 @@ class CloudRetentionTest(PreallocNodesTest):
 
     @cluster(num_nodes=4,
              log_allow_list=[r"failed to hydrate chunk.*NotFound"])
+    @skip_debug_mode
     @matrix(max_consume_rate_mb=[20, None],
             cloud_storage_type=get_cloud_storage_type())
-    @skip_debug_mode
     def test_cloud_retention(self, max_consume_rate_mb, cloud_storage_type):
         """
         Test cloud retention with an ongoing workload. The consume load comes
