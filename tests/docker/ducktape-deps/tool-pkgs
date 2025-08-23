@@ -43,3 +43,7 @@ chmod +x llvm.sh
 mkdir -p /opt/llvm
 # make it available in a version-independent way
 ln -s /usr/bin/llvm-addr2line-$LLVM_VERSION /opt/llvm/llvm-addr2line
+
+# Make llvm-symbolizer available in the PATH, this allows ASAN, UBSAN, etc
+# symbolization to work out of the box.
+ln -s /usr/bin/llvm-symbolizer-$LLVM_VERSION /usr/local/bin/llvm-symbolizer
