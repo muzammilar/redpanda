@@ -103,23 +103,6 @@ ss::future<> manager::start() {
         co_await handle_on_link_change(id);
     }
 
-    auto controller_node_leader = _partition_leader_cache->get_leader_node(
-      ::model::controller_ntp);
-    if (
-      controller_node_leader.has_value()
-      && controller_node_leader.value() == _self) {
-        auto controller_shard_leader = _partition_manager->shard_owner(
-          ::model::controller_ntp);
-        if (
-          controller_shard_leader.has_value()
-          && controller_shard_leader.value() == ss::this_shard_id()) {
-            vlog(
-              cllog.info, "Cluster link manager started on controller shard");
-            handle_partition_state_change(
-              ::model::controller_ntp, ntp_leader::yes);
-        }
-    }
-
     _link_task_reconciler_timer.set_callback([this] {
         ssx::spawn_with_gate(_g, [this] { return link_task_reconciler(); });
     });
@@ -223,10 +206,12 @@ void manager::on_link_change(model::id_t id) {
 }
 
 void manager::handle_partition_state_change(
-  ::model::ntp ntp, ntp_leader is_ntp_leader) {
+  ::model::ntp ntp,
+  ntp_leader is_ntp_leader,
+  std::optional<::model::term_id> term) {
     vlog(cllog.trace, "NTP={} leadership changed to {}", ntp, is_ntp_leader);
-    _queue.submit([this, ntp{std::move(ntp)}, is_ntp_leader]() mutable {
-        return handle_on_leadership_change(std::move(ntp), is_ntp_leader);
+    _queue.submit([this, ntp{std::move(ntp)}, is_ntp_leader, term]() mutable {
+        return handle_on_leadership_change(std::move(ntp), is_ntp_leader, term);
     });
 }
 
@@ -414,7 +399,9 @@ ss::future<> manager::link_task_reconciler() {
 }
 
 ss::future<> manager::handle_on_leadership_change(
-  ::model::ntp ntp, ntp_leader is_ntp_leader) {
+  ::model::ntp ntp,
+  ntp_leader is_ntp_leader,
+  std::optional<::model::term_id> term) {
     vlog(
       cllog.trace,
       "Handling leadership change for NTP={}, is_ntp_leader={}",
@@ -435,9 +422,11 @@ ss::future<> manager::handle_on_leadership_change(
         }
     }
 
-    co_await ss::parallel_for_each(_links, [ntp, is_ntp_leader](auto& pair) {
-        return pair.second->handle_on_leadership_change(ntp, is_ntp_leader);
-    });
+    co_await ss::parallel_for_each(
+      _links, [ntp, is_ntp_leader, term](auto& pair) {
+          return pair.second->handle_on_leadership_change(
+            ntp, is_ntp_leader, term);
+      });
 }
 
 ss::future<::cluster::cluster_link::errc> manager::add_mirror_topic(
