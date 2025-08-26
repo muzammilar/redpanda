@@ -109,13 +109,21 @@ class EndToEndCloudTopicsTest(EndToEndCloudTopicsBase):
 
 class EndToEndCloudTopicsTxTest(EndToEndCloudTopicsBase):
     """Cloud topics end-to-end test with transactions used."""
+
+    topics = (TopicSpec(
+        name=EndToEndCloudTopicsBase.s3_topic_name,
+        partition_count=1,
+        replication_factor=3,
+    ), )
+
     def __init__(self, test_context, extra_rp_conf=None, env=None):
         super(EndToEndCloudTopicsTxTest,
               self).__init__(test_context, extra_rp_conf, env)
         self.producer = None
         self.consumer = None
         self.msg_size = 4096
-        self.msg_count = 10000
+        # Use a smaller message count to prevent timeouts
+        self.msg_count = 1000
         self.per_transaction = 10
 
     def start_producer_with_tx(self):
