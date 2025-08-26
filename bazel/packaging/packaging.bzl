@@ -25,8 +25,17 @@ def _is_versioned_so(file):
 def _is_dynamic_loader(file):
     return _is_versioned(file, "ld")
 
+def _patched_file(ctx, original, suffix):
+    """Return a new File for patching.
+
+    Based on an input File, declare a new File with a given suffix, in a directory
+    named by the target name (so that patched files from different targets do not
+    collide."""
+    name = "patched/{}/{}_{}".format(ctx.label.name, original.basename, suffix)
+    return ctx.actions.declare_file(name)
+
 def _override_binary_rpath(ctx, path_override, original_binary):
-    patched_binary = ctx.actions.declare_file("{}_patched".format(original_binary.path))
+    patched_binary = _patched_file(ctx, original_binary, "patched")
 
     ctx.actions.run(
         inputs = [original_binary],
@@ -40,7 +49,7 @@ def _override_binary_rpath(ctx, path_override, original_binary):
 
 def _set_dynamic_loader(ctx, binary, loader, interpreter_path):
     """Uses provided dynamic loader as the interpreter for the binary"""
-    patched_binary = ctx.actions.declare_file("{}_ld".format(binary.path))
+    patched_binary = _patched_file(ctx, binary, "ld")
     ctx.actions.run(
         inputs = [binary, loader],
         outputs = [patched_binary],
