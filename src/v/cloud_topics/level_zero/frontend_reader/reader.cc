@@ -226,32 +226,13 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
             _unhydrated.push_back(local_log_batch{.header = header, .data = e});
         }
         if (!_unhydrated.empty()) {
-            if (cd_log.is_enabled(ss::log_level::debug)) {
-                auto pred = [](const local_log_batch& b) -> bool {
-                    return std::holds_alternative<cloud_topics::extent_meta>(
-                      b.data);
-                };
-                auto first_extent = std::ranges::find_if(_unhydrated, pred);
-                auto last_extent = std::ranges::find_if(
-                  std::views::reverse(_unhydrated), pred);
-                if (first_extent == _unhydrated.end()) {
-                    vlog(
-                      cd_log.debug,
-                      "Fetched {} L0 meta batches from the underlying "
-                      "partition, but all of them are control batches",
-                      _unhydrated.size());
-                } else {
-                    vlog(
-                      cd_log.debug,
-                      "Fetched {} L0 meta batches from the underlying "
-                      "partition, first offset: {}, last offset: {}",
-                      _unhydrated.size(),
-                      std::get<cloud_topics::extent_meta>(first_extent->data)
-                        .base_offset,
-                      std::get<cloud_topics::extent_meta>(last_extent->data)
-                        .last_offset);
-                }
-            }
+            vlog(
+              cd_log.debug,
+              "Fetched {} L0 meta batches from the underlying "
+              "partition, first offset: {}, last offset: {}",
+              _unhydrated.size(),
+              _unhydrated.front().header.base_offset,
+              _unhydrated.back().header.last_offset());
         } else {
             vlog(
               cd_log.debug,
