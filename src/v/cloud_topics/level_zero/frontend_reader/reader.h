@@ -113,8 +113,15 @@ private:
     };
 
     // Data from the local log that is not yet hydrated from data in L0
+    //
+    // The data stored in this buffer is ascending order by offset.
+    //
+    // All batches in _unhydrated come after the _hydrated batches (in offset
+    // ordering).
     chunked_circular_buffer<local_log_batch> _unhydrated;
     // Data that has been hydrated from L0 and is ready to be returned.
+    //
+    // The data stored in this buffer is ascending order by offset.
     chunked_circular_buffer<model::record_batch> _hydrated;
 
     cloud_topic_log_reader_config _config;
