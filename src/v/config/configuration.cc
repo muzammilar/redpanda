@@ -846,6 +846,34 @@ configuration::configuration()
        .visibility = visibility::tunable},
       2h,
       {.min = 5min})
+  , log_message_timestamp_before_max_ms(
+      *this,
+      "log_message_timestamp_before_max_ms",
+      "The maximum allowable timestamp difference between the broker's "
+      "timestamp and a record's timestamp. For topics with "
+      "`message.timestamp.type` set to `CreateTime`, Redpanda rejects records "
+      "that have timestamps earlier than the broker timestamp and exceed this "
+      "difference. Redpanda ignores this property for topics with "
+      "`message.timestamp.type` set to `AppendTime`. The topic property "
+      "`message.timestamp.before.max.ms` overrides the value of "
+      "`log_message_timestamp_before_max_ms` at the topic level.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      serde::max_serializable_ms,
+      {.min = 0ms, .max = serde::max_serializable_ms})
+  , log_message_timestamp_after_max_ms(
+      *this,
+      "log_message_timestamp_after_max_ms",
+      "The maximum allowable timestamp difference between the broker's "
+      "timestamp and a record's timestamp. For topics with "
+      "`message.timestamp.type` set to `CreateTime`, Redpanda rejects records "
+      "that have timestamps later than the broker timestamp and exceed this "
+      "difference. Redpanda ignores this property for topics with "
+      "`message.timestamp.type` set to `AppendTime`. The topic property "
+      "`message.timestamp.after.max.ms` overrides the value of "
+      "`log_message_timestamp_after_max_ms` at the topic level.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      1h,
+      {.min = 0ms, .max = serde::max_serializable_ms})
   , log_compression_type(
       *this,
       "log_compression_type",
