@@ -24,7 +24,7 @@ def main():
     rundir = Path(
         os.getenv("MB_RUNDIR",
                   "/dev/shm/vectorized_io" if exec_in_shm == 1 else "."))
-    redirect_stderr = bool(
+    redirect_stderr = int(
         os.getenv("MB_REDIRECT_STDERR",
                   os.getenv("MB_REDIRECT_STDERR_DEFAULT", "0")))
     verbose = int(os.getenv("MB_VERBOSE", "0"))
