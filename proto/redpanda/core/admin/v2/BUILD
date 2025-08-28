@@ -2,13 +2,19 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 load("//bazel/pbgen:pbgen.bzl", "redpanda_proto_library")
 
 proto_library(
-    name = "admin_proto",
-    srcs = ["admin.proto"],
+    name = "broker_proto",
+    srcs = ["broker.proto"],
     visibility = ["//visibility:public"],
     deps = [
         "//proto/redpanda/pbgen:options_proto",
         "//proto/redpanda/pbgen:rpc_proto",
     ],
+)
+
+redpanda_proto_library(
+    name = "broker_redpanda_proto",
+    protos = [":broker_proto"],
+    visibility = ["//visibility:public"],
 )
 
 proto_library(
@@ -26,12 +32,6 @@ proto_library(
         "@protobuf//:field_mask_proto",
         "@protobuf//:timestamp_proto",
     ],
-)
-
-redpanda_proto_library(
-    name = "admin_redpanda_proto",
-    protos = [":admin_proto"],
-    visibility = ["//visibility:public"],
 )
 
 redpanda_proto_library(

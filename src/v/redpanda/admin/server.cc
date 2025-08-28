@@ -84,7 +84,7 @@
 #include "redpanda/admin/api-doc/shadow_indexing.json.hh"
 #include "redpanda/admin/api-doc/status.json.hh"
 #include "redpanda/admin/cluster_config_schema_util.h"
-#include "redpanda/admin/services/admin.h"
+#include "redpanda/admin/services/broker.h"
 #include "redpanda/admin/util.h"
 #include "resource_mgmt/memory_sampling.h"
 #include "rpc/errc.h"
@@ -525,7 +525,7 @@ ss::future<> admin_server::start() {
           return _controller->get_members_table().local().node_ids();
       });
     add_service(
-      std::make_unique<admin::admin_service_impl>(
+      std::make_unique<admin::broker_service_impl>(
         std::move(client), &_services));
 
     co_await _debug_bundle_file_handler.start();
