@@ -2,13 +2,16 @@
 # ---------------------------------------------------------------------------
 # Buf CI
 # ---------------------------------------------------------------------------
-# 1. validate -> lint + format + breaking checks (runs on both push & pull_request)
+# 1. validate -> lint + breaking checks (runs on both push & pull_request)
 # 2. push-to-registry -> push to Buf registry only (runs after validation passes)
 # 3. archive-label -> archive label in registry when branch/tag deleted (with error handling)
 # ---------------------------------------------------------------------------
 name: Buf CI
 on:
   push:
+    branches:
+      - 'dev'
+      - 'v*'
     paths:
       - 'proto/**/*.proto'
       - '**/buf.yaml'
@@ -39,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Buf – lint, format & breaking
+      - name: Buf – lint & breaking
         uses: bufbuild/buf-action@v1
         with:
           paths: proto
