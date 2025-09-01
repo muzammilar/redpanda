@@ -14,6 +14,7 @@
 #include "absl/time/time.h"
 #include "bytes/iobuf.h"
 #include "serde/protobuf/field_mask.h"
+#include "strings/static_str.h"
 
 #include <seastar/core/sstring.hh>
 
@@ -30,7 +31,7 @@ namespace serde::pb {
 // value and the string name.
 struct raw_enum_value {
     int32_t number;
-    std::string_view name;
+    static_str name;
 
     bool operator==(const raw_enum_value&) const = default;
 };

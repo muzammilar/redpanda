@@ -6162,7 +6162,7 @@ void enum_from_proto(iobuf_parser* p, test_all_types_edition2023_nested_enum* e)
 void enum_to_proto(const test_all_types_edition2023_nested_enum& e, iobuf* buf) {
   serde::pb::write_varint<int32_t, serde::pb::zigzag::no>(static_cast<int32_t>(e), buf);
 }
-std::string_view enum_to_string(const test_all_types_edition2023_nested_enum& e) {
+static_str enum_to_string(const test_all_types_edition2023_nested_enum& e) {
   switch (e) {
   case test_all_types_edition2023_nested_enum::foo:
     return "FOO";
@@ -6233,7 +6233,7 @@ void enum_from_proto(iobuf_parser* p, foreign_enum_edition2023* e) {
 void enum_to_proto(const foreign_enum_edition2023& e, iobuf* buf) {
   serde::pb::write_varint<int32_t, serde::pb::zigzag::no>(static_cast<int32_t>(e), buf);
 }
-std::string_view enum_to_string(const foreign_enum_edition2023& e) {
+static_str enum_to_string(const foreign_enum_edition2023& e) {
   switch (e) {
   case foreign_enum_edition2023::foreign_foo:
     return "FOREIGN_FOO";

@@ -6,6 +6,7 @@
 #include "base/format_to.h"
 #include "bytes/iobuf.h"
 #include "serde/protobuf/base.h"
+#include "strings/static_str.h"
 #include "container/chunked_hash_map.h"
 #include "container/chunked_vector.h"
 
@@ -39,7 +40,7 @@ enum class test_all_types_edition2023_nested_enum : int8_t {
 void enum_to_proto(const test_all_types_edition2023_nested_enum&, iobuf*);
 void enum_from_proto(iobuf_parser*, test_all_types_edition2023_nested_enum*);
 // Returns the name of the enum value
-std::string_view enum_to_string(const test_all_types_edition2023_nested_enum&);
+static_str enum_to_string(const test_all_types_edition2023_nested_enum&);
 void enum_from_json(serde::pb::json::peekable_parser*, test_all_types_edition2023_nested_enum*);
 int32_t format_as(test_all_types_edition2023_nested_enum);
 
@@ -51,7 +52,7 @@ enum class foreign_enum_edition2023 : uint8_t {
 void enum_to_proto(const foreign_enum_edition2023&, iobuf*);
 void enum_from_proto(iobuf_parser*, foreign_enum_edition2023*);
 // Returns the name of the enum value
-std::string_view enum_to_string(const foreign_enum_edition2023&);
+static_str enum_to_string(const foreign_enum_edition2023&);
 void enum_from_json(serde::pb::json::peekable_parser*, foreign_enum_edition2023*);
 int32_t format_as(foreign_enum_edition2023);
 

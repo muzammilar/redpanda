@@ -127,6 +127,7 @@ redpanda_cc_library(
     deps = [
         ":field_mask",
         "//src/v/bytes:iobuf",
+        "//src/v/strings:static_str",
         "@abseil-cpp//absl/time",
         "@seastar",
     ],

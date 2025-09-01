@@ -333,6 +333,7 @@ func (g *headerGenerator) generateFile(w *codewriter) {
 		w.PreludePrintln(`#include "base/format_to.h"`)
 		w.PreludePrintln(`#include "bytes/iobuf.h"`)
 		w.PreludePrintln(`#include "serde/protobuf/base.h"`)
+		w.PreludePrintln(`#include "strings/static_str.h"`)
 		if g.needsChunkedHashMap {
 			w.PreludePrintln(`#include "container/chunked_hash_map.h"`)
 		}
@@ -499,7 +500,7 @@ func (g *headerGenerator) generateEnumSerde(msg protoreflect.EnumDescriptor, w *
 	w.Printf("void enum_to_proto(const %s&, iobuf*);\n", cppName)
 	w.Printf("void enum_from_proto(iobuf_parser*, %s*);\n", cppName)
 	w.Println("// Returns the name of the enum value")
-	w.Printf("std::string_view enum_to_string(const %s&);\n", cppName)
+	w.Printf("static_str enum_to_string(const %s&);\n", cppName)
 	w.Printf("void enum_from_json(serde::pb::json::peekable_parser*, %s*);\n", cppName)
 	// TODO: When we've upgraded to libfmt 11 we can change this to return std::string_view
 	w.Printf("int32_t format_as(%s);\n", cppName)
@@ -1113,7 +1114,7 @@ func (g *implGenerator) generateEnumWrite(enum protoreflect.EnumDescriptor, w *c
 }
 
 func (g *implGenerator) generateEnumToString(enum protoreflect.EnumDescriptor, w *codewriter) {
-	w.Printf("std::string_view enum_to_string(const %s& e) {\n", cppTypeName(enum))
+	w.Printf("static_str enum_to_string(const %s& e) {\n", cppTypeName(enum))
 	defer w.Println("}")
 	w.Indent()
 	defer w.Dedent()

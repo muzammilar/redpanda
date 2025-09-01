@@ -6,6 +6,7 @@
 #include "base/format_to.h"
 #include "bytes/iobuf.h"
 #include "serde/protobuf/base.h"
+#include "strings/static_str.h"
 #include "container/chunked_hash_map.h"
 #include "container/chunked_vector.h"
 #include "serde/protobuf/rpc.h"
@@ -53,7 +54,7 @@ enum class corpus : uint8_t {
 void enum_to_proto(const corpus&, iobuf*);
 void enum_from_proto(iobuf_parser*, corpus*);
 // Returns the name of the enum value
-std::string_view enum_to_string(const corpus&);
+static_str enum_to_string(const corpus&);
 void enum_from_json(serde::pb::json::peekable_parser*, corpus*);
 int32_t format_as(corpus);
 
@@ -66,7 +67,7 @@ enum class protobuf3_test : uint8_t {
 void enum_to_proto(const protobuf3_test&, iobuf*);
 void enum_from_proto(iobuf_parser*, protobuf3_test*);
 // Returns the name of the enum value
-std::string_view enum_to_string(const protobuf3_test&);
+static_str enum_to_string(const protobuf3_test&);
 void enum_from_json(serde::pb::json::peekable_parser*, protobuf3_test*);
 int32_t format_as(protobuf3_test);
 
@@ -78,7 +79,7 @@ enum class proto3_test : uint8_t {
 void enum_to_proto(const proto3_test&, iobuf*);
 void enum_from_proto(iobuf_parser*, proto3_test*);
 // Returns the name of the enum value
-std::string_view enum_to_string(const proto3_test&);
+static_str enum_to_string(const proto3_test&);
 void enum_from_json(serde::pb::json::peekable_parser*, proto3_test*);
 int32_t format_as(proto3_test);
 

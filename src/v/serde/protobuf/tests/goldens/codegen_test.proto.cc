@@ -1784,7 +1784,7 @@ void enum_from_proto(iobuf_parser* p, corpus* e) {
 void enum_to_proto(const corpus& e, iobuf* buf) {
   serde::pb::write_varint<int32_t, serde::pb::zigzag::no>(static_cast<int32_t>(e), buf);
 }
-std::string_view enum_to_string(const corpus& e) {
+static_str enum_to_string(const corpus& e) {
   switch (e) {
   case corpus::unspecified:
     return "CORPUS_UNSPECIFIED";
@@ -1880,7 +1880,7 @@ void enum_from_proto(iobuf_parser* p, protobuf3_test* e) {
 void enum_to_proto(const protobuf3_test& e, iobuf* buf) {
   serde::pb::write_varint<int32_t, serde::pb::zigzag::no>(static_cast<int32_t>(e), buf);
 }
-std::string_view enum_to_string(const protobuf3_test& e) {
+static_str enum_to_string(const protobuf3_test& e) {
   switch (e) {
   case protobuf3_test::unspecified:
     return "PROTOBUF3_TEST_UNSPECIFIED";
@@ -1945,7 +1945,7 @@ void enum_from_proto(iobuf_parser* p, proto3_test* e) {
 void enum_to_proto(const proto3_test& e, iobuf* buf) {
   serde::pb::write_varint<int32_t, serde::pb::zigzag::no>(static_cast<int32_t>(e), buf);
 }
-std::string_view enum_to_string(const proto3_test& e) {
+static_str enum_to_string(const proto3_test& e) {
   switch (e) {
   case proto3_test::unspecified:
     return "PROTO3_TEST_UNSPECIFIED";
