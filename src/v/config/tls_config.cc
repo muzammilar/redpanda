@@ -186,6 +186,22 @@ Node convert<config::tls_config>::encode(const config::tls_config& rhs) {
         node["truststore_file"] = *rhs.get_truststore_file();
     }
 
+    if (rhs.get_tls_v1_2_cipher_suites()) {
+        node["tls_v1_2_cipher_suites"] = *rhs.get_tls_v1_2_cipher_suites();
+    }
+
+    if (rhs.get_tls_v1_3_cipher_suites()) {
+        node["tls_v1_3_cipher_suites"] = *rhs.get_tls_v1_3_cipher_suites();
+    }
+
+    if (rhs.get_min_tls_version()) {
+        node["min_tls_version"] = *rhs.get_min_tls_version();
+    }
+
+    if (rhs.get_enable_renegotiation()) {
+        node["enable_renegotiation"] = *rhs.get_enable_renegotiation();
+    }
+
     return node;
 }
 
@@ -241,8 +257,14 @@ bool convert<config::tls_config>::decode(
           container,
           to_absolute(read_optional(node, "truststore_file")),
           to_absolute(read_optional(node, "crl_file")),
-          node["require_client_auth"]
-            && node["require_client_auth"].as<bool>());
+          node["require_client_auth"] && node["require_client_auth"].as<bool>(),
+          read_optional(node, "tls_v1_2_cipher_suites"),
+          read_optional(node, "tls_v1_3_cipher_suites"),
+          node["min_tls_version"]
+            ? node["min_tls_version"].as<config::tls_version>()
+            : std::optional<config::tls_version>(),
+          node["enable_renegotiation"] ? node["enable_renegotiation"].as<bool>()
+                                       : std::optional<bool>());
     }
     return true;
 }
