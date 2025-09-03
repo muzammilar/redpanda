@@ -14,6 +14,10 @@
 #include "iceberg/partition.h"
 #include "iceberg/table_identifier.h"
 
+namespace features {
+class feature_table;
+}
+
 namespace datalake {
 
 class schema_manager {
@@ -86,8 +90,10 @@ private:
 // evolution.
 class catalog_schema_manager : public schema_manager {
 public:
-    explicit catalog_schema_manager(iceberg::catalog& catalog)
-      : catalog_(catalog) {}
+    explicit catalog_schema_manager(
+      iceberg::catalog& catalog, features::feature_table* features)
+      : catalog_(catalog)
+      , features_(features) {}
 
     // Create the table with a desired schema, or, if the table exists and its
     // current schema doesn't include all of the fields (e.g. we are going from
@@ -122,6 +128,7 @@ private:
       iceberg::struct_type&);
     checked<ss::gate::holder, errc> maybe_gate();
     iceberg::catalog& catalog_;
+    features::feature_table* features_;
     ss::gate gate_;
 };
 

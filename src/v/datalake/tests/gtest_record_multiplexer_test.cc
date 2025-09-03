@@ -21,6 +21,7 @@
 #include "datalake/tests/test_data_writer.h"
 #include "datalake/tests/test_utils.h"
 #include "datalake/translation/translation_probe.h"
+#include "features/feature_table.h"
 #include "iceberg/filesystem_catalog.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
@@ -237,9 +238,13 @@ class RecordMultiplexerParquetTest
   , public ::testing::Test {
 public:
     RecordMultiplexerParquetTest()
-      : schema_mgr(catalog)
+      : schema_mgr(catalog, &features)
       , type_resolver(registry)
-      , t_creator(type_resolver, schema_mgr) {}
+      , t_creator(type_resolver, schema_mgr) {
+        features.testing_activate_all();
+    }
+
+    features::feature_table features;
     catalog_schema_manager schema_mgr;
     record_schema_resolver type_resolver;
     direct_table_creator t_creator;

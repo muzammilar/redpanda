@@ -11,6 +11,7 @@
 #include "cloud_io/tests/s3_imposter.h"
 #include "cloud_io/tests/scoped_remote.h"
 #include "datalake/catalog_schema_manager.h"
+#include "features/feature_table.h"
 #include "iceberg/datatypes.h"
 #include "iceberg/field_collecting_visitor.h"
 #include "iceberg/filesystem_catalog.h"
@@ -35,7 +36,8 @@ public:
     CatalogSchemaManagerTest()
       : sr(cloud_io::scoped_remote::create(10, conf))
       , catalog(remote(), bucket_name, ss::sstring(base_location))
-      , schema_mgr(catalog) {
+      , schema_mgr(catalog, &features) {
+        features.testing_activate_all();
         set_expectations_and_listen({});
     }
     cloud_io::remote& remote() { return sr->remote.local(); }
@@ -88,6 +90,7 @@ public:
         co_return std::move(*schema_it);
     }
 
+    features::feature_table features;
     std::unique_ptr<cloud_io::scoped_remote> sr;
     filesystem_catalog catalog;
     catalog_schema_manager schema_mgr;

@@ -11,6 +11,7 @@
 
 #include "base/vlog.h"
 #include "datalake/logger.h"
+#include "features/feature_table.h"
 #include "iceberg/compatibility.h"
 #include "iceberg/compatibility_types.h"
 #include "iceberg/datatypes.h"
@@ -170,6 +171,10 @@ catalog_schema_manager::ensure_table_schema(
   const iceberg::table_identifier& table_id,
   const iceberg::struct_type& desired_type,
   const iceberg::unresolved_partition_spec& partition_spec) {
+    if (!features_->is_active(features::feature::iceberg_schema_merging)) {
+        vlog(datalake_log.debug, "Iceberg schema merging is not yet active");
+    }
+
     auto gh = maybe_gate();
     if (gh.has_error()) {
         co_return gh.error();

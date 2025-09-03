@@ -11,6 +11,7 @@ redpanda_cc_library(
     implementation_deps = [
         ":logger",
         "//src/v/base",
+        "//src/v/features",
         "//src/v/iceberg:compatibility",
         "//src/v/iceberg:compatibility_types",
         "//src/v/iceberg:field_collecting_visitor",
