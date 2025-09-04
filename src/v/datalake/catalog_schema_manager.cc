@@ -113,10 +113,10 @@ bool schema_manager::table_info::fill_registered_ids(
 ss::future<checked<std::nullopt_t, schema_manager::errc>>
 simple_schema_manager::ensure_table_schema(
   const iceberg::table_identifier& table_id,
-  const iceberg::struct_type& desired_type,
+  const iceberg::struct_type& writer_struct_type,
   const iceberg::unresolved_partition_spec& partition_spec) {
     iceberg::schema s{
-      .schema_struct = desired_type.copy(),
+      .schema_struct = writer_struct_type.copy(),
       .schema_id = {},
       .identifier_field_ids = {},
     };
@@ -169,7 +169,7 @@ simple_schema_manager::get_table_info(
 ss::future<checked<std::nullopt_t, schema_manager::errc>>
 catalog_schema_manager::ensure_table_schema(
   const iceberg::table_identifier& table_id,
-  const iceberg::struct_type& desired_type,
+  const iceberg::struct_type& writer_struct_type,
   const iceberg::unresolved_partition_spec& partition_spec) {
     if (!features_->is_active(features::feature::iceberg_schema_merging)) {
         vlog(datalake_log.debug, "Iceberg schema merging is not yet active");
@@ -180,7 +180,7 @@ catalog_schema_manager::ensure_table_schema(
         co_return gh.error();
     }
     auto load_res = co_await catalog_.load_or_create_table(
-      table_id, desired_type, partition_spec);
+      table_id, writer_struct_type, partition_spec);
     if (load_res.has_error()) {
         co_return log_and_convert_catalog_err(
           load_res.error(), fmt::format("Error loading table {}", table_id));
@@ -189,8 +189,8 @@ catalog_schema_manager::ensure_table_schema(
     iceberg::transaction txn(std::move(load_res.value()));
 
     // Check schema compatibility
-    auto type_copy = desired_type.copy();
-    auto get_res = get_ids_from_table_meta(table_id, txn.table(), type_copy);
+    auto type_copy = writer_struct_type.copy();
+    auto get_res = apply_evolution_rules(table_id, txn.table(), type_copy);
     if (get_res.has_error()) {
         co_return get_res.error();
     }
@@ -242,7 +242,8 @@ catalog_schema_manager::ensure_table_schema(
 ss::future<checked<schema_manager::table_info, schema_manager::errc>>
 catalog_schema_manager::get_table_info(
   const iceberg::table_identifier& table_id,
-  std::optional<std::reference_wrapper<iceberg::struct_type>> desired_type) {
+  std::optional<std::reference_wrapper<iceberg::struct_type>>
+    writer_struct_type) {
     auto gh = maybe_gate();
     if (gh.has_error()) {
         co_return gh.error();
@@ -256,9 +257,9 @@ catalog_schema_manager::get_table_info(
     }
     const auto& table = load_res.value();
 
-    const auto* cur_schema = desired_type.has_value()
+    const auto* cur_schema = writer_struct_type.has_value()
                                ? table.get_equivalent_schema(
-                                   desired_type->get())
+                                   writer_struct_type->get())
                                : table.get_schema(table.current_schema_id);
     if (!cur_schema) {
         vlog(
@@ -289,7 +290,7 @@ catalog_schema_manager::get_table_info(
 }
 
 checked<bool, schema_manager::errc>
-catalog_schema_manager::get_ids_from_table_meta(
+catalog_schema_manager::apply_evolution_rules(
   const iceberg::table_identifier& table_id,
   const iceberg::table_metadata& table_meta,
   iceberg::struct_type& dest_type) {
