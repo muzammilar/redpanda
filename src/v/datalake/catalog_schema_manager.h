@@ -119,17 +119,6 @@ public:
     ss::future<> stop() override;
 
 private:
-    // Attempts to fill the field ids in the given type with those from the
-    // current schema of the given table metadata.
-    //
-    // Returns true if successful, false if the fill is incomplete because the
-    // table schema does not have all the necessary fields. The latter is a
-    // signal that the caller needs to add the schema to the table.
-    checked<bool, errc> apply_evolution_rules(
-      const iceberg::table_identifier&,
-      const iceberg::table_metadata&,
-      const iceberg::schema&,
-      iceberg::struct_type&);
     checked<ss::gate::holder, errc> maybe_gate();
     iceberg::catalog& catalog_;
     features::feature_table* features_;

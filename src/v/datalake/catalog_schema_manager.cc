@@ -91,6 +91,42 @@ checked<std::nullopt_t, fill_errc> check_schema_compat(
     // The schemas are identical
     return std::nullopt;
 }
+
+// Attempts to fill the field ids in the given type with those from the
+// current schema of the given table metadata.
+//
+// Returns true if successful, false if the fill is incomplete because the
+// table schema does not have all the necessary fields. The latter is a
+// signal that the caller needs to add the schema to the table.
+checked<bool, schema_manager::errc> apply_evolution_rules(
+  const iceberg::table_identifier& table_id,
+  const iceberg::table_metadata& table_meta,
+  const iceberg::schema& schema,
+  iceberg::struct_type& dest_type) {
+    const auto* cur_spec = table_meta.get_partition_spec(
+      table_meta.default_spec_id);
+    if (cur_spec == nullptr) {
+        vlog(
+          datalake_log.error,
+          "Cannot find default partition spec {} in table {}",
+          table_meta.default_spec_id,
+          table_id);
+        return schema_manager::errc::failed;
+    }
+    auto compat_res = check_schema_compat(
+      dest_type, schema.schema_struct.copy(), *cur_spec);
+    if (compat_res.has_error()) {
+        switch (compat_res.error()) {
+        case fill_errc::invalid_schema:
+            vlog(datalake_log.warn, "Type mismatch with table {}", table_id);
+            return schema_manager::errc::not_supported;
+        case fill_errc::schema_evolution_needed:
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 std::ostream& operator<<(std::ostream& o, const schema_manager::errc& e) {
@@ -360,36 +396,6 @@ catalog_schema_manager::get_table_info(
       .location = table.location,
       .properties = table.properties.transform(copy_properties),
     };
-}
-
-checked<bool, schema_manager::errc>
-catalog_schema_manager::apply_evolution_rules(
-  const iceberg::table_identifier& table_id,
-  const iceberg::table_metadata& table_meta,
-  const iceberg::schema& schema,
-  iceberg::struct_type& dest_type) {
-    const auto* cur_spec = table_meta.get_partition_spec(
-      table_meta.default_spec_id);
-    if (cur_spec == nullptr) {
-        vlog(
-          datalake_log.error,
-          "Cannot find default partition spec {} in table {}",
-          table_meta.default_spec_id,
-          table_id);
-        return errc::failed;
-    }
-    auto compat_res = check_schema_compat(
-      dest_type, schema.schema_struct.copy(), *cur_spec);
-    if (compat_res.has_error()) {
-        switch (compat_res.error()) {
-        case fill_errc::invalid_schema:
-            vlog(datalake_log.warn, "Type mismatch with table {}", table_id);
-            return errc::not_supported;
-        case fill_errc::schema_evolution_needed:
-            return false;
-        }
-    }
-    return true;
 }
 
 checked<ss::gate::holder, catalog_schema_manager::errc>
