@@ -98,7 +98,9 @@ checked<std::nullopt_t, fill_errc> check_schema_compat(
 // Returns true if successful, false if the fill is incomplete because the
 // table schema does not have all the necessary fields. The latter is a
 // signal that the caller needs to add the schema to the table.
-checked<bool, schema_manager::errc> apply_evolution_rules(
+using schema_update_required
+  = ss::bool_class<struct schema_update_required_tag>;
+checked<schema_update_required, schema_manager::errc> apply_evolution_rules(
   const iceberg::table_identifier& table_id,
   const iceberg::table_metadata& table_meta,
   const iceberg::schema& schema,
@@ -121,10 +123,10 @@ checked<bool, schema_manager::errc> apply_evolution_rules(
             vlog(datalake_log.warn, "Type mismatch with table {}", table_id);
             return schema_manager::errc::not_supported;
         case fill_errc::schema_evolution_needed:
-            return false;
+            return schema_update_required::yes;
         }
     }
-    return true;
+    return schema_update_required::no;
 }
 
 } // namespace
@@ -261,11 +263,11 @@ catalog_schema_manager::ensure_table_schema(
             // Make a copy so that we still have the original struct in case we
             // need to log it on the error path.
             auto merged_schema_with_evo = merged_schema_struct_type.copy();
-            auto get_res = apply_evolution_rules(
+            auto evo_res = apply_evolution_rules(
               table_id, txn.table(), *current_schema, merged_schema_with_evo);
-            if (get_res.has_error()) {
-                co_return get_res.error();
-            } else if (get_res.value()) {
+            if (evo_res.has_error()) {
+                co_return evo_res.error();
+            } else if (evo_res.value() == schema_update_required::no) {
                 vlog(
                   datalake_log.error,
                   "Applying evolution rules on merged schema resulted in a "
@@ -294,11 +296,11 @@ catalog_schema_manager::ensure_table_schema(
         } else {
             // Apply evolution rules from current schema to writer schema.
             auto type_copy = writer_struct_type.copy();
-            auto get_res = apply_evolution_rules(
+            auto evo_res = apply_evolution_rules(
               table_id, txn.table(), *current_schema, type_copy);
-            if (get_res.has_error()) {
-                co_return get_res.error();
-            } else if (!get_res.value()) {
+            if (evo_res.has_error()) {
+                co_return evo_res.error();
+            } else if (evo_res.value() == schema_update_required::yes) {
                 new_schema.emplace(std::move(type_copy));
             }
         }
