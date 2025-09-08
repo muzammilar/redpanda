@@ -176,6 +176,7 @@ class ClusterRateQuotaTest(RedpandaTest):
                     "kafka_quotas": "trace",
                     "cluster": "trace",
                     "raft": "trace",
+                    "storage": "trace",
                 },
             ),
             resource_settings=ResourceSettings(num_cpus=1),
