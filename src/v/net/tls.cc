@@ -57,8 +57,10 @@ get_credentials_builder(credentials_configuration cfg) {
     ss::tls::credentials_builder builder;
 
     builder.enable_server_precedence();
-    builder.set_cipher_string(ss::sstring{tls_v1_2_cipher_suites});
-    builder.set_ciphersuites({ss::sstring{tls_v1_3_cipher_suites}});
+    builder.set_cipher_string(
+      cfg.tls_v1_2_cipher_suites.value_or(ss::sstring{tls_v1_2_cipher_suites}));
+    builder.set_ciphersuites(
+      cfg.tls_v1_3_cipher_suites.value_or(ss::sstring{tls_v1_3_cipher_suites}));
     builder.set_minimum_tls_version(cfg.min_tls_version);
     builder.set_dh_level(ss::tls::dh_params::level::MEDIUM);
 

@@ -68,6 +68,8 @@ struct credentials_configuration {
     ss::tls::tls_version min_tls_version;
     bool enable_renegotiation = false;
     bool require_client_auth = false;
+    std::optional<ss::sstring> tls_v1_2_cipher_suites;
+    std::optional<ss::sstring> tls_v1_3_cipher_suites;
     fmt::iterator format_to(fmt::iterator it) const;
 };
 
