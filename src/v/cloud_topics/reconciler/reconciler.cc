@@ -63,7 +63,7 @@ private:
 namespace cloud_topics::reconciler {
 
 reconciler::reconciler(
-  ss::sharded<cluster::partition_manager>* pm,
+  cluster::partition_manager* pm,
   ss::sharded<cloud_io::remote>* cloud_io,
   data_plane_api* data_plane,
   std::optional<cloud_storage_clients::bucket_name> bucket)
@@ -79,15 +79,13 @@ reconciler::reconciler(
 }
 
 ss::future<> reconciler::start() {
-    _manage_notify_handle
-      = _partition_manager->local().register_manage_notification(
-        model::kafka_namespace,
-        [this](ss::lw_shared_ptr<cluster::partition> p) {
-            attach_partition(std::move(p));
-        });
+    _manage_notify_handle = _partition_manager->register_manage_notification(
+      model::kafka_namespace, [this](ss::lw_shared_ptr<cluster::partition> p) {
+          attach_partition(std::move(p));
+      });
 
     _unmanage_notify_handle
-      = _partition_manager->local().register_unmanage_notification(
+      = _partition_manager->register_unmanage_notification(
         model::kafka_namespace, [this](model::topic_partition_view tp_p) {
             detach_partition(
               model::ntp(model::kafka_namespace, tp_p.topic, tp_p.partition));
@@ -99,10 +97,9 @@ ss::future<> reconciler::start() {
 }
 
 ss::future<> reconciler::stop() {
-    _partition_manager->local().unregister_manage_notification(
-      _manage_notify_handle);
+    _partition_manager->unregister_manage_notification(_manage_notify_handle);
 
-    _partition_manager->local().unregister_unmanage_notification(
+    _partition_manager->unregister_unmanage_notification(
       _unmanage_notify_handle);
 
     _as.request_abort();

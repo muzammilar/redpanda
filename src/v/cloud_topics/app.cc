@@ -51,7 +51,12 @@ ss::future<> app::construct(
     co_await construct_service(state, data_plane.get());
 
     co_await construct_service(
-      reconciler, partition_mgr, remote, data_plane.get(), bucket);
+      reconciler,
+      ss::sharded_parameter(
+        [&partition_mgr] { return &partition_mgr->local(); }),
+      remote,
+      data_plane.get(),
+      bucket);
     co_await construct_service(domain_supervisor, controller);
     co_await construct_service(
       l1_metastore_fe,

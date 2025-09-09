@@ -42,7 +42,7 @@ namespace cloud_topics::reconciler {
 class reconciler {
 public:
     reconciler(
-      ss::sharded<cluster::partition_manager>*,
+      cluster::partition_manager*,
       ss::sharded<cloud_io::remote>*,
       data_plane_api*,
       std::optional<cloud_storage_clients::bucket_name> = std::nullopt);
@@ -152,7 +152,7 @@ private:
     make_reader(frontend*, kafka::offset start_offset, size_t);
 
 private:
-    ss::sharded<cluster::partition_manager>* _partition_manager;
+    cluster::partition_manager* _partition_manager;
     ss::sharded<cloud_io::remote>* _cloud_io;
     data_plane_api* _data_plane;
     cloud_storage_clients::bucket_name _bucket;
