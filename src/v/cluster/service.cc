@@ -903,6 +903,13 @@ service::update_mirror_topic_properties(
     co_return update_mirror_topic_properties_response{.ec = result};
 }
 
+ss::future<update_cluster_link_configuration_response>
+service::update_cluster_link_configuration(
+  update_cluster_link_configuration_request, rpc::streaming_context&) {
+    co_return update_cluster_link_configuration_response{
+      .ec = cluster_link::errc::invalid_update};
+}
+
 ss::future<get_current_cluster_epoch_response>
 service::get_current_cluster_epoch(
   get_current_cluster_epoch_request, ::rpc::streaming_context&) {
