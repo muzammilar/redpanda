@@ -63,6 +63,7 @@ bool ssl_clean_room(auto func) {
 ss::future<std::optional<ss::tls::credentials_builder>>
 tls_config::get_credentials_builder() const& {
     if (_enabled) {
+        const auto& cfg = config::shard_local_cfg();
         auto builder = co_await net::get_credentials_builder({
           .truststore = _truststore_file.transform(
             [](auto& f) { return net::certificate(std::filesystem::path(f)); }),
@@ -70,10 +71,14 @@ tls_config::get_credentials_builder() const& {
           .crl = _crl_file.transform(
             [](auto& f) { return net::certificate(std::filesystem::path(f)); }),
           .min_tls_version = from_config(
-            config::shard_local_cfg().tls_min_version()),
-          .enable_renegotiation
-          = config::shard_local_cfg().tls_enable_renegotiation(),
+            _min_tls_version.value_or(cfg.tls_min_version())),
+          .enable_renegotiation = _enable_renegotiation.value_or(
+            cfg.tls_enable_renegotiation()),
           .require_client_auth = _require_client_auth,
+          .tls_v1_2_cipher_suites = _tls_v1_2_cipher_suites.value_or(
+            cfg.tls_v1_2_cipher_suites()),
+          .tls_v1_3_cipher_suites = _tls_v1_3_cipher_suites.value_or(
+            cfg.tls_v1_3_cipher_suites()),
         });
         co_return builder;
     }
