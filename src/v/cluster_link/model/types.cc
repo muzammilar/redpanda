@@ -17,7 +17,76 @@
 
 #include <fmt/ranges.h>
 
+#include <ostream>
+
 namespace cluster_link::model {
+
+std::ostream& operator<<(std::ostream& os, mirror_topic_state s) {
+    return os << fmt::format("{}", s);
+}
+
+std::ostream& operator<<(std::ostream& os, task_state s) {
+    return os << fmt::format("{}", s);
+}
+
+std::ostream& operator<<(std::ostream& os, const scram_credentials& creds) {
+    return os << fmt::format("{}", creds);
+}
+
+std::ostream& operator<<(std::ostream& os, const tls_file_path& p) {
+    return os << fmt::format("{}", p());
+}
+
+std::ostream& operator<<(std::ostream& os, const tls_value& v) {
+    return os << fmt::format("{}", v());
+}
+
+std::ostream& operator<<(std::ostream& os, const tls_file_or_value& t) {
+    return os << fmt::format("{}", t);
+}
+
+std::ostream& operator<<(std::ostream& os, const connection_config& cfg) {
+    return os << fmt::format("{}", cfg);
+}
+
+std::ostream& operator<<(std::ostream& os, const mirror_topic_metadata& md) {
+    return os << fmt::format("{}", md);
+}
+
+std::ostream& operator<<(std::ostream& os, filter_pattern_type f) {
+    return os << fmt::format("{}", f);
+}
+
+std::ostream& operator<<(std::ostream& os, filter_type f) {
+    return os << fmt::format("{}", f);
+}
+
+std::ostream&
+operator<<(std::ostream& os, const resource_name_filter_pattern& p) {
+    return os << fmt::format("{}", p);
+}
+
+std::ostream&
+operator<<(std::ostream& os, const topic_metadata_mirroring_config& cfg) {
+    return os << fmt::format("{}", cfg);
+}
+
+std::ostream&
+operator<<(std::ostream& os, const consumer_groups_mirroring_config& cfg) {
+    return os << fmt::format("{}", cfg);
+}
+
+std::ostream& operator<<(std::ostream& os, const link_configuration& cfg) {
+    return os << fmt::format("{}", cfg);
+}
+
+std::ostream& operator<<(std::ostream& os, const link_state& ls) {
+    return os << fmt::format("{}", ls);
+}
+
+std::ostream& operator<<(std::ostream& os, const metadata& md) {
+    return os << fmt::format("{}", md);
+}
 
 mirror_topic_metadata mirror_topic_metadata::copy() const {
     mirror_topic_metadata copy;
