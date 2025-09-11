@@ -336,3 +336,29 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         ):
             self.start_producer_consumer(topic=topic.name, msg_size=128, msg_cnt=100000)
             self.verify()
+
+    @cluster(
+        num_nodes=7,
+        log_allow_list=[
+            re.compile(".*Failed to sync write_at_offset_stm for partition"),
+        ],
+    )
+    def test_replication_with_failures(self):
+        topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
+
+        self.source_default_client().create_topic(topic)
+        self.create_link("test-link")
+
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic.name),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in target cluster",
+        )
+
+        self.start_producer_consumer(topic=topic.name, msg_size=128, msg_cnt=100000)
+        with (
+            self.create_source_failure_injector(),
+            self.create_target_failure_injector(),
+        ):
+            self.verify()

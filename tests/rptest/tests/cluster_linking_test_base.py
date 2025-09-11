@@ -30,6 +30,8 @@ from rptest.tests.prealloc_nodes import PreallocNodesTest
 from rptest.services.redpanda import LoggingConfig
 from rptest.tests.redpanda_test import RedpandaTest
 import google.protobuf.duration_pb2
+from rptest.utils.node_operations import FailureInjectorBackgroundThread
+from contextlib import contextmanager
 
 
 class ShadowLinkTestBase(PreallocNodesTest):
@@ -163,6 +165,28 @@ class ShadowLinkTestBase(PreallocNodesTest):
     def topic_exists_in_target(self, topic: str) -> bool:
         topics = RpkTool(self.target_cluster.service).list_topics()
         return topic in topics
+
+    @contextmanager
+    def create_source_failure_injector(self, **kwargs):
+        fi = FailureInjectorBackgroundThread(
+            self.source_cluster.service, self.logger, **kwargs
+        )
+        fi.start()
+        try:
+            yield
+        finally:
+            fi.stop()
+
+    @contextmanager
+    def create_target_failure_injector(self, **kwargs):
+        fi = FailureInjectorBackgroundThread(
+            self.target_cluster.service, self.logger, **kwargs
+        )
+        fi.start()
+        try:
+            yield
+        finally:
+            fi.stop()
 
 
 class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
