@@ -79,7 +79,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         self.test_context = test_context
         self.admin_v2: AdminV2
         self.services: MultiClusterServices
-        self.client: shadow_link_pb2_connect.ShadowLinkServiceClient
+        self.service_client: shadow_link_pb2_connect.ShadowLinkServiceClient
         self.secondary_cluster_args: SecondaryClusterArgs = secondary_cluster_args
 
     def setUp(self):
@@ -93,7 +93,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         )
         self.services.setUp()
         self.admin_v2 = AdminV2(self.target_cluster_service)
-        self.client = self.admin_v2.shadow_link()
+        self.service_client = self.admin_v2.shadow_link()
 
     @property
     def source_cluster(self) -> Cluster:
@@ -185,16 +185,16 @@ class ShadowLinkTestBase(PreallocNodesTest):
     def create_link_with_request(
         self, req: shadow_link_pb2.CreateShadowLinkRequest
     ) -> shadow_link_pb2.ShadowLink:
-        return self.client.create_shadow_link(req=req).shadow_link
+        return self.service_client.create_shadow_link(req=req).shadow_link
 
     def list_links(self) -> list[shadow_link_pb2.ShadowLink]:
-        resp = self.client.list_shadow_links(
+        resp = self.service_client.list_shadow_links(
             req=shadow_link_pb2.ListShadowLinksRequest()
         )
         return resp.shadow_links
 
     def get_link(self, name: str) -> shadow_link_pb2.ShadowLink:
-        resp = self.client.get_shadow_link(
+        resp = self.service_client.get_shadow_link(
             req=shadow_link_pb2.GetShadowLinkRequest(name=name)
         )
         return resp.shadow_link
