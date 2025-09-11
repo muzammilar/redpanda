@@ -52,15 +52,18 @@ class ShadowLinkTestBase(PreallocNodesTest):
         *args,
         **kwargs,
     ):
+        kwargs.setdefault("extra_rp_conf", {}).update(
+            {
+                "enable_developmental_unrecoverable_data_corrupting_features": True,
+                "development_enable_cluster_link": True,
+            }
+        )
+
         super().__init__(
             test_context=test_context,
             # For running kgo producer/consumer
             node_prealloc_count=num_prealloc_nodes,
             num_brokers=3,
-            extra_rp_conf={
-                "enable_developmental_unrecoverable_data_corrupting_features": True,
-                "development_enable_cluster_link": True,
-            },
             log_config=LoggingConfig(
                 "info",
                 logger_levels={
