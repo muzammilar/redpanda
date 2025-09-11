@@ -37,19 +37,8 @@ class ServerlessValidationTest(RedpandaCloudTest):
     # any less than that.
     CLUSTER_NODES = 10
 
-    GCP_EXPECTED_MAX_LATENCIES = {
-        OMBSampleConfigurations.E2E_LATENCY_50PCT: 200.0,
-        OMBSampleConfigurations.E2E_LATENCY_75PCT: 15000.0,
-        OMBSampleConfigurations.E2E_LATENCY_99PCT: 100000.0,
-        OMBSampleConfigurations.E2E_LATENCY_999PCT: 200000.0,
-    }
-
-    AWS_EXPECTED_MAX_LATENCIES = {
-        OMBSampleConfigurations.E2E_LATENCY_50PCT: 20.0,
-        OMBSampleConfigurations.E2E_LATENCY_75PCT: 25.0,
-        OMBSampleConfigurations.E2E_LATENCY_99PCT: 60.0,
-        OMBSampleConfigurations.E2E_LATENCY_999PCT: 100.0,
-    }
+    # no expectations at this time, we are simply measuring for now so we have historical data
+    EXPECTED_MAX_LATENCIES = {}
 
     # Mapping of result keys from specific series to their expected max latencies
     # Key is a series (Ex: endToEndLatency999pct and value is mapped to OMBSampleConfigurations.E2E_LATENCY_999PCT)
@@ -130,14 +119,7 @@ class ServerlessValidationTest(RedpandaCloudTest):
             self.logger.info(f"{key}: [{series_values}]")
 
     def expected_max_latencies(self):
-        if self._cloud_provider == "gcp":
-            expected = self.GCP_EXPECTED_MAX_LATENCIES
-        elif self._cloud_provider == "aws":
-            expected = self.AWS_EXPECTED_MAX_LATENCIES
-        else:
-            raise ValueError(
-                f"Unsupported or unspecified cloud provider: {self._cloud_provider}"
-            )
+        expected = self.EXPECTED_MAX_LATENCIES
         return {
             series_key: expected[config_key]
             for series_key, config_key in ServerlessValidationTest.LATENCY_SERIES_AND_MAX.items()
@@ -191,14 +173,7 @@ class ServerlessValidationTest(RedpandaCloudTest):
         latencies in cases we know this is reasonable (e.g., a system running at
         its maximum partition count."""
 
-        if cloud_provider == "gcp":
-            latency_limits = ServerlessValidationTest.GCP_EXPECTED_MAX_LATENCIES
-        elif cloud_provider == "aws":
-            latency_limits = ServerlessValidationTest.AWS_EXPECTED_MAX_LATENCIES
-        else:
-            raise ValueError(
-                f"Unsupported or unspecified cloud provider: {cloud_provider}"
-            )
+        latency_limits = ServerlessValidationTest.EXPECTED_MAX_LATENCIES
 
         # use dict comprehension to generate dict of latencies to list of validation functions
         # e.g. { 'aggregatedEndToEndLatency50pct': [OMBSampleConfigurations.lte(20.0 * multiplier)] }
