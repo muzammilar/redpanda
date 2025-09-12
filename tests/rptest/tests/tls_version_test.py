@@ -17,7 +17,13 @@ from ducktape.services.service import Service
 
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
-from rptest.services.redpanda import SecurityConfig, TLSProvider
+from rptest.services.redpanda import (
+    PandaproxyConfig,
+    RedpandaService,
+    SchemaRegistryConfig,
+    SecurityConfig,
+    TLSProvider,
+)
 from rptest.services.tls import (
     Certificate,
     CertificateAuthority,
@@ -92,6 +98,7 @@ class TLSVersionTestBase(RedpandaTest):
         super(TLSVersionTestBase, self).__init__(test_context=test_context)
         self.security = SecurityConfig()
         self.tls = TLSCertManager(self.logger, key_type=key_type)
+        self.key_type = key_type
         self.admin = Admin(self.redpanda)
         self.installer = self.redpanda._installer
 
@@ -99,7 +106,36 @@ class TLSVersionTestBase(RedpandaTest):
         self.security.tls_provider = TLSVersionTestProvider(tls=self.tls)
         self.redpanda.set_security_settings(self.security)
 
-        super().setUp()
+        self.schema_registry_config = SchemaRegistryConfig()
+        self.schema_registry_config.require_client_auth = True
+        self.redpanda.set_schema_registry_settings(self.schema_registry_config)
+
+        self.pandaproxy_config = PandaproxyConfig()
+        self.pandaproxy_config.require_client_auth = True
+        self.redpanda.set_pandaproxy_settings(self.pandaproxy_config)
+
+        tls = dict(
+            enabled=True,
+            require_client_auth=True,
+            key_file=RedpandaService.TLS_SERVER_KEY_FILE,
+            cert_file=RedpandaService.TLS_SERVER_CRT_FILE,
+            truststore_file=RedpandaService.TLS_CA_CRT_FILE,
+        )
+        admin_api_tls = tls.copy()
+        admin_api_tls.update(
+            name="iplistener",
+        )
+
+        cfg_overrides = {}
+
+        def set_cfg(node):
+            cfg_overrides[node] = dict(
+                admin_api_tls=admin_api_tls, rpc_server_tls=admin_api_tls
+            )
+
+        self.redpanda.for_nodes(self.redpanda.nodes, set_cfg)
+
+        self.redpanda.start(node_config_overrides=cfg_overrides)
 
     def _output_good(self, output: str) -> bool:
         return "Verify return code: 0" in output or "Verify return code: 19" in output
@@ -111,18 +147,25 @@ class TLSVersionTestBase(RedpandaTest):
         )
 
     def verify_tls_version(
-        self, node: ClusterNode, tls_version: TLSVersion, expect_fail: bool
+        self,
+        node: ClusterNode,
+        tls_version: TLSVersion,
+        expect_fail: bool,
+        port: int = 9092,
+        cipher: str = None,
     ):
         tls_version_str = tls_version_to_openssl(tls_version)
+        cipher_arg = "ciphersuites" if tls_version == TLSVersion.v1_3 else "cipher"
+        cipher_opt = f"-{cipher_arg} {cipher}" if cipher else ""
         try:
-            cmd = f"openssl s_client {tls_version_str} -CAfile {self.tls.ca.crt} -connect {node.name}:9092"
+            cmd = f"openssl s_client {tls_version_str} {cipher_opt} -CAfile {self.tls.ca.crt} -connect {node.name}:{port}"
             self.logger.debug(f"Running: {cmd}")
             _ = subprocess.check_output(
                 cmd.split(), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL
             )
             if expect_fail:
                 assert False, (
-                    f"Expected openssl s_client to fail with TLS version string {tls_version_str}"
+                    f"Expected openssl s_client to fail with TLS version string {tls_version_str}, cipher {cipher}, port {port}"
                 )
         except subprocess.CalledProcessError as e:
             if not expect_fail:
