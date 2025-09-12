@@ -2301,7 +2301,7 @@ class AuditLogTestOauth(AuditLogTestBase):
         [ip_set.add(r["dst_endpoint"]["ip"]) for r in records]
 
         assert len(records) == len(ip_set), (
-            f"Expected one record but received {len(records)}"
+            f"Expected {len(ip_set)} record but received {len(records)}"
         )
 
         records = self.read_all_from_audit_log(
@@ -2315,7 +2315,10 @@ class AuditLogTestOauth(AuditLogTestBase):
             lambda records: self.aggregate_count(records) >= 1,
         )
 
-        assert 1 == len(records), f"Expected one record but received {len(records)}"
+        # The kafka client may have sent the metadata request to >1 node, so we may see >1 metadata record
+        assert len(records) >= 1, (
+            f"Expected at least one record but received {len(records)}"
+        )
 
     @skip_fips_mode
     @cluster(num_nodes=6)
