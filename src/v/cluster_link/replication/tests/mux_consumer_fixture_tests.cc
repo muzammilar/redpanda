@@ -65,7 +65,7 @@ TEST_P(MuxConsumerFixture, TestProduceConsume) {
     // register partitions and set to start from 0
     for (int i = 0; i < 3; i++) {
         auto tp = model::topic_partition{topic, model::partition_id{i}};
-        auto added = _mux_consumer->add(tp);
+        auto added = _mux_consumer->add(tp, kafka::offset{0});
         ASSERT_TRUE(added.has_value()) << added.error();
         auto reset = _mux_consumer->reset(tp, kafka::offset{0});
         ASSERT_TRUE(reset.has_value()) << reset.error();
@@ -123,7 +123,7 @@ TEST_P(MuxConsumerFixture, TestProduceConsume) {
 
 TEST_P(MuxConsumerFixture, TestUnassignmentOnFullMemory) {
     auto tp = model::topic_partition{topic, model::partition_id{0}};
-    auto added = _mux_consumer->add(tp);
+    auto added = _mux_consumer->add(tp, kafka::offset{0});
     ASSERT_TRUE(added.has_value()) << added.error();
     auto reset = _mux_consumer->reset(tp, kafka::offset{0});
     ASSERT_TRUE(reset.has_value()) << reset.error();
@@ -166,7 +166,7 @@ TEST_P(MuxConsumerFixture, TestUnassignmentOnFullMemory) {
 
 TEST_P(MuxConsumerFixture, TestResetPartition) {
     auto tp = model::topic_partition{topic, model::partition_id{0}};
-    auto added = _mux_consumer->add(tp);
+    auto added = _mux_consumer->add(tp, kafka::offset{0});
     ASSERT_TRUE(added.has_value()) << added.error();
     auto reset = _mux_consumer->reset(tp, kafka::offset{0});
     ASSERT_TRUE(reset.has_value()) << reset.error();

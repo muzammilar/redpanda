@@ -37,15 +37,17 @@ ss::future<> mux_remote_consumer::stop() noexcept {
     _partitions.clear();
 }
 
-mux_remote_consumer::result
-mux_remote_consumer::add(const model::topic_partition& tp) {
-    vlog(cllog.trace, "Adding partition {}", tp);
+mux_remote_consumer::result mux_remote_consumer::add(
+  const model::topic_partition& tp, kafka::offset offset) {
+    vlog(
+      cllog.trace, "Adding partition {}, with initial offset: {}", tp, offset);
     _gate.check();
     if (_partitions.contains(tp)) {
         return std::unexpected(errc::partition_already_exists);
     }
-    _partitions.emplace(
+    auto [it, success] = _partitions.emplace(
       tp, std::make_unique<partition_data_queue>(_partition_max_buffered));
+    it->second->reset(offset);
     _pending_assignment[tp.topic].insert(tp.partition);
     _cv.signal();
     return {};
