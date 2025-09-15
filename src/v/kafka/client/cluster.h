@@ -171,7 +171,11 @@ private:
     ss::future<> update_metadata(
       std::optional<chunked_vector<model::topic>> topics_request_list
       = std::nullopt);
-    ss::future<> dispatch_metadata_request(
+    ss::future<> dispatch_and_apply_metadata_updates(
+      std::optional<chunked_vector<model::topic>> topics_request_list
+      = std::nullopt);
+    ss::future<metadata_response> dispatch_metadata_request(
+      shared_broker_t broker,
       std::optional<chunked_vector<model::topic>> topics_request_list
       = std::nullopt,
       std::optional<api_version> requested_version = std::nullopt);
