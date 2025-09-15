@@ -9,10 +9,8 @@
  */
 #include "cluster/cloud_metadata/key_utils.h"
 
-#include "cloud_storage/remote_segment.h"
 #include "cluster/cloud_metadata/types.h"
 #include "model/fundamental.h"
-#include "utils/uuid.h"
 
 namespace cluster::cloud_metadata {
 
@@ -60,6 +58,12 @@ cloud_storage_clients::object_key offsets_snapshot_key(
       meta_id(),
       pid(),
       snapshot_idx)};
+}
+
+cloud_storage_clients::object_key cluster_name_ref_for_uuid_key(
+  const ss::sstring& name, const model::cluster_uuid& cluster_uuid) {
+    return cloud_storage_clients::object_key{fmt::format(
+      "cluster_name/{}/uuid/{}", name, ss::sstring(cluster_uuid()))};
 }
 
 } // namespace cluster::cloud_metadata

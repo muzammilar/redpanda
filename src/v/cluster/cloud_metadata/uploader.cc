@@ -197,6 +197,11 @@ ss::future<error_outcome> uploader::upload_next_metadata(
     if (co_await term_has_changed(synced_term)) {
         co_return error_outcome::term_has_changed;
     }
+    auto ref_upload_result = co_await maybe_upload_cluster_name_reference(
+      retry_node);
+    if (ref_upload_result != error_outcome::success) {
+        co_return ref_upload_result;
+    }
     manifest.upload_time_since_epoch
       = std::chrono::duration_cast<std::chrono::milliseconds>(
         ss::lowres_system_clock::now().time_since_epoch());
@@ -328,6 +333,35 @@ ss::future<error_outcome> uploader::maybe_upload_controller_snapshot(
         }
         co_return error_outcome::upload_failed;
     }
+    co_return error_outcome::success;
+}
+
+ss::future<error_outcome>
+uploader::maybe_upload_cluster_name_reference(retry_chain_node& retry_node) {
+    auto cluster_name = config::shard_local_cfg().cloud_storage_cluster_name();
+    if (cluster_name.has_value()) {
+        cloud_io::transfer_details ref_td{
+          .bucket = _bucket,
+          .key = cluster_name_ref_for_uuid_key(
+            cluster_name.value(), _cluster_uuid),
+          .parent_rtc = retry_node,
+        };
+        auto ref_upload_result = co_await _remote.upload_object({
+          .transfer_details = std::move(ref_td),
+          .type = cloud_storage::upload_type::object,
+          // Empty payload. All the information is encoded in the key.
+          .payload = iobuf{},
+        });
+        if (ref_upload_result != cloud_storage::upload_result::success) {
+            vlog(
+              clusterlog.warn,
+              "Failed to upload cluster name reference: {}",
+              ref_upload_result);
+            co_return error_outcome::upload_failed;
+        }
+    } else {
+    }
+
     co_return error_outcome::success;
 }
 

@@ -43,4 +43,13 @@ cloud_storage_clients::object_key offsets_snapshot_key(
   const model::partition_id&,
   size_t snapshot_idx);
 
+// E.g. cluster_name/<name>/uuid/<uuid>
+cloud_storage_clients::object_key
+cluster_name_ref_for_uuid_key(const ss::sstring&, const model::cluster_uuid&);
+
+// E.g. cluster_name/
+constexpr cloud_storage_clients::object_key cluster_name_prefix_key() {
+    return cloud_storage_clients::object_key{"cluster_name/"};
+}
+
 } // namespace cluster::cloud_metadata
