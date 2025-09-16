@@ -60,13 +60,17 @@ mirror_topic_metadata create_mirror_topic_metadata(
   ::model::topic source_topic_name,
   std::optional<::model::topic_id> source_topic_id,
   std::optional<::model::topic_id> destination_topic_id,
-  chunked_hash_map<ss::sstring, ss::sstring> topic_configs) {
+  chunked_hash_map<ss::sstring, ss::sstring> topic_configs,
+  int32_t partition_count,
+  std::optional<int16_t> replication_factor) {
     return {
       .state = state,
       .source_topic_id = source_topic_id,
       .source_topic_name = std::move(source_topic_name),
       .destination_topic_id = destination_topic_id.value_or(
         ::model::topic_id{uuid_t::create()}),
+      .partition_count = partition_count,
+      .replication_factor = replication_factor,
       .topic_configs = std::move(topic_configs),
     };
 }

@@ -477,6 +477,24 @@ errc frontend::validator::validate_mutation(const cluster_link_cmd& cmd) const {
                   return errc::topic_already_being_mirrored;
               }
           }
+          if (cmd.value.metadata.partition_count < 1) {
+              vlog(
+                cluster::clusterlog.warn,
+                "Invalid partition count for topic {} in link {}: {}",
+                cmd.value.topic,
+                meta->get().name,
+                cmd.value.metadata.partition_count);
+              return errc::invalid_update;
+          }
+          if (
+            cmd.value.metadata.replication_factor.has_value()
+            && cmd.value.metadata.replication_factor < 1) {
+              vlog(
+                cluster::clusterlog.warn,
+                "Invalid replication factor: {}",
+                cmd.value.metadata.replication_factor);
+              return errc::invalid_update;
+          }
           return errc::success;
       },
       [this](const cluster::cluster_link_update_mirror_topic_state_cmd& cmd) {
@@ -550,7 +568,9 @@ errc frontend::validator::validate_mutation(const cluster_link_cmd& cmd) const {
               return errc::invalid_update;
           }
 
-          if (cmd.value.replication_factor < 1) {
+          if (
+            cmd.value.replication_factor.has_value()
+            && cmd.value.replication_factor < 1) {
               vlog(
                 cluster::clusterlog.warn,
                 "Invalid replication factor: {}",
