@@ -172,15 +172,12 @@ ss::future<> ctp_stm::do_apply(const model::record_batch& batch) {
     } else if (
       batch.header().type == model::record_batch_type::ctp_stm_command) {
         // Decode the command and apply it to the state.
-        kafka::offset lro;
-        batch.for_each_record([&lro](model::record&& r) {
+        batch.for_each_record([this](model::record&& r) {
             auto key = serde::from_iobuf<uint8_t>(r.release_key());
             auto cmd_key = static_cast<ctp_stm_key>(key);
             switch (cmd_key) {
             case ctp_stm_key::advance_reconciled_offset: {
-                auto cmd = serde::from_iobuf<advance_reconciled_offset_cmd>(
-                  r.release_value());
-                lro = cmd.last_reconciled_offset;
+                apply_advance_reconciled_offset(std::move(r));
                 break;
             }
             default:
@@ -191,13 +188,19 @@ ss::future<> ctp_stm::do_apply(const model::record_batch& batch) {
             }
             return ss::stop_iteration::no;
         });
-        vlog(_log.debug, "New LRO value is {}", lro);
-        // LRO is expected to be within the translation range
-        auto lro_log = _raft->log()->to_log_offset(kafka::offset_cast(lro));
-        _state.advance_last_reconciled_offset(lro, lro_log);
     }
 
     co_return;
+}
+
+void ctp_stm::apply_advance_reconciled_offset(model::record record) {
+    auto cmd = serde::from_iobuf<advance_reconciled_offset_cmd>(
+      record.release_value());
+    auto lro = cmd.last_reconciled_offset;
+    vlog(_log.debug, "New LRO value is {}", lro);
+    // LRO is expected to be within the translation range
+    auto lro_log = _raft->log()->to_log_offset(kafka::offset_cast(lro));
+    _state.advance_last_reconciled_offset(lro, lro_log);
 }
 
 void ctp_stm::apply_placeholder(const model::record_batch& batch) {
