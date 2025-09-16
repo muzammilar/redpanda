@@ -892,7 +892,9 @@ ss::future<api_version> fetcher::get_list_offsets_request_version() const {
 }
 
 ss::future<> fetcher::assign_partition(
-  model::topic_partition_view tp, std::optional<kafka::offset> offset) {
+  model::topic_partition_view tp,
+  std::optional<kafka::offset> offset,
+  subscription_epoch subscription_epoch) {
     auto lock = co_await _state_lock.get_units();
     vlog(
       logger().debug,
@@ -904,7 +906,7 @@ ss::future<> fetcher::assign_partition(
     _partitions[tp.topic].insert_or_assign(
       tp.partition,
       partition_fetch_state(
-        tp.partition, offset, next_epoch(), subscription_epoch(-1)));
+        tp.partition, offset, next_epoch(), subscription_epoch));
 
     // in the case of fast leadership transfers, we may have a partition both
     // being added and forgotten, in which case, make sure that it is only

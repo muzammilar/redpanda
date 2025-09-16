@@ -165,7 +165,9 @@ public:
      * update the fetch offsets for the already assigned partitions.
      */
     ss::future<> assign_partition(
-      model::topic_partition_view, std::optional<kafka::offset>);
+      model::topic_partition_view,
+      std::optional<kafka::offset>,
+      subscription_epoch);
     /**
      * Unassign partition from the fetcher, it will stop fetching data for the
      * partition and remove it from the fetcher state. After the unassignment
