@@ -232,6 +232,21 @@ private:
                    && to_forget.empty();
         }
     };
+
+    // consistency tracking, fetcher_epoch will be used to detect fetcher
+    // assignment updates, subscription epoch will be used in direct_consumer to
+    // filter stale fetch responses
+    struct epoch_set {
+        epoch_set(
+          assignment_epoch fetcher_epoch,
+          subscription_epoch subscription_epoch) noexcept
+          : fetcher_epoch{fetcher_epoch}
+          , subscription_epoch{subscription_epoch} {}
+
+        assignment_epoch fetcher_epoch;
+        subscription_epoch subscription_epoch;
+    };
+
     struct partitions_with_epoch {
         topic_partition_map<assignment_epoch> assignment_epochs;
         chunked_vector<partitions_to_process> partitions;
