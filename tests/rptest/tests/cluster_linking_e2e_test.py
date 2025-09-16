@@ -467,6 +467,64 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         ):
             self.update_link(shadow_link=shadow_link, update_mask=update_mask)
 
+    @cluster(num_nodes=6)
+    def test_delete_simple_link(self):
+        def get_links_by_name():
+            list_links = self.list_links()
+            return [l.name for l in list_links]
+
+        empty_link = "empty-link"
+        shadow_link = self.create_link(empty_link)
+        self.logger.info(f"Create shadow link result: {shadow_link}")
+
+        links = get_links_by_name()
+        assert len(links) == 1, (
+            f"Expected exactly one shadow link, got {len(links)}. Test setup failed"
+        )
+
+        # Verify that a request to delete a non-existent link will fail gracefully
+        bad_link_name = "non-existent-link"
+        with expect_exception(
+            ConnectError,
+            lambda e: str(e)
+            == f"[not_found] Failed to find cluster link with name '{bad_link_name}'",
+        ):
+            self.delete_link(bad_link_name)
+
+        # Verify that an empty link can and will be deleted
+        self.delete_link(empty_link)
+        wait_until(
+            lambda: empty_link not in get_links_by_name(),
+            timeout_sec=20,
+            err_msg=f"Failed to delete {empty_link}",
+        )
+
+        # Create some topics to be mirrored.
+        topics = []
+        for i in range(10):
+            topic = TopicSpec(
+                name=f"source-topic-{i}",
+            )
+            self.source_default_client().create_topic(topic)
+            topics.append(topic)
+
+        test_link = "test-link"
+        self.create_link(test_link)
+
+        wait_until(
+            lambda: self._topics_are_present_in_target_cluster(topics),
+            timeout_sec=20,
+            err_msg="Failed to find topics in the target cluster. Test setup failed",
+        )
+
+        # Verify that a request to delete a link with mirrored topics will fail
+        with expect_exception(
+            ConnectError,
+            lambda e: str(e)
+            == f"[failed_precondition] Failed to delete cluster link with name '{test_link}'. There are active shadow topics.",
+        ):
+            self.delete_link(test_link)
+
 
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
     def leadership_shuffler(self, redpanda, topic: str, enabled: bool):

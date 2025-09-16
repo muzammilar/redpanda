@@ -109,8 +109,15 @@ shadow_link_service_impl::create_shadow_link(
 
 ss::future<proto::admin::delete_shadow_link_response>
 shadow_link_service_impl::delete_shadow_link(
-  serde::pb::rpc::context, proto::admin::delete_shadow_link_request) {
-    throw serde::pb::rpc::unimplemented_exception();
+  serde::pb::rpc::context, proto::admin::delete_shadow_link_request req) {
+    vlog(sllog.trace, "delete_shadow_link: {}", req);
+
+    handle_error(
+      co_await _service->local().delete_cluster_link(
+        cluster_link::model::name_t{req.get_name()}));
+
+    proto::admin::delete_shadow_link_response dsl_resp;
+    co_return dsl_resp;
 }
 
 ss::future<proto::admin::get_shadow_link_response>
