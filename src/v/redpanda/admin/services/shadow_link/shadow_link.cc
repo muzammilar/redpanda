@@ -44,6 +44,7 @@ T handle_error(cluster_link::result<T> result) {
     case cluster_link::errc::service_shutting_down:
         throw serde::pb::rpc::unavailable_exception(info.message());
     case cluster_link::errc::cluster_link_disabled:
+    case cluster_link::errc::link_has_active_shadow_topics:
         throw serde::pb::rpc::failed_precondition_exception(info.message());
     case cluster_link::errc::link_id_not_found:
         throw serde::pb::rpc::not_found_exception(info.message());
