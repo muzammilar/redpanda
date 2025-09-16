@@ -160,12 +160,14 @@ ss::future<> write_request_scheduler::apply_time_based_fallback() {
     // will always be able to handle the addition L0 upload (e.g. it has
     // borrowing mechanism to do this).
 
-    for (auto& req : shard_bytes) {
-        vlog(
-          cd_log.trace,
-          "map result: {} requests, {} bytes",
-          req.shard,
-          req.bytes);
+    if (cd_log.is_enabled(ss::log_level::trace)) {
+        for (auto& req : shard_bytes) {
+            vlog(
+              cd_log.trace,
+              "map result: {} requests, {} bytes",
+              req.shard,
+              req.bytes);
+        }
     }
 
     // Find the shard with the most bytes to write
