@@ -25,6 +25,7 @@ enum class [[nodiscard]] error_outcome : uint8_t {
     not_ready,
     ntp_not_found,
     rpc_error,
+    misconfiguration,
 };
 
 struct error_outcome_category final : public std::error_category {
@@ -52,9 +53,10 @@ struct error_outcome_category final : public std::error_category {
             return "NTP not found";
         case error_outcome::rpc_error:
             return "RPC error";
-        default:
-            return fmt::format("Unknown outcome ({})", c);
+        case error_outcome::misconfiguration:
+            return "Cluster misconfiguration";
         }
+        return fmt::format("Unknown outcome ({})", c);
     }
 };
 

@@ -89,12 +89,18 @@ uploader::download_highest_manifest_or_create(retry_chain_node& retry_node) {
         // Happy path, just return.
         co_return manifest_res;
     }
+
     if (manifest_res.error() == error_outcome::no_matching_metadata) {
         cluster_metadata_manifest manifest{};
         manifest.cluster_uuid = _cluster_uuid;
+
+        // When no manifest is found we want to start from a metadata ID which
+        // is highest across all possible generations of clusters. That's why we
+        // ignore the cluster name filter here and just look for the highest
+        // manifest in the bucket.
         auto highest_manifest_res
           = co_await download_highest_manifest_in_bucket(
-            _remote, _bucket, retry_node);
+            _remote, _bucket, retry_node, cluster_name_ignore_filter);
         if (highest_manifest_res.has_value()) {
             auto& highest_manifest = highest_manifest_res.value();
             vlog(

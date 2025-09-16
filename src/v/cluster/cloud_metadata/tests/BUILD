@@ -207,3 +207,18 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "key_utils_test",
+    timeout = "short",
+    srcs = [
+        "key_utils_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/cluster",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)

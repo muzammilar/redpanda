@@ -18,6 +18,8 @@
 
 #include <boost/uuid/uuid_io.hpp>
 
+#include <optional>
+
 namespace {
 
 const std::regex cluster_metadata_manifest_prefix_expr{
@@ -168,11 +170,147 @@ ss::future<std::list<ss::sstring>> list_orphaned_by_manifest(
     co_return ret;
 }
 
+namespace {
+ss::future<result<absl::btree_set<model::cluster_uuid>, error_outcome>>
+find_candidate_uuids(
+  cloud_storage::remote& remote,
+  const cloud_storage_clients::bucket_name& bucket,
+  const ss::sstring& cloud_storage_cluster_name,
+  retry_chain_node& retry_node) {
+    absl::btree_set<model::cluster_uuid> candidate_uuids;
+
+    const auto cluster_uuids_prefix = cluster_name_ref_for_uuid_prefix_key(
+      cloud_storage_cluster_name);
+    vlog(
+      clusterlog.trace, "Listing objects with prefix {}", cluster_uuids_prefix);
+    auto uuids_list_res = co_await remote.list_objects(
+      bucket, retry_node, cluster_uuids_prefix, std::nullopt);
+    if (uuids_list_res.has_error()) {
+        vlog(
+          clusterlog.debug,
+          "Error listing cluster UUIDs for cluster name {} in bucket {}: {}",
+          cloud_storage_cluster_name,
+          bucket(),
+          uuids_list_res.error());
+        co_return error_outcome::list_failed;
+    }
+
+    for (const auto& item : uuids_list_res.value().contents) {
+        auto parsed = parse_cluster_name_ref_for_uuid_key(item.key);
+        if (!parsed.has_value()) {
+            vlog(
+              clusterlog.warn,
+              "Error parsing object key {} for cluster name {} in bucket {}: "
+              "{}",
+              item.key,
+              cloud_storage_cluster_name,
+              bucket(),
+              parsed.error());
+            co_return error_outcome::list_failed;
+        }
+        candidate_uuids.emplace(std::get<1>(parsed.value()));
+    }
+
+    co_return candidate_uuids;
+}
+
+using find_candidate_uuids_for_optional_name_result
+  = result<std::optional<absl::btree_set<model::cluster_uuid>>, error_outcome>;
+
+// If cloud_storage_cluster_name_opt is set, find candidate UUIDs for that name.
+// If not set, check that the bucket does not contain any cluster name
+// references, and return std::nullopt if so. If there are cluster name
+// references in the bucket but no name is configured, return an error.
+ss::future<find_candidate_uuids_for_optional_name_result>
+find_candidate_uuids_for_optional_name(
+  cloud_storage::remote& remote,
+  const cloud_storage_clients::bucket_name& bucket,
+  const std::optional<ss::sstring>& cloud_storage_cluster_name_opt,
+  retry_chain_node& retry_node) {
+    std::optional<absl::btree_set<model::cluster_uuid>> candidate_uuids;
+
+    if (cloud_storage_cluster_name_opt.has_value()) {
+        const auto& name = cloud_storage_cluster_name_opt.value();
+
+        auto candidate_uuids_res = co_await find_candidate_uuids(
+          remote, bucket, name, retry_node);
+        if (!candidate_uuids_res.has_value()) {
+            co_return candidate_uuids_res.error();
+        }
+
+        if (candidate_uuids_res.value().empty()) {
+            vlog(
+              clusterlog.debug,
+              "No cluster UUIDs found for cluster name {} in bucket {}",
+              name,
+              bucket());
+            co_return error_outcome::no_matching_metadata;
+        }
+
+        candidate_uuids.emplace(std::move(candidate_uuids_res.value()));
+
+        vlog(
+          clusterlog.trace,
+          "Found candidate UUIDs: {}",
+          fmt::join(candidate_uuids.value(), ", "));
+
+        co_return std::move(candidate_uuids);
+    } else {
+        // If cluster name is not configured we need to error out if the bucket
+        // contains any cluster name references to avoid customer shooting
+        // themselves in the foot.
+        auto uses_cluster_id_res = co_await check_bucket_contains_cluster_names(
+          remote, bucket, retry_node);
+        if (!uses_cluster_id_res.has_value()) {
+            vlog(
+              clusterlog.debug,
+              "Error checking for cluster names in bucket {}: {}",
+              bucket(),
+              uses_cluster_id_res.error());
+            co_return error_outcome::list_failed;
+        }
+        if (uses_cluster_id_res.value()) {
+            vlog(
+              clusterlog.warn,
+              "Cluster name references exist in bucket {}, but no cluster name "
+              "is configured. Cannot proceed. Please check "
+              "`cloud_storage_cluster_name` config property.",
+              bucket());
+            co_return error_outcome::misconfiguration;
+        }
+
+        co_return std::nullopt;
+    }
+}
+
+} // namespace
+
 ss::future<cluster_manifest_result> download_highest_manifest_in_bucket(
   cloud_storage::remote& remote,
   const cloud_storage_clients::bucket_name& bucket,
   retry_chain_node& retry_node,
+  const cluster_name_filter& cluster_name_filter,
   std::optional<model::cluster_uuid> ignore_uuid) {
+    auto candidate_uuids_res = co_await ss::visit(
+      cluster_name_filter,
+      [](const cluster_name_ignore_t&)
+        -> ss::future<find_candidate_uuids_for_optional_name_result> {
+          return ss::make_ready_future<
+            find_candidate_uuids_for_optional_name_result>(std::nullopt);
+      },
+      [&remote, &bucket, &retry_node](
+        const std::optional<ss::sstring>& cluster_name_opt)
+        -> ss::future<find_candidate_uuids_for_optional_name_result> {
+          return find_candidate_uuids_for_optional_name(
+            remote, bucket, cluster_name_opt, retry_node);
+      });
+
+    if (candidate_uuids_res.has_error()) {
+        co_return candidate_uuids_res.error();
+    }
+    std::optional<absl::btree_set<model::cluster_uuid>> candidate_uuids
+      = std::move(candidate_uuids_res.value());
+
     // Look for unique cluster UUIDs for which we have metadata.
     constexpr auto cluster_prefix = "cluster_metadata/";
     vlog(clusterlog.trace, "Listing objects with prefix {}", cluster_prefix);
@@ -230,7 +368,9 @@ ss::future<cluster_manifest_result> download_highest_manifest_in_bucket(
               cluster_uuid_str);
             continue;
         }
-        if (ignore_uuid == cluster_uuid) {
+        if (
+          ignore_uuid == cluster_uuid
+          || (candidate_uuids.has_value() && !candidate_uuids.value().contains(cluster_uuid))) {
             continue;
         }
         if (meta_id > highest_meta_id) {

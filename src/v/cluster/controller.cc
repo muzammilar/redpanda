@@ -1015,7 +1015,10 @@ ss::future<> controller::create_cluster(bootstrap_cluster_cmd_data cmd_data) {
             retry_chain_node retry_node(_as.local(), 300s, 5s);
             auto res
               = co_await cloud_metadata::download_highest_manifest_in_bucket(
-                _cloud_storage_api.local(), bucket_opt.value(), retry_node);
+                _cloud_storage_api.local(),
+                bucket_opt.value(),
+                retry_node,
+                config::shard_local_cfg().cloud_storage_cluster_name());
             if (res.has_value()) {
                 vlog(
                   clusterlog.info,

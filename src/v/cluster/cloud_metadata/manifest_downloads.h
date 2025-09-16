@@ -18,6 +18,7 @@
 #include <seastar/core/future.hh>
 
 #include <expected>
+#include <optional>
 
 namespace cloud_storage {
 class remote;
@@ -49,6 +50,25 @@ ss::future<std::list<ss::sstring>> list_orphaned_by_manifest(
   const cluster_metadata_manifest& manifest,
   retry_chain_node& retry_node);
 
+struct cluster_name_filter_tag_t {};
+
+/// Used to ignore cluster names and instead look through all cluster
+/// metadata. This ensures correctness when we start uploading metadata and
+/// cluster name is set/changed later.
+struct cluster_name_ignore_t {
+    explicit constexpr cluster_name_ignore_t(cluster_name_filter_tag_t) {}
+};
+
+using cluster_name_filter
+  = std::variant<cluster_name_ignore_t, std::optional<ss::sstring>>;
+
+// We don't want a default-constructed variant, so force the user to pick one
+// of the two options.
+static_assert(!std::is_default_constructible_v<cluster_name_filter>);
+
+constexpr auto cluster_name_ignore_filter = cluster_name_filter{
+  cluster_name_ignore_t{cluster_name_filter_tag_t{}}};
+
 // Looks through the given bucket for cluster metadata with the highest
 // metadata ID.
 // - list_failed/download_failed: there was a physical error sending requests
@@ -59,6 +79,7 @@ ss::future<cluster_manifest_result> download_highest_manifest_in_bucket(
   cloud_storage::remote& remote,
   const cloud_storage_clients::bucket_name& bucket,
   retry_chain_node& retry_node,
+  const cluster_name_filter& cluster_name_filter,
   std::optional<model::cluster_uuid> ignore_uuid = std::nullopt);
 
 // Checks whether the given bucket contains any keys with the
