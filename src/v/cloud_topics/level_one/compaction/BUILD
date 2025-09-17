@@ -45,13 +45,18 @@ redpanda_cc_library(
         "//src/v/cloud_topics/level_one:__subpackages__",
     ],
     deps = [
+        ":committer",
+        ":logger",
+        ":meta",
         "//src/v/bytes",
         "//src/v/bytes:iostream",
+        "//src/v/cloud_topics/level_one/common:abstract_io",
         "//src/v/cloud_topics/level_one/common:object",
         "//src/v/compaction:reducer",
         "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/model:batch_compression",
+        "//src/v/ssx:future_util",
         "@seastar",
     ],
 )
