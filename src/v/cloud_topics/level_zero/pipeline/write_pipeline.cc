@@ -231,6 +231,11 @@ void write_pipeline<Clock>::stage::push_next_stage(
 }
 
 template<class Clock>
+void write_pipeline<Clock>::stage::signal_next_stage() {
+    _parent->signal(_parent->next_stage(_ps));
+}
+
+template<class Clock>
 write_pipeline<Clock>::write_requests_list
 write_pipeline<Clock>::stage::pull_write_requests(
   size_t max_bytes, size_t max_requests) {

@@ -72,6 +72,11 @@ public:
         /// \param signal If true signal the next stage that new write request
         void push_next_stage(write_request<Clock>& r, bool signal = true);
 
+        /// Notify the next stage that new write requests are available.
+        /// This method should be invoked after 'push_next_stage(..., false)'
+        /// to avoid stalling the pipeline.
+        void signal_next_stage();
+
         /// Extract write requests out of the pipeline atomically.
         /// The caller is responsible for handling each write request.
         /// The request could be either returned using 'push_next_stage'
