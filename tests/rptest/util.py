@@ -12,7 +12,7 @@ import pprint
 import threading
 from contextlib import contextmanager
 from logging import Logger
-from typing import Any, Callable, ContextManager, Optional
+from typing import Any, Callable, ContextManager, Optional, TypeVar
 
 from ducktape.cluster.remoteaccount import RemoteCommandError
 from ducktape.errors import TimeoutError
@@ -21,6 +21,8 @@ from requests.exceptions import HTTPError
 
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.services.storage import Segment
+
+T = TypeVar("T")
 
 
 class Scale:
@@ -630,3 +632,9 @@ def bg_thread_cm(func) -> Callable[..., ContextManager]:
             thread.join()
 
     return contextmanager(ctx)
+
+
+def not_none(value: T | None) -> T:
+    if value is None:
+        raise ValueError("value was unexpectedly None")
+    return value

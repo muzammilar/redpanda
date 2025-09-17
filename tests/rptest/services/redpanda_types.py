@@ -14,6 +14,10 @@ from rptest.utils.allow_logs_on_predicate import AllowLogsOnPredicate
 LogAllowListElem = str | AllowLogsOnPredicate | re.Pattern[str]
 LogAllowList = Sequence[LogAllowListElem]
 
+# After we use prepare_log_allow_list the str values are gone
+CompiledLogAllowElem = AllowLogsOnPredicate | re.Pattern[str]
+CompiledLogAllowList = Sequence[CompiledLogAllowElem]
+
 
 @dataclass
 class SaslCredentials:
@@ -282,7 +286,8 @@ class RedpandaServiceForClients(Protocol):
     Method documentation lives on the service implementations themselves and is
     not repeated here."""
 
-    logger: Logger
+    @property
+    def logger(self) -> Logger: ...
 
     def kafka_client_security(self) -> KafkaClientSecurity: ...
 
