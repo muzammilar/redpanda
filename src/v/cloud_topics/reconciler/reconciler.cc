@@ -267,7 +267,7 @@ ss::future<> reconciler::reconcile() {
 
     // Process partitions by their object. This should be easier to
     // improve than processing partition-by-partition.
-    chunked_vector<object_metadata> successful_objects;
+    chunked_vector<built_object_metadata> successful_objects;
     for (const auto& [oid, partitions] : oid_to_partitions) {
         auto object_fut = co_await ss::coroutine::as_future(
           reconcile_partitions(oid, partitions));
@@ -320,7 +320,7 @@ ss::future<> reconciler::reconcile() {
     }
 }
 
-ss::future<std::expected<reconciler::object_metadata, reconcile_error>>
+ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
 reconciler::reconcile_partitions(
   const l1::object_id& oid,
   const chunked_vector<attached_partition>& partitions) {
@@ -352,7 +352,7 @@ reconciler::reconcile_partitions(
     co_return fut.get();
 }
 
-ss::future<std::expected<reconciler::object_metadata, reconcile_error>>
+ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
 reconciler::build_and_put_object(
   const l1::object_id& oid,
   builder_context& ctx,
@@ -415,7 +415,7 @@ reconciler::make_context() {
     co_return ctx;
 }
 
-ss::future<std::expected<reconciler::object_metadata, reconcile_error>>
+ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
 reconciler::build_object(
   builder_context& ctx, const chunked_vector<attached_partition>& partitions) {
     chunked_vector<partition_commit_info> metas;
@@ -439,7 +439,7 @@ reconciler::build_object(
       "Built L1 object from {} partitions ({} partitions didn't fit)",
       metas.size(),
       partitions.size() - metas.size());
-    co_return object_metadata{
+    co_return built_object_metadata{
       .object_info = std::move(obj_info), .partitions = std::move(metas)};
 }
 
@@ -491,7 +491,7 @@ reconciler::add_partition_to_object(
 ss::future<std::expected<void, reconcile_error>>
 reconciler::add_object_metadata(
   const l1::object_id& oid,
-  const object_metadata& obj_meta,
+  const built_object_metadata& obj_meta,
   l1::metastore::object_metadata_builder* meta_builder) {
     // Add metadata for this object to the metadata builder.
     // Remember that there are two kinds of partitions here: the
@@ -543,7 +543,7 @@ reconciler::add_object_metadata(
 }
 
 ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
-  const chunked_vector<object_metadata>& objects,
+  const chunked_vector<built_object_metadata>& objects,
   std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder) {
     // It's possible to build the terms map as we build the objects, but
     // I think re-iterating over all the object partitions here is worth

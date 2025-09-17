@@ -155,7 +155,7 @@ private:
      * Contains the information necessary to register the object
      * with the metastore.
      */
-    struct object_metadata {
+    struct built_object_metadata {
         l1::object_builder::object_info object_info;
         chunked_vector<partition_commit_info> partitions;
     };
@@ -184,7 +184,7 @@ private:
      * in `partitions`. Returns metadata on success, or an error if building,
      * uploading, or metadata operations fail.
      */
-    ss::future<std::expected<object_metadata, reconcile_error>>
+    ss::future<std::expected<built_object_metadata, reconcile_error>>
     reconcile_partitions(
       const l1::object_id& oid,
       const chunked_vector<attached_partition>& partitions);
@@ -195,7 +195,7 @@ private:
      * Returns metadata on success, or an error if no data was added or
      * if the build/upload fails.
      */
-    ss::future<std::expected<object_metadata, reconcile_error>>
+    ss::future<std::expected<built_object_metadata, reconcile_error>>
     build_and_put_object(
       const l1::object_id& oid,
       builder_context& ctx,
@@ -214,7 +214,8 @@ private:
      * Returns empty metadata if no data was added to the object.
      * Returns an error if building fails.
      */
-    ss::future<std::expected<object_metadata, reconcile_error>> build_object(
+    ss::future<std::expected<built_object_metadata, reconcile_error>>
+    build_object(
       builder_context& ctx,
       const chunked_vector<attached_partition>& partitions);
 
@@ -239,7 +240,7 @@ private:
      */
     ss::future<std::expected<void, reconcile_error>> add_object_metadata(
       const l1::object_id& oid,
-      const object_metadata& info,
+      const built_object_metadata& info,
       l1::metastore::object_metadata_builder* meta_builder);
 
     /*
@@ -248,7 +249,7 @@ private:
      * the committed data, using corrections from the metastore if provided.
      */
     ss::future<std::expected<void, reconcile_error>> commit_objects(
-      const chunked_vector<object_metadata>& objects,
+      const chunked_vector<built_object_metadata>& objects,
       std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder);
 
     /*
