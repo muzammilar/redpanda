@@ -244,6 +244,11 @@ ss::future<error_outcome> uploader::maybe_upload_controller_snapshot(
   retry_chain_node& retry_node) {
     auto controller_snap_file = co_await _raft0->open_snapshot_file();
     if (!controller_snap_file.has_value()) {
+        vlog(
+          clusterlog.trace,
+          "Skipping controller snapshot upload as it does not exist at {}",
+          _raft0->get_snapshot_path());
+
         // Nothing to upload; continue.
         co_return error_outcome::success;
     }
