@@ -243,6 +243,11 @@ ss::future<> controller::start(
   std::chrono::milliseconds application_start_time,
   ss::sharded<std::unique_ptr<cluster::data_migrations::group_proxy>>&
     data_migrations_group_proxy) {
+    // Abort all background activity if start() is asked to abort mid-way.
+    auto shard0_as_sub = shard0_as.subscribe([this](const auto&) noexcept {
+        return _as.invoke_on_all(&ss::abort_source::request_abort);
+    });
+
     /**
      * Switch to cluster scheduling group to ensure that all the controller
      * services are started within that scheduling group.
