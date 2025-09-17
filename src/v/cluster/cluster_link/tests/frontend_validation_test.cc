@@ -151,6 +151,22 @@ public:
         co_return ec;
     }
 
+    ss::future<cluster::cluster_link::errc>
+    failover_link_topic(id_t id, const model::topic& topic) {
+        // first transition to failing over and then to failed over
+        auto ec = co_await update_mirror_topic_status(
+          id,
+          update_mirror_topic_status_cmd{
+            .topic = topic, .status = mirror_topic_status::failing_over});
+        if (ec != errc::success) {
+            co_return ec;
+        }
+        co_return co_await update_mirror_topic_status(
+          id,
+          update_mirror_topic_status_cmd{
+            .topic = topic, .status = mirror_topic_status::failed_over});
+    }
+
     id_t _latest_id{0};
 };
 
@@ -211,6 +227,66 @@ TEST_F_CORO(frontend_validation_test, remove_existing) {
     EXPECT_EQ(
       co_await delete_cluster_link(name_t("link1")),
       cluster::cluster_link::errc::does_not_exist);
+}
+
+TEST_F_CORO(frontend_validation_test, remove_empty_link) {
+    EXPECT_EQ(
+      co_await upsert_cluster_link(create_base_metadata()),
+      cluster::cluster_link::errc::success);
+    EXPECT_EQ(
+      co_await delete_cluster_link(name_t("link1")),
+      cluster::cluster_link::errc::success);
+}
+
+TEST_F_CORO(frontend_validation_test, remove_link_with_topics) {
+    // create a link
+    EXPECT_EQ(
+      co_await upsert_cluster_link(create_base_metadata()),
+      cluster::cluster_link::errc::success);
+    // Add a topic to the link
+    auto maybe_link_id = _table.local().find_id_by_name(name_t("link1"));
+    EXPECT_TRUE(maybe_link_id.has_value())
+      << "Unable to find link ID for link1";
+    auto link_id = maybe_link_id.value();
+    add_mirror_topic_cmd cmd0{
+      .topic = model::topic("mirror-topic-0"),
+      .metadata = testing::create_mirror_topic_metadata(
+        mirror_topic_status::active, model::topic("mirror-topic-0"))};
+    EXPECT_EQ(
+      co_await add_mirror_topic(link_id, std::move(cmd0)),
+      cluster::cluster_link::errc::success);
+    // Try to delete the link, should fail
+    EXPECT_EQ(
+      co_await delete_cluster_link(name_t("link1")),
+      cluster::cluster_link::errc::link_has_active_shadow_topics);
+    // Add another topic and transition the first one to failed_over
+    add_mirror_topic_cmd cmd1{
+      .topic = model::topic("mirror-topic-1"),
+      .metadata = testing::create_mirror_topic_metadata(
+        mirror_topic_status::active, model::topic("mirror-topic-1"))};
+    EXPECT_EQ(
+      co_await add_mirror_topic(link_id, std::move(cmd1)),
+      cluster::cluster_link::errc::success);
+    // Try delete again, should still fail
+    EXPECT_EQ(
+      co_await delete_cluster_link(name_t("link1")),
+      cluster::cluster_link::errc::link_has_active_shadow_topics);
+    // Transition first topic to failed_over
+    EXPECT_EQ(
+      co_await failover_link_topic(link_id, model::topic("mirror-topic-0")),
+      cluster::cluster_link::errc::success);
+    // Try delete again, should still fail
+    EXPECT_EQ(
+      co_await delete_cluster_link(name_t("link1")),
+      cluster::cluster_link::errc::link_has_active_shadow_topics);
+    // Transition second topic to failed_over
+    EXPECT_EQ(
+      co_await failover_link_topic(link_id, model::topic("mirror-topic-1")),
+      cluster::cluster_link::errc::success);
+    // Now the delete should succeed
+    EXPECT_EQ(
+      co_await delete_cluster_link(name_t("link1")),
+      cluster::cluster_link::errc::success);
 }
 
 TEST_F_CORO(frontend_validation_test, update_existing_bad_uuid) {

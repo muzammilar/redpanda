@@ -19,7 +19,40 @@
 
 #include <ostream>
 
+namespace {
+template<typename T, typename... Args>
+bool is_any_of(T status, Args&&... args) {
+    return ((args == status) || ...);
+}
+} // namespace
+
 namespace cluster_link::model {
+
+bool is_valid_status_transition(
+  mirror_topic_status current, mirror_topic_status target) noexcept {
+    switch (target) {
+    case mirror_topic_status::active:
+        // Currently a mirror topic is created with active status
+        // and we do not allow transition back to active from a different
+        // status. This needs to change when we allow failed_over/promoted
+        // topics to be re-activated.
+        return false;
+    case mirror_topic_status::failed:
+        return is_any_of(
+          current,
+          mirror_topic_status::active,
+          mirror_topic_status::failing_over,
+          mirror_topic_status::promoting);
+    case mirror_topic_status::paused:
+    case mirror_topic_status::failing_over:
+    case mirror_topic_status::promoting:
+        return is_any_of(current, mirror_topic_status::active);
+    case mirror_topic_status::failed_over:
+        return is_any_of(current, mirror_topic_status::failing_over);
+    case mirror_topic_status::promoted:
+        return is_any_of(current, mirror_topic_status::promoting);
+    }
+}
 
 std::ostream& operator<<(std::ostream& os, const link_status& s) {
     return os << fmt::format("{}", s);

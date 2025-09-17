@@ -319,6 +319,7 @@ void source_topic_syncer::enqueue_create_mirror_topic_commands(
           model::add_mirror_topic_cmd{
             .topic = it->first,
             .metadata = model::mirror_topic_metadata{
+              .status = model::mirror_topic_status::active,
               .source_topic_id = it->second.topic_id,
               .source_topic_name = it->first,
               .partition_count = it->second.partition_count,

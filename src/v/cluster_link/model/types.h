@@ -37,12 +37,40 @@ using name_t = named_type<ss::sstring, struct name_tag>;
 /// Type to indicate if the task is enabled or not
 using enabled_t = ss::bool_class<struct enabled_tag>;
 
-/// TODO: define valid state transitions and add an ascii state machine
-/// diagram.
+/**
+ *
+ *                     ┌─────────────┐
+ *                     │   PAUSED    │
+ *                     └─────────────┘
+ *                           ▲ │
+ *                           │ ▼
+ *                     ┌─────────────┐
+ *        ┌────────────┤   ACTIVE    ├────────────┐
+ *        │            └─────────────┘            │
+ *        │                  │                    │
+ *        ▼                  ▼                    ▼
+ *  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+ *  │FAILING_OVER │───▶│   FAILED    │◀───│ PROMOTING   │
+ *  └─────────────┘    └─────────────┘    └─────────────┘
+ *        │                                       │
+ *        ▼                                       ▼
+ *  ┌─────────────┐                      ┌─────────────┐
+ *  │ FAILED_OVER │                      │  PROMOTED   │
+ *  └─────────────┘                      └─────────────┘
+ *        │                                       │
+ *      <---     todo: add transitional states --->
+ *        └───────────────┐    ┌──────────────────┘
+ *                        ▼    ▼
+ *                  ┌─────────────┐
+ *                  │   ACTIVE    │
+ *                  └─────────────┘
+ *
+ **/
 enum class mirror_topic_status : uint8_t {
     /// Mirroring is active on the topic
     active,
-    /// Mirroring has failed for the topic
+    /// Mirroring has failed for the topic. This is a terminal state
+    /// and non recoverable today.
     failed,
     /// Mirroring has been paused
     paused,
@@ -80,6 +108,9 @@ static constexpr std::string_view to_string_view(mirror_topic_status s) {
         return "promoting";
     }
 }
+
+bool is_valid_status_transition(
+  mirror_topic_status current, mirror_topic_status target) noexcept;
 
 std::ostream& operator<<(std::ostream& os, mirror_topic_status s);
 
@@ -634,7 +665,6 @@ struct link_configuration
     operator<<(std::ostream& os, const link_configuration& lc);
 };
 
-// TODO: define valid state transitions and an ascii diagram
 enum class link_status : uint8_t {
     // Initial state when the link is created
     active,
