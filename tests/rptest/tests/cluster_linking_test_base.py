@@ -10,6 +10,7 @@
 from collections import defaultdict
 from contextlib import contextmanager
 import time
+from typing import Any
 
 import google.protobuf.duration_pb2
 import google.protobuf.field_mask_pb2
@@ -22,6 +23,7 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
 from rptest.clients.admin.v2 import Admin as AdminV2
 from rptest.clients.default import DefaultClient
 from rptest.clients.rpk import RpkTool
+from rptest.services.cluster import TestContext
 from rptest.services.kgo_verifier_services import (
     KgoVerifierConsumerGroupConsumer,
     KgoVerifierProducer,
@@ -283,11 +285,11 @@ class ShadowLinkTestBase(PreallocNodesTest):
 
     def __init__(
         self,
-        test_context,
-        num_prealloc_nodes=0,
+        test_context: TestContext,
+        num_prealloc_nodes: int = 0,
         secondary_cluster_args: SecondaryClusterArgs = SecondaryClusterArgs(),
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ):
         kwargs.setdefault("extra_rp_conf", {}).update(
             {
@@ -430,7 +432,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         return req
 
     def create_link(
-        self, link_name: str, *args, **kwargs
+        self, link_name: str, *args: Any, **kwargs: Any
     ) -> shadow_link_pb2.ShadowLink:
         req = self.create_default_link_request(link_name=link_name, *args, **kwargs)
         return self.create_link_with_request(req=req)
@@ -516,7 +518,7 @@ class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
     kgo producer/consumer pair on a preallocated node.
     """
 
-    def __init__(self, test_context, *args, **kwargs):
+    def __init__(self, test_context: TestContext, *args: Any, **kwargs: Any):
         super().__init__(test_context, num_prealloc_nodes=1, *args, **kwargs)
 
         self.verifier: ClusterLinkingProgressVerifier
