@@ -22,7 +22,6 @@ namespace cluster_link {
 
 /**
  * @brief Abstract class that provides accessors to cluster link table
- *
  */
 class link_registry {
 public:

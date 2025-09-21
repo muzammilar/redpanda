@@ -399,6 +399,7 @@ ss::future<errc> frontend::do_local_mutation(
     if (!result) {
         co_return errc::not_leader_controller;
     }
+    auto [_, term] = result.value();
     auto ec = validate_mutation(cmd);
     if (ec != errc::success) {
         co_return ec;
@@ -417,7 +418,7 @@ ss::future<errc> frontend::do_local_mutation(
       [](auto cmd) { return serde_serialize_cmd(std::move(cmd)); },
       std::move(cmd));
     auto err_code = co_await _controller->replicate_and_wait(
-      std::move(b), timeout, *_as);
+      std::move(b), timeout, *_as, term);
     co_return map_errc(err_code);
 }
 
