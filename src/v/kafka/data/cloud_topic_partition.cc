@@ -69,6 +69,8 @@ kafka::error_code map_errc(frontend_errc errc) {
         return kafka::error_code::not_leader_for_partition;
     case frontend_errc::offset_out_of_range:
         return kafka::error_code::offset_out_of_range;
+    case frontend_errc::timeout:
+        return kafka::error_code::request_timed_out;
     default:
         return kafka::error_code::unknown_server_error;
     }
