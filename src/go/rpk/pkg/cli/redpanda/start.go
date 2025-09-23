@@ -476,7 +476,7 @@ func checkNetDedicatedMode(fs afero.Fs, y *config.RedpandaYaml) (string, error) 
 	irqDeviceInfo := irq.NewDeviceInfo(fs, irqProcFile)
 	balanceService := irq.NewBalanceService(fs, proc, executor, timeout)
 	netCheckersFactory := tuners.NewNetCheckersFactory(
-		fs, irqProcFile, irqDeviceInfo, ethtool, balanceService, cpuMasks)
+		fs, y.Rpk.Tuners, irqProcFile, irqDeviceInfo, ethtool, balanceService, cpuMasks)
 	mask := netCheckersFactory.DedicatedMaskForComputations(params.Nics)
 	if mask != "" {
 		// TODO: Need to add various checks here:
