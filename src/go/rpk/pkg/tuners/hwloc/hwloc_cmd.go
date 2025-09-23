@@ -150,3 +150,7 @@ func (hwLocCmd *hwLocCmd) runDistrib(args ...string) ([]string, error) {
 	}
 	return result, nil
 }
+
+func (hwLocCmd *hwLocCmd) MaskToListFormat(mask string) (string, error) {
+	return hwLocCmd.runCalc("--cpuset-output-format", "list", mask)
+}

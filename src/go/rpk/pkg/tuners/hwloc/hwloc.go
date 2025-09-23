@@ -22,5 +22,6 @@ type HwLoc interface {
 	GetNumberOfPUs(mask string) (uint, error)
 	GetPhysIntersection(firstMask string, secondMask string) ([]uint, error)
 	CheckIfMaskIsEmpty(mask string) bool
+	MaskToListFormat(mask string) (string, error)
 	IsSupported() bool
 }
