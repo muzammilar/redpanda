@@ -87,7 +87,7 @@ TEST(ReducerTest, InMemoryReducer) {
 class ReducerTestFixture : public l1::l1_reader_fixture {
 public:
     l1::compaction_committer::updates_t
-    steal_updates_from_committer(l1::compaction_committer& committer) {
+    take_updates_from_committer(l1::compaction_committer& committer) {
         auto updates = std::exchange(committer._updates, {});
         return updates;
     }
@@ -153,7 +153,7 @@ TEST_F(ReducerTestFixture, Reducer) {
 
     std::move(reducer).run().get();
 
-    auto updates = steal_updates_from_committer(committer);
+    auto updates = take_updates_from_committer(committer);
     ASSERT_EQ(updates.size(), 1);
 
     auto& update = updates.front();
