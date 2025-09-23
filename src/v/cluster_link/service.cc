@@ -250,29 +250,39 @@ private:
       kafka::client::cluster& cluster,
       kafka::snc_quota_manager& snc_quota_mgr,
       const model::connection_config& conn_cfg) {
-        // todo0: make more these configurable at connection level
-        // todo1: make these dynamic
+        const auto max_buffered_bytes = 2 * conn_cfg.get_fetch_max_bytes();
         kafka::client::direct_consumer::configuration cfg;
+        const auto max_wait_time = std::chrono::milliseconds(
+          conn_cfg.get_fetch_wait_max_ms());
+
         cfg.min_bytes = conn_cfg.get_fetch_min_bytes();
         cfg.max_fetch_size = conn_cfg.get_fetch_max_bytes();
-        cfg.partition_max_bytes = 512_KiB;
-        cfg.max_wait_time = 200ms;
         cfg.isolation_level = ::model::isolation_level::read_committed;
-        cfg.max_buffered_bytes = 5_MiB;
+        cfg.max_buffered_bytes = max_buffered_bytes;
+        // We are not interested in limiting the number of buffered fetches as
+        // we already set bytes limit
         cfg.max_buffered_elements = std::numeric_limits<size_t>::max();
         cfg.with_sessions = kafka::client::fetch_sessions_enabled::yes;
-        static constexpr size_t partition_max_buffered_bytes = 5_MiB;
-        static constexpr auto fetch_max_wait = 100ms;
+
+        cfg.max_wait_time = max_wait_time;
+        cfg.partition_max_bytes = conn_cfg.get_fetch_partition_max_bytes();
+
         auto direct_consumer = std::make_unique<kafka::client::direct_consumer>(
           cluster, cfg);
-
+        // Cache up to double the max fetch size in the consumer
+        // to allow more than one fetch to be buffered per partition.
+        vlog(
+          cllog.debug,
+          "Creating MUX consumer with {} direct consumer configuration",
+          cfg);
         return std::make_unique<replication::mux_remote_consumer>(
           std::move(client_id),
           std::move(direct_consumer),
           snc_quota_mgr,
-          partition_max_buffered_bytes,
-          fetch_max_wait);
+          max_buffered_bytes,
+          max_wait_time);
     }
+
     ss::sharded<cluster::partition_manager>* _partition_manager;
     ss::sharded<kafka::snc_quota_manager>* _snc_quota_mgr;
 };
