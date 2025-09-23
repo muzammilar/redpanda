@@ -600,7 +600,7 @@ simple_metastore::get_earliest_dirty_ts(
 }
 
 ss::future<std::expected<metastore::compaction_info_response, metastore::errc>>
-simple_metastore::get_compaction_info(const sample_spec& log) {
+simple_metastore::get_compaction_info(const compaction_sample_spec& log) {
     auto dirty_ratio = get_dirty_ratio(state_, log.tid_p);
     if (!dirty_ratio.has_value()) {
         co_return std::unexpected(dirty_ratio.error());

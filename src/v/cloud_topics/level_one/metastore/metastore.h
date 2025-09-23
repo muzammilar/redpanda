@@ -326,7 +326,7 @@ public:
     // All the information required to query a `compaction_info_response` from
     // the metastore. Parameters are used for call to
     // `get_compaction_offsets()`.
-    struct sample_spec {
+    struct compaction_sample_spec {
         model::topic_id_partition tid_p;
         model::timestamp tombstone_removal_upper_bound_ts;
     };
@@ -348,14 +348,14 @@ public:
     // timestamp, as well as compaction offsets (see `get_compaction_offsets()`
     // above).
     virtual ss::future<std::expected<compaction_info_response, errc>>
-    get_compaction_info(const sample_spec&) = 0;
+    get_compaction_info(const compaction_sample_spec&) = 0;
 
     // Vectorized RPC for obtaining compaction state for a number of partitions.
     // Ensures `compaction_info_response`s for partitions are returned in the
     // same order as requested in `to_sample`.
     virtual ss::future<
       chunked_vector<std::expected<compaction_info_response, errc>>>
-    get_compaction_infos(const chunked_vector<sample_spec>& to_sample) {
+    get_compaction_infos(const chunked_vector<compaction_sample_spec>& to_sample) {
         chunked_vector<std::expected<compaction_info_response, errc>> ret;
         ret.reserve(to_sample.size());
         for (const auto& log : to_sample) {
