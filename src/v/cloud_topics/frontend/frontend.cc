@@ -244,15 +244,8 @@ kafka::offset frontend::start_offset() const {
 
 ss::future<std::expected<kafka::offset, frontend_errc>>
 frontend::sync_effective_start(model::timeout_clock::duration duration) {
-    ss::abort_source as;
-    auto timeout_fut = ss::sleep_abortable<model::timeout_clock>(duration, as)
-                         .then_wrapped([&as](ss::future<> fut) {
-                             fut.ignore_ready_future();
-                             as.request_abort();
-                         });
-    bool synced = co_await _ctp_stm_api->sync_in_term(as);
-    as.request_abort();
-    co_await std::move(timeout_fut);
+    bool synced = co_await _ctp_stm_api->sync_in_term(
+      model::timeout_clock::now() + duration);
     if (!synced) {
         co_return std::unexpected(frontend_errc::timeout);
     }

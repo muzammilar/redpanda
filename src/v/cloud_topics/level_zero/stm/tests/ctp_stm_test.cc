@@ -318,7 +318,7 @@ TEST_F_CORO(ctp_stm_fixture, test_truncate_all_epochs) {
     co_await api(node(*get_leader()))
       .advance_reconciled_offset(kafka::offset(50), model::no_timeout);
     ss::abort_source as;
-    co_await api(node(*get_leader())).sync_in_term(as);
+    co_await api(node(*get_leader())).sync_in_term(model::no_timeout);
     inactive_epoch = co_await api(node(*get_leader())).get_inactive_epoch();
     ASSERT_TRUE_CORO(inactive_epoch);
     ASSERT_TRUE_CORO(inactive_epoch->has_value());

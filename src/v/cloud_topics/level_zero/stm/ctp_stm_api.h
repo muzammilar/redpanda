@@ -84,7 +84,7 @@ public:
     /// with the log messages replicated in the current term.
     /// \return 'true' if the replica is a leader and the in-memory state of
     /// the STM is up-to-date. Otherwise, return 'false'.
-    ss::future<bool> sync_in_term(ss::abort_source& as);
+    ss::future<bool> sync_in_term(model::timeout_clock::time_point deadline);
 
     /// Fence writes
     ss::future<cluster_epoch_fence> fence_epoch(cluster_epoch e);
