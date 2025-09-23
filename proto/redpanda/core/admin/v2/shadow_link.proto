@@ -260,13 +260,13 @@ message ShadowLinkClientOptions {
     // If 0 is provided, defaults to 100ms
     int32 retry_backoff_ms = 8;
     // Fetch request timeout
-    // If 0 is provided, defaults to 100ms
+    // If 0 is provided, defaults to 500ms
     int32 fetch_wait_max_ms = 9;
     // Fetch min bytes
-    // If 0 is provided, defaults to 1 byte
+    // If 0 is provided, defaults to 5 MiB
     int32 fetch_min_bytes = 10;
     // Fetch max bytes
-    // If 0 is provided, defaults to 1MiB
+    // If 0 is provided, defaults to 20 MiB
     int32 fetch_max_bytes = 11;
 }
 // Options for syncing topic metadata

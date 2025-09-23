@@ -253,16 +253,16 @@ struct connection_config
     static constexpr auto retry_backoff_ms_default = 100;
     // Maximum fetch wait time
     std::optional<int32_t> fetch_wait_max_ms;
-    // Default value for fetch_wait_max_ms (100ms)
-    static constexpr auto fetch_wait_max_ms_default = 100;
+    // Default value for fetch_wait_max_ms (500ms)
+    static constexpr auto fetch_wait_max_ms_default = 500;
     // Minimum number of bytes to fetch
     std::optional<int32_t> fetch_min_bytes;
-    // Default minimum number of bytes to fetch (1B)
-    static constexpr auto fetch_min_bytes_default = 1;
+    // Default minimum number of bytes to fetch (5MiB)
+    static constexpr auto fetch_min_bytes_default = 5_MiB;
     // Maximum number of bytes to fetch
     std::optional<int32_t> fetch_max_bytes;
     // Default maximum number of bytes to fetch (1MiB)
-    static constexpr auto fetch_max_bytes_default = 1 * 1024 * 1024;
+    static constexpr auto fetch_max_bytes_default = 20 * 1024 * 1024;
 
     // Returns the metadata_max_age_ms value
     int32_t get_metadata_max_age_ms() const {
