@@ -40,6 +40,11 @@
 #include <algorithm>
 #include <type_traits>
 
+#if defined(IS_GTEST)
+#error                                                                         \
+  "archival_service_fixture.h is not compatible with gtest due to use of boost assertions"
+#endif
+
 namespace {
 constexpr int16_t fixture_port_number = 7676;
 inline ss::logger arch_fixture_log("archival_service_fixture");
