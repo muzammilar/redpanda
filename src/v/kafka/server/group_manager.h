@@ -119,7 +119,7 @@ namespace kafka {
  *
  *     - This is not yet implemented.
  */
-class group_manager {
+class group_manager : public ss::peering_sharded_service<group_manager> {
 public:
     group_manager(
       model::topic_namespace,

@@ -164,7 +164,7 @@ ss::future<> group_manager::start() {
         }
     });
 
-    {
+    if (ss::this_shard_id() == cluster::health_monitor_backend_shard) {
         constexpr auto set_lag_timer = [](group_manager* me) {
             auto has_lag_metric = enabled_metrics::from_vector(
                                     me->_enabled_metrics())
@@ -2177,6 +2177,10 @@ group_manager::get_group_producers_locally(
 
 ss::future<> group_manager::collect_consumer_lag_metrics() {
     vlog(cg_klog.trace, "group_manager::collect_consumer_lag_metrics");
+    vassert(
+      ss::this_shard_id() == cluster::health_monitor_backend_shard,
+      "collect_consumer_lag_metrics must run on shard {}",
+      cluster::health_monitor_backend_shard);
 
     using lag = size_t;
     using topic_map_t = cluster::partitions_filter::topic_map_t;
@@ -2191,7 +2195,15 @@ ss::future<> group_manager::collect_consumer_lag_metrics() {
         return topic_map;
     };
 
-    auto ntps = collect_ntps(*this);
+    constexpr auto reduce_ntps = [](topic_map_t acc, topic_map_t val) {
+        for (auto& [topic, parts] : val) {
+            acc[topic].insert(parts.begin(), parts.end());
+        }
+        return acc;
+    };
+
+    auto ntps = co_await container().map_reduce0(
+      collect_ntps, topic_map_t{}, reduce_ntps);
 
     if (ntps.empty()) {
         co_return;
@@ -2252,7 +2264,7 @@ ss::future<> group_manager::collect_consumer_lag_metrics() {
         }
     };
 
-    set_metrics(*this);
+    co_await container().invoke_on_all(set_metrics);
 }
 
 } // namespace kafka
