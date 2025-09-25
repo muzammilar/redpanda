@@ -404,6 +404,7 @@ redpanda_cc_btest(
         "//src/v/model/tests:random",
         "//src/v/test_utils:random",
         "//src/v/test_utils:scoped_config",
+        "//src/v/test_utils:seastar_boost",
         "@seastar",
     ],
 )

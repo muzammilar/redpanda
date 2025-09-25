@@ -37,10 +37,6 @@
 #include "test_utils/async.h" // IWYU pragma: export
 #include "utils/unresolved_address.h"
 
-#if defined(IS_BTEST)
-#include "test_utils/boost_fixture.h" // IWYU pragma: export
-#endif
-
 #include <seastar/core/future.hh>
 #include <seastar/core/loop.hh>
 #include <seastar/core/shared_ptr.hh>

@@ -15,6 +15,7 @@
 #include "config/configuration.h"
 #include "random/generators.h"
 #include "redpanda/tests/fixture.h"
+#include "test_utils/boost_fixture.h"
 
 #include <seastar/core/reactor.hh>
 #include <seastar/core/sstring.hh>
