@@ -27,6 +27,8 @@ struct random_state_accessor;
 // Random generators useful for testing.
 namespace random_generators {
 
+struct random_seed_tag {};
+
 /**
  * @brief Holds random generator state and allows generation of random values.
  *
@@ -42,10 +44,14 @@ public:
     using seed_type = uint32_t;
     using engine_type = std::default_random_engine;
 
-    // Initializes an rng object with using the "default" seed
+    // Initializes an rng object using the _default_ seed
     // policy, which is fixed in most contexts, but random in
     // fuzz test contexts.
     rng();
+
+    // Initializes an rng object using a random seed regardless
+    // of the default policy.
+    explicit rng(random_seed_tag);
 
     // Initializes with a given seed.
     explicit rng(seed_type seed);
@@ -126,6 +132,10 @@ private:
     seed_type initial_seed_;
     friend random_state_accessor;
 };
+
+// Return a rng object which is seeded randomly regardless of
+// the default seeding policy.
+rng with_random_seed();
 
 rng& global();
 

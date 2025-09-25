@@ -69,9 +69,14 @@ std::random_device::result_type get_initial_seed() {
 rng::rng()
   : rng(get_initial_seed()) {}
 
+rng::rng(random_seed_tag)
+  : rng(random_seed()) {}
+
 rng::rng(seed_type seed)
   : gen_(seed)
   , initial_seed_(seed) {}
+
+rng with_random_seed() { return rng{random_seed_tag{}}; }
 
 rng& global() {
     // if a reseeding has been requested, apply it here
