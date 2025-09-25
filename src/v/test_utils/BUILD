@@ -91,6 +91,18 @@ redpanda_test_cc_library(
 )
 
 redpanda_test_cc_library(
+    name = "tmp_dir",
+    hdrs = [
+        "tmp_dir.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_test_cc_library(
     name = "async",
     hdrs = [
         "async.h",
