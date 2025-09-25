@@ -23,6 +23,7 @@
 #include "storage/types.h"
 #include "test_utils/boost_fixture.h"
 #include "test_utils/randoms.h"
+#include "test_utils/test_env.h"
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/util/log.hh>
@@ -68,8 +69,7 @@ struct config_manager_fixture {
         _storage.start().get();
     }
 
-    ss::sstring base_dir = "test_cfg_manager_"
-                           + random_generators::gen_alphanum_string(6);
+    ss::sstring base_dir = test_env::random_dir_path("test_cfg_manager_");
     ss::logger _test_logger{"config-mgmr-test-logger"};
     ss::sharded<features::feature_table> _feature_table;
     storage::api _storage;
