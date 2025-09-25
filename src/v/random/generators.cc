@@ -94,15 +94,18 @@ void fill_buffer_randomchars(char* start, size_t amount) {
     memset(start, rand_fill(global().engine()), amount);
 }
 
-ss::sstring gen_alphanum_string(size_t n) {
+ss::sstring rng::gen_alphanum_string(size_t n) {
     // do not include \0
     static constexpr std::size_t max_index = chars.size() - 2;
     std::uniform_int_distribution<size_t> dist(0, max_index);
     auto s = ss::uninitialized_string(n);
 
-    std::generate_n(
-      s.begin(), n, [&dist] { return chars[dist(global().engine())]; });
+    std::generate_n(s.begin(), n, [this, &dist] { return chars[dist(gen_)]; });
     return s;
+}
+
+ss::sstring gen_alphanum_string(size_t n) {
+    return global().gen_alphanum_string(n);
 }
 
 ss::sstring gen_alphanum_max_distinct(size_t cardinality) {

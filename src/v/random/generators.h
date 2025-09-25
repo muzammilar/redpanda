@@ -123,6 +123,9 @@ public:
         return r;
     }
 
+    // Generate a random string of alphanumeric characters of length n.
+    ss::sstring gen_alphanum_string(size_t n);
+
     // Returns the underlying random engine, for use in
     // algorithms that require one.
     engine_type& engine() { return gen_; }
