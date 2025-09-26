@@ -15,7 +15,7 @@
 
 namespace cluster::cloud_metadata {
 
-enum class error_outcome {
+enum class [[nodiscard]] error_outcome : uint8_t {
     success = 0,
     list_failed,
     download_failed,
