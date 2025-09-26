@@ -36,6 +36,8 @@ redpanda_test_cc_library(
         "//src/v/ssx:thread_worker",
         "//src/v/storage",
         "//src/v/storage/tests:disk_log_builder",
+        "//src/v/test_utils:async",
+        "//src/v/test_utils:test_env",
         "//src/v/utils:unresolved_address",
         "@fmt",
     ],

@@ -16,6 +16,7 @@
 #include "cloud_storage/tests/util.h"
 #include "cloud_storage/types.h"
 #include "model/record_batch_types.h"
+#include "random/generators.h"
 #include "test_utils/boost_fixture.h"
 
 #include <seastar/core/lowres_clock.hh>
@@ -207,7 +208,7 @@ FIXTURE_TEST(
     vlog(
       test_log.info,
       "Seed used for read workload: {}",
-      random_generators::internal::seed);
+      random_generators::global().initial_seed());
 
     constexpr int num_segments = 1000;
     const auto [batch_types, num_data_batches] = generate_segment_layout(
@@ -235,7 +236,7 @@ FIXTURE_TEST(
     vlog(
       test_log.info,
       "Seed used for read workload: {}",
-      random_generators::internal::seed);
+      random_generators::global().initial_seed());
 
     constexpr int num_segments = 1000;
     const auto [batch_types, num_data_batches] = generate_segment_layout(
@@ -265,7 +266,7 @@ FIXTURE_TEST(
     vlog(
       test_log.info,
       "Seed used for read workload: {}",
-      random_generators::internal::seed);
+      random_generators::global().initial_seed());
 
     constexpr int num_segments = 1000;
     const auto [batch_types, num_data_batches] = generate_segment_layout(
@@ -308,7 +309,7 @@ FIXTURE_TEST(
     vlog(
       test_log.info,
       "Seed used for read workload: {}",
-      random_generators::internal::seed);
+      random_generators::global().initial_seed());
 
     constexpr int num_segments = 1000;
     const auto [segment_layout, num_data_batches] = generate_segment_layout(
@@ -349,7 +350,7 @@ FIXTURE_TEST(
     vlog(
       test_log.info,
       "Seed used for read workload: {}",
-      random_generators::internal::seed);
+      random_generators::global().initial_seed());
 
     constexpr int num_segments = 1000;
     const auto [segment_layout, num_data_batches] = generate_segment_layout(
@@ -392,7 +393,7 @@ FIXTURE_TEST(
     vlog(
       test_log.info,
       "Seed used for read workload: {}",
-      random_generators::internal::seed);
+      random_generators::global().initial_seed());
 
     constexpr int num_segments = 1000;
     const auto [batch_types, num_data_batches] = generate_segment_layout(

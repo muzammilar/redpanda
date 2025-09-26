@@ -84,6 +84,7 @@ redpanda_test_cc_library(
         "//src/v/random:generators",
         "//src/v/ssx:sformat",
         "//src/v/storage",
+        "//src/v/test_utils:test_env",
         "@seastar",
     ],
 )
@@ -132,6 +133,7 @@ redpanda_test_cc_library(
         "//src/v/features",
         "//src/v/storage",
         "//src/v/test_utils:gtest",
+        "//src/v/test_utils:test_env",
     ],
 )
 
@@ -147,6 +149,7 @@ redpanda_test_cc_library(
         "//src/v/features",
         "//src/v/storage",
         "//src/v/test_utils:gtest",
+        "//src/v/test_utils:test_env",
         "@googletest//:gtest",
     ],
 )
@@ -224,6 +227,7 @@ redpanda_cc_gtest(
         "//src/v/storage:segment_appender",
         "//src/v/test_utils:gtest",
         "//src/v/test_utils:random_bytes",
+        "//src/v/test_utils:test_env",
         "@googletest//:gtest",
         "@seastar",
     ],
@@ -779,6 +783,7 @@ redpanda_cc_gtest(
         "//src/v/storage:record_batch_builder",
         "//src/v/storage/tests:disk_log_builder",
         "//src/v/test_utils:gtest",
+        "//src/v/test_utils:test_env",
         "@fmt",
         "@googletest//:gtest",
         "@seastar",

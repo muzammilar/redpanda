@@ -14,6 +14,9 @@ redpanda_test_cc_library(
         "test_macros.h",
         "tmp_dir.h",
     ],
+    implementation_deps = [
+        ":global_test_hooks",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
@@ -231,6 +234,21 @@ redpanda_test_cc_library(
     ],
 )
 
+# Gives access to test environment configuration such as TEST_TMPDIR.
+redpanda_test_cc_library(
+    name = "test_env",
+    srcs = [
+        "test_env.cc",
+    ],
+    hdrs = [
+        "test_env.h",
+    ],
+    implementation_deps = [
+        "//src/v/random:generators",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 redpanda_test_cc_library(
     name = "tee_log",
     hdrs = [
@@ -240,5 +258,40 @@ redpanda_test_cc_library(
     deps = [
         "@boost//:iostreams",
         "@seastar",
+    ],
+)
+
+# Test hooks are things that run before/after test cases or the entire test
+# run. This library has global test hooks which should run for every type of
+# test (gtest or btest).
+redpanda_test_cc_library(
+    name = "global_test_hooks",
+    srcs = [
+        "global_test_hooks.cc",
+    ],
+    hdrs = [
+        "global_test_hooks.h",
+    ],
+    implementation_deps = [
+        "//src/v/random:test_seeding",
+        "@fmt",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The hook implementation for boost tests, installs the global test hooks.
+redpanda_test_cc_library(
+    name = "boost_test_hooks",
+    srcs = [
+        "boost_test_hooks.cc",
+    ],
+    hdrs = [
+    ],
+    implementation_deps = [
+        ":global_test_hooks",
+        "@boost//:test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
     ],
 )
