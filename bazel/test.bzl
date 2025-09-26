@@ -312,6 +312,7 @@ def redpanda_cc_btest_no_seastar(
         cpu = 1,
         memory = "128MiB",
         deps = []):
+    test_data, test_env = _test_options()
     cc_test(
         name = name,
         timeout = timeout,
@@ -328,6 +329,8 @@ def redpanda_cc_btest_no_seastar(
             "//src/v/test_utils:boost_test_hooks",
             "@boost//:test.so",
         ] + deps,
+        data = test_data,
+        env = test_env,
     )
 
 def redpanda_test_cc_library(
