@@ -33,7 +33,8 @@ level_zero_log_reader_impl::level_zero_log_reader_impl(
   data_plane_api* ct_api)
   : _config(cfg)
   , _ctp(std::move(ctp))
-  , _ct_api(ct_api) {}
+  , _ct_api(ct_api)
+  , _log(cd_log, fmt::format("[{}/{}]", fmt::ptr(this), _ctp->ntp())) {}
 
 ss::future<model::record_batch_reader::storage_t>
 level_zero_log_reader_impl::do_load_slice(
@@ -97,7 +98,7 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
             break;
         }
         vlog(
-          cd_log.trace,
+          _log.trace,
           "Loaded batch from cache for {}: {} @ term {}",
           current,
           batch.value().base_offset(),
@@ -131,7 +132,7 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
     _config.start_offset = current;
     if (_config.start_offset > _config.max_offset) {
         vlog(
-          cd_log.debug,
+          _log.debug,
           "reached end of stream, start offset: {}, max offset: {}, "
           "current: {}",
           _config.start_offset,
@@ -219,7 +220,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
         }
         if (!_unhydrated.empty()) {
             vlog(
-              cd_log.debug,
+              _log.debug,
               "Fetched {} L0 meta batches from the underlying "
               "partition, first offset: {}, last offset: {}",
               _unhydrated.size(),
@@ -227,7 +228,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
               _unhydrated.back().header.last_offset());
         } else {
             vlog(
-              cd_log.debug,
+              _log.debug,
               "No L0 meta batches fetched from the underlying partition, "
               "start offset: {}, max offset: {}",
               cfg.start_offset,
@@ -235,7 +236,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
         }
     } catch (...) {
         vlog(
-          cd_log.info,
+          _log.info,
           "Failed to fetch metadata from the underlying partition: {}",
           std::current_exception());
         _hydrated.clear();
@@ -251,7 +252,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
   model::timeout_clock::time_point deadline) {
     if (_current == state::end_of_stream_state) {
         _current = state::end_of_stream_state;
-        vlog(cd_log.trace, "Materialize batches called while EOS");
+        vlog(_log.trace, "Materialize batches called while EOS");
         co_return;
     }
     vassert(
@@ -263,7 +264,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
         // We're already materialized.
         _current = state::materialized_state;
         vlog(
-          cd_log.trace,
+          _log.trace,
           "Materialize batches call redundant, already materialized");
         co_return;
     }
@@ -271,7 +272,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
     if (_unhydrated.empty()) {
         // Nothing to materialize.
         _current = state::end_of_stream_state;
-        vlog(cd_log.trace, "Materialize batches without unhydrated batches");
+        vlog(_log.trace, "Materialize batches without unhydrated batches");
         co_return;
     }
 
@@ -298,7 +299,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
                 // limit). In this case we don't want to stall the reader
                 // completely.
                 vlog(
-                  cd_log.trace,
+                  _log.trace,
                   "Materialize batches overshot at {} bytes, config: {}, last "
                   "hydrated batch size: {}",
                   materialize_bytes,
@@ -313,24 +314,21 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
                 materialize_bytes += meta->byte_range_size;
                 to_materialize.push_back(*meta);
                 vlog(
-                  cd_log.trace,
+                  _log.trace,
                   "Materialize {} bytes total...",
                   materialize_bytes);
             }
         }
         size_t materialize_count = to_materialize.size();
         vlog(
-          cd_log.trace,
+          _log.trace,
           "Invoking 'materialize' for {}: {} bytes, {} batches to materialize",
           _ctp->ntp(),
           materialize_bytes,
           materialize_count);
         // Ask data layer to bring data from the cloud storage.
         auto mat_res = co_await _ct_api->materialize(
-          _ctp->ntp(),
-          materialize_bytes,
-          std::move(to_materialize),
-          deadline);
+          _ctp->ntp(), materialize_bytes, std::move(to_materialize), deadline);
         if (mat_res.has_error()) {
             throw std::runtime_error(
               fmt::format(
@@ -367,7 +365,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
                   // Propagate materialized batches to the record batch cache
                   if (cache_enabled()) {
                       vlog(
-                        cd_log.trace,
+                        _log.trace,
                         "Putting batch for {} to cache: {}, term: {}",
                         _ctp->ntp(),
                         batch.base_offset(),
@@ -392,12 +390,12 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
         _hydrated = std::move(hydrated);
         // Materialize batches from the L0 meta batches.
         vlog(
-          cd_log.debug,
+          _log.debug,
           "Materialized {} batches from the L0 meta batches",
           _hydrated.size());
     } catch (...) {
         vlog(
-          cd_log.info,
+          _log.info,
           "Failed to materialize batches {}",
           std::current_exception());
         _hydrated.clear();
@@ -426,7 +424,7 @@ bool level_zero_log_reader_impl::cache_enabled() const {
 void level_zero_log_reader_impl::consume_materialized_batches(
   chunked_circular_buffer<model::record_batch>* dest) {
     vlog(
-      cd_log.debug,
+      _log.debug,
       "consuming {} materialized batches, cached {} extents",
       _hydrated.size(),
       _unhydrated.size());

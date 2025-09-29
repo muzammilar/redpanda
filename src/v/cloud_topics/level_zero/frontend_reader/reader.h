@@ -12,6 +12,7 @@
 #include "cloud_topics/level_zero/common/extent_meta.h"
 #include "cloud_topics/log_reader_config.h"
 #include "model/record_batch_reader.h"
+#include "utils/prefix_logger.h"
 
 namespace cluster {
 class partition;
@@ -130,6 +131,7 @@ private:
     cloud_topic_log_reader_config _config;
     ss::lw_shared_ptr<cluster::partition> _ctp;
     data_plane_api* _ct_api;
+    prefix_logger _log;
 };
 
 } // namespace cloud_topics
