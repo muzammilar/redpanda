@@ -80,7 +80,9 @@ redpanda_cc_bench(
     name = "random_rpbench",
     srcs = ["random_bench.cc"],
     deps = [
+        "//src/v/random:fast_prng",
         "//src/v/random:generators",
+        "@abseil-cpp//absl/random",
         "@seastar",
         "@seastar//:benchmark",
     ],
