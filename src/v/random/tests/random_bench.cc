@@ -9,7 +9,6 @@
  * by the Apache License, Version 2.0
  */
 
-#include "random/fast_prng.h"
 #include "random/generators.h"
 
 #include <seastar/testing/perf_tests.hh>
@@ -86,9 +85,16 @@ PERF_TEST(rng_dist, std_dre) {
     });
 }
 
-// the same engine as fast_prng
-PERF_TEST(rng_dist, fast_prng_dist) {
+PERF_TEST(rng_dist, pcg32) {
     absl::random_internal::pcg32_2018_engine rng;
+    return do_generate([&] {
+        auto dist = get_dist();
+        return dist(rng);
+    });
+}
+
+PERF_TEST(rng_dist, pcg64) {
+    absl::random_internal::pcg64_2018_engine rng;
     return do_generate([&] {
         auto dist = get_dist();
         return dist(rng);
@@ -157,8 +163,6 @@ auto test_creation() {
 
 // the "creation" tests are intended to measure the cost of
 // creating the rng state objects, not using them.
-
-PERF_TEST(creation, fast_prng) { return test_creation<fast_prng>(); }
 
 PERF_TEST(creation, generators_rng) {
     return test_creation<random_generators::rng>();

@@ -70,6 +70,6 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":fast_prng",
+        ":generators",
     ],
 )
