@@ -87,6 +87,10 @@ ss::future<std::expected<std::monostate, ctp_stm_api_errc>>
 ctp_stm_api::advance_reconciled_offset(
   kafka::offset last_reconciled_offset,
   model::timeout_clock::time_point deadline) {
+    if (last_reconciled_offset <= get_last_reconciled_offset()) {
+        co_return std::monostate{};
+    }
+
     vlog(_rtclog.debug, "Replicating ctp_stm_cmd::advance_reconciled_offset");
 
     storage::record_batch_builder builder(
