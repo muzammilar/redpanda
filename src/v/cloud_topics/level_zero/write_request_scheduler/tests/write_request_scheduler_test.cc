@@ -1,4 +1,4 @@
-// Copyright 2024 Redpanda Data, Inc.
+// Copyright 2025 Redpanda Data, Inc.
 //
 // Use of this software is governed by the Business Source License
 // included in the file licenses/BSL.md
@@ -278,9 +278,14 @@ TEST_F_CORO(write_request_balancer_fixture, test_core_affinity) {
     });
 
     size_t shard0_data_size = 0;
-    auto buf = co_await model::test::make_random_batches();
+    auto buf1 = co_await model::test::make_random_batches();
+    auto buf2 = co_await model::test::make_random_batches();
     chunked_vector<model::record_batch> batches;
-    for (auto& b : buf) {
+    for (auto& b : buf1) {
+        shard0_data_size += b.size_bytes();
+        batches.push_back(std::move(b));
+    }
+    for (auto& b : buf2) {
         shard0_data_size += b.size_bytes();
         batches.push_back(std::move(b));
     }
@@ -293,6 +298,7 @@ TEST_F_CORO(write_request_balancer_fixture, test_core_affinity) {
 
     // Check that number of upload requests matches expectation.
     // The shard that has the most data should handle the request.
+    ASSERT_NE_CORO(shard0_data_size, shard1_data_size);
     auto expected_shard = shard0_data_size > shard1_data_size ? 0 : 1;
     auto num_requests = co_await request_sink.invoke_on(
       expected_shard, [](auto& s) { return s.write_requests_acked; });
