@@ -47,12 +47,18 @@ public:
 
     ss::future<std::expected<void, errc>>
     set_last_reconciled_offset(kafka::offset o, ss::abort_source&) override {
+        if (_fail_set_lro) {
+            co_return std::unexpected(errc::failure);
+        }
         _lro = o;
         co_return std::expected<void, errc>{};
     }
 
     ss::future<model::record_batch_reader>
     make_reader(cloud_topic_log_reader_config cfg) override {
+        if (_fail_make_reader) {
+            throw std::runtime_error("Failed to make reader");
+        }
         chunked_vector<model::record_batch> log;
         size_t size = 0;
         for (const auto& batch : _source_log) {
@@ -72,13 +78,74 @@ public:
           std::move(log));
     }
 
+    void fail_set_lro(bool fail) { _fail_set_lro = fail; }
+    void fail_make_reader(bool fail) { _fail_make_reader = fail; }
+
 private:
     kafka::offset _lro;
     chunked_vector<model::record_batch> _source_log;
+    bool _fail_set_lro = false;
+    bool _fail_make_reader = false;
+};
+
+class unreliable_metastore : public l1::simple_metastore {
+public:
+    ss::future<std::expected<add_response, errc>> add_objects(
+      const object_metadata_builder& builder,
+      const term_offset_map_t& terms) override {
+        if (_fail_add_objects) {
+            co_return std::unexpected(errc::invalid_request);
+        }
+        if (_fail_add_objects_transiently_count > 0) {
+            _fail_add_objects_transiently_count--;
+            co_return std::unexpected(errc::transport_error);
+        }
+        co_return co_await l1::simple_metastore::add_objects(builder, terms);
+    }
+
+    void fail_add_objects(bool fail) { _fail_add_objects = fail; }
+    void fail_add_objects_transiently(int times) {
+        _fail_add_objects_transiently_count = times;
+    }
+
+private:
+    bool _fail_add_objects = false;
+    int _fail_add_objects_transiently_count = 0;
+};
+
+class unreliable_io : public l1::fake_io {
+public:
+    ss::future<std::expected<std::unique_ptr<l1::staging_file>, errc>>
+    create_tmp_file() override {
+        if (_fail_create_tmp_file) {
+            co_return std::unexpected(errc::file_io_error);
+        }
+        co_return co_await l1::fake_io::create_tmp_file();
+    }
+
+    ss::future<std::expected<void, errc>> put_object(
+      l1::object_id oid,
+      l1::staging_file* file,
+      ss::abort_source* as) override {
+        if (_fail_put_object) {
+            co_return std::unexpected(errc::cloud_op_error);
+        }
+        co_return co_await l1::fake_io::put_object(oid, file, as);
+    }
+
+    void fail_create_tmp_file(bool fail) { _fail_create_tmp_file = fail; }
+    void fail_put_object(bool fail) { _fail_put_object = fail; }
+
+private:
+    bool _fail_create_tmp_file = false;
+    bool _fail_put_object = false;
 };
 
 class ReconcilerTest : public testing::Test {
 public:
+    ReconcilerTest()
+      : _reconciler(&_io, &_metastore) {}
+
     ss::shared_ptr<fake_source> add_source() {
         auto ntp = model::random_ntp();
         auto tid = model::create_topic_id();
@@ -99,10 +166,13 @@ public:
         return offsets.value().next_offset;
     }
 
-private:
-    l1::fake_io _io;
-    l1::simple_metastore _metastore;
-    reconciler::reconciler _reconciler{&_io, &_metastore};
+    unreliable_metastore& metastore() { return _metastore; }
+    unreliable_io& io() { return _io; }
+
+protected:
+    unreliable_io _io;
+    unreliable_metastore _metastore;
+    reconciler::reconciler _reconciler;
 };
 
 using ::testing::Optional;
@@ -212,4 +282,173 @@ TEST_F(ReconcilerTest, ObjectSizeLimit) {
     EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{last_offset});
     EXPECT_THAT(
       metastore_next_offset(src), Optional(kafka::offset{last_offset + 1}));
+}
+
+TEST_F(ReconcilerTest, SourceReadFailure) {
+    auto src = add_source();
+    src->add_batch({.count = 10});
+    src->fail_make_reader(true);
+
+    reconcile();
+
+    // The failure of one source should not stop others from being reconciled.
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(metastore_next_offset(src), std::nullopt);
+
+    src->fail_make_reader(false);
+
+    reconcile();
+
+    // Reconciliation should resume on a source after a failure.
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src), Optional(kafka::offset{10}));
+}
+
+TEST_F(ReconcilerTest, MetastoreAddObjectsFailure) {
+    auto src = add_source();
+    src->add_batch({.count = 10});
+    metastore().fail_add_objects(true);
+
+    reconcile();
+
+    // Verify LRO doesn't advance when metastore fails, for any source.
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(metastore_next_offset(src), std::nullopt);
+
+    metastore().fail_add_objects(false);
+
+    reconcile();
+
+    // Reconciliation should resume after a metastore failure.
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src), Optional(kafka::offset{10}));
+}
+
+TEST_F(ReconcilerTest, MetastoreAddObjectsTransientFailure) {
+    auto src1 = add_source();
+    auto src2 = add_source();
+
+    src1->add_batch({.count = 10});
+    src2->add_batch({.count = 10});
+
+    metastore().fail_add_objects_transiently(3);
+
+    reconcile();
+
+    // A transient failure should be retried until success or timeout, and
+    // retries will be too fast to time out in this test.
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{10}));
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{10}));
+}
+
+TEST_F(ReconcilerTest, IOStagingFileFailure) {
+    auto src = add_source();
+    src->add_batch({.count = 10});
+
+    io().fail_create_tmp_file(true);
+
+    reconcile();
+
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(metastore_next_offset(src), std::nullopt);
+
+    io().fail_create_tmp_file(false);
+
+    reconcile();
+
+    // Reconciliation should resume after an IO failure.
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src), Optional(kafka::offset{10}));
+}
+
+TEST_F(ReconcilerTest, IOPutObjectFailure) {
+    auto src = add_source();
+    src->add_batch({.count = 10});
+
+    io().fail_put_object(true);
+
+    reconcile();
+
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(metastore_next_offset(src), std::nullopt);
+
+    io().fail_put_object(false);
+
+    reconcile();
+
+    // Reconciliation should resume after an IO failure.
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src), Optional(kafka::offset{10}));
+}
+
+TEST_F(ReconcilerTest, LROUpdateFailure) {
+    // Note that this test tests the behavior when the LRO and the metastore's
+    // next_offset go out of sync, so it's also a test for recovery in cases
+    // like a reconciliation race between an old and new leader.
+    auto src1 = add_source();
+    auto src2 = add_source();
+
+    src1->add_batch({.count = 10});
+    src2->add_batch({.count = 10});
+
+    src1->fail_set_lro(true);
+
+    reconcile();
+
+    // LRO failure doesn't stop metastore update, and it doesn't
+    // interfere with reconciliation of other sources.
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{});
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{10}));
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{10}));
+
+    src1->fail_set_lro(false);
+
+    src1->add_batch({.count = 10});
+    src2->add_batch({.count = 10});
+
+    reconcile();
+
+    // The reconciler will adjust the LRO based on the metastore's next offset
+    // in the next round, but it won't make any more progress.
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{9});
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{10}));
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{19});
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{20}));
+
+    reconcile();
+
+    // In the round after that, reconciliation makes progress.
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{19});
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{20}));
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{19});
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{20}));
+}
+
+TEST_F(ReconcilerTest, MultipleSourcesWithFailures) {
+    auto src1 = add_source();
+    auto src2 = add_source();
+    auto src3 = add_source();
+
+    src1->add_batch({.count = 10});
+    src2->add_batch({.count = 20});
+    src3->add_batch({.count = 30});
+
+    src2->fail_make_reader(true);
+
+    reconcile();
+
+    // When one source in an object fails, the entire object fails so none of
+    // the sources in that object get reconciled
+    // NB: This depends on the simple_metastore grouping all sources into the
+    //     same object.
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(src3->last_reconciled_offset(), kafka::offset{});
+
+    EXPECT_EQ(metastore_next_offset(src1), std::nullopt);
+    EXPECT_EQ(metastore_next_offset(src2), std::nullopt);
+    EXPECT_EQ(metastore_next_offset(src3), std::nullopt);
 }
