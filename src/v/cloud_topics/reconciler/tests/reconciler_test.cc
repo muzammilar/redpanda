@@ -35,11 +35,16 @@ public:
     fake_source(model::ntp ntp, model::topic_id_partition tidp)
       : reconciler::source(std::move(ntp), tidp) {}
 
-    void add_batch(model::test::record_batch_spec spec) {
+    void add_batch(
+      model::test::record_batch_spec spec,
+      std::optional<model::term_id> term = std::nullopt) {
         if (!_source_log.empty()) {
             spec.offset = _source_log.back().last_offset() + model::offset{1};
         }
         auto batch = model::test::make_random_batch(spec);
+        if (term.has_value()) {
+            batch.set_term(term.value());
+        }
         _source_log.push_back(std::move(batch));
     }
 
@@ -451,4 +456,100 @@ TEST_F(ReconcilerTest, MultipleSourcesWithFailures) {
     EXPECT_EQ(metastore_next_offset(src1), std::nullopt);
     EXPECT_EQ(metastore_next_offset(src2), std::nullopt);
     EXPECT_EQ(metastore_next_offset(src3), std::nullopt);
+}
+
+TEST_F(ReconcilerTest, TermTracking) {
+    auto src = add_source();
+
+    src->add_batch({.count = 10}, model::term_id{1});
+    src->add_batch({.count = 10}, model::term_id{1});
+    src->add_batch({.count = 10}, model::term_id{2});
+    src->add_batch({.count = 10}, model::term_id{3});
+
+    reconcile();
+
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{39});
+    EXPECT_THAT(metastore_next_offset(src), Optional(kafka::offset{40}));
+
+    auto term_at_5 = metastore()
+                       .get_term_for_offset(
+                         src->topic_id_partition(), kafka::offset{5})
+                       .get();
+    auto term_at_25 = metastore()
+                        .get_term_for_offset(
+                          src->topic_id_partition(), kafka::offset{25})
+                        .get();
+    auto term_at_35 = metastore()
+                        .get_term_for_offset(
+                          src->topic_id_partition(), kafka::offset{35})
+                        .get();
+
+    EXPECT_TRUE(term_at_5.has_value());
+    EXPECT_EQ(term_at_5.value(), model::term_id{1});
+    EXPECT_TRUE(term_at_25.has_value());
+    EXPECT_EQ(term_at_25.value(), model::term_id{2});
+    EXPECT_TRUE(term_at_35.has_value());
+    EXPECT_EQ(term_at_35.value(), model::term_id{3});
+}
+
+TEST_F(ReconcilerTest, OffsetAndTimestampTracking) {
+    auto src = add_source();
+
+    model::timestamp base_ts{1000000};
+    src->add_batch({.count = 10, .timestamp = base_ts});
+    src->add_batch(
+      {.count = 10, .timestamp = model::timestamp{base_ts() + 1000}});
+
+    reconcile();
+
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{19});
+
+    src->add_batch(
+      {.count = 10, .timestamp = model::timestamp{base_ts() + 2000}});
+
+    reconcile();
+
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{29});
+
+    // Offset queries.
+    auto obj_at_offset_0 = metastore()
+                             .get_first_ge(
+                               src->topic_id_partition(), kafka::offset{0})
+                             .get();
+    EXPECT_TRUE(obj_at_offset_0.has_value());
+
+    auto obj_at_offset_25 = metastore()
+                              .get_first_ge(
+                                src->topic_id_partition(), kafka::offset{25})
+                              .get();
+    EXPECT_TRUE(obj_at_offset_25.has_value());
+    EXPECT_NE(obj_at_offset_0.value().oid, obj_at_offset_25.value().oid);
+
+    auto obj_beyond_offset = metastore()
+                               .get_first_ge(
+                                 src->topic_id_partition(), kafka::offset{1000})
+                               .get();
+    EXPECT_FALSE(obj_beyond_offset.has_value());
+    EXPECT_EQ(obj_beyond_offset.error(), l1::metastore::errc::out_of_range);
+
+    // Timestamp queries.
+    auto obj_at_ts
+      = metastore().get_first_ge(src->topic_id_partition(), base_ts).get();
+    EXPECT_TRUE(obj_at_ts.has_value());
+
+    auto obj_at_later_ts = metastore()
+                             .get_first_ge(
+                               src->topic_id_partition(),
+                               model::timestamp{base_ts() + 1500})
+                             .get();
+    EXPECT_TRUE(obj_at_later_ts.has_value());
+    EXPECT_NE(obj_at_ts.value().oid, obj_at_later_ts.value().oid);
+
+    auto obj_beyond_ts = metastore()
+                           .get_first_ge(
+                             src->topic_id_partition(),
+                             model::timestamp{base_ts() + 10000})
+                           .get();
+    EXPECT_FALSE(obj_beyond_ts.has_value());
+    EXPECT_EQ(obj_beyond_ts.error(), l1::metastore::errc::out_of_range);
 }
