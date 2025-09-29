@@ -16,10 +16,12 @@
 #include "cluster/logger.h"
 #include "cluster/partition_leaders_table.h"
 #include "cluster/types.h"
+#include "cluster_link/model/filter_utils.h"
 #include "cluster_link/model/types.h"
 #include "config/configuration.h"
 #include "model/validation.h"
 #include "rpc/connection_cache.h"
+#include "ssx/when_all.h"
 
 namespace cluster::cluster_link {
 
@@ -191,6 +193,11 @@ std::optional<id_t> frontend::find_link_id_by_name(const name_t& name) const {
     return _table->find_id_by_name(name);
 }
 
+std::optional<id_t>
+frontend::find_link_id_by_topic(model::topic_view topic) const {
+    return _table->find_id_by_topic(topic);
+}
+
 std::optional<std::reference_wrapper<const metadata>>
 frontend::find_link_by_id(id_t id) const {
     return _table->find_link_by_id(id);
@@ -246,6 +253,56 @@ frontend::get_mirror_topics_for_link(id_t id) const {
 std::optional<::model::revision_id> frontend::get_last_update_revision(
   const ::cluster_link::model::id_t& id) const {
     return _table->get_link_last_update_revision(id);
+}
+
+bool frontend::is_autocreate_mirror_topic(const model::topic& topic) const {
+    auto link_id = _table->find_id_by_topic(topic);
+    if (!link_id.has_value()) {
+        return false;
+    }
+    auto link = _table->find_link_by_id(link_id.value());
+    vassert(
+      link.has_value(), "Expected value for link with id {}", link_id.value());
+    const auto& topic_filters
+      = link->get()
+          .configuration.topic_metadata_mirroring_cfg.topic_name_filters;
+    return ::cluster_link::model::select_topic(topic, topic_filters);
+}
+
+ss::future<topic_result> frontend::delete_mirror_topic(
+  model::topic topic, model::timeout_clock::time_point timeout) {
+    const auto& link_id = _table->find_id_by_topic(topic);
+    if (!link_id.has_value()) {
+        co_return topic_result{
+          std::move(topic), errc::topic_not_being_mirrored};
+    }
+
+    topic_result ret;
+    ret.topic = topic;
+    ret.ec = co_await delete_mirror_topic(
+      link_id.value(),
+      delete_mirror_topic_cmd{.topic = std::move(topic)},
+      timeout);
+
+    co_return ret;
+}
+
+ss::future<chunked_vector<topic_result>> frontend::delete_mirror_topics(
+  chunked_vector<model::topic> topics,
+  model::timeout_clock::time_point timeout) {
+    vlog(clusterlog.debug, "Deleting mirror topics {}", topics);
+
+    const auto do_delete =
+      [this, timeout](model::topic t) -> ss::future<topic_result> {
+        return delete_mirror_topic(std::move(t), timeout);
+    };
+
+    auto fut_r = topics | std::views::as_rvalue
+                 | std::views::transform(do_delete);
+    chunked_vector<ss::future<topic_result>> futures{
+      fut_r.begin(), fut_r.end()};
+    return ssx::when_all_succeed<chunked_vector<topic_result>>(
+      std::move(futures));
 }
 
 ss::future<errc> frontend::do_mutation(

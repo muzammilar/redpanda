@@ -12,9 +12,12 @@
 
 #include "base/seastarx.h"
 #include "cluster/cluster_link/table.h"
+#include "cluster/cluster_link/types.h"
 #include "cluster/commands.h"
 #include "cluster/controller_stm.h"
 #include "cluster/fwd.h"
+#include "cluster_link/model/types.h"
+#include "container/chunked_vector.h"
 #include "features/feature_table.h"
 #include "features/fwd.h"
 #include "model/timeout_clock.h"
@@ -91,6 +94,9 @@ public:
     std::optional<::cluster_link::model::id_t>
     find_link_id_by_name(const ::cluster_link::model::name_t& name) const;
 
+    std::optional<::cluster_link::model::id_t>
+    find_link_id_by_topic(model::topic_view topic) const;
+
     chunked_vector<::cluster_link::model::id_t> get_all_link_ids() const;
 
     std::optional<chunked_hash_map<
@@ -106,6 +112,29 @@ public:
      * through the Kafka API unless the topics are in a failed over state.
      */
     bool is_topic_mutable_for_kafka_api(const model::topic&) const;
+
+    /**
+     * @brief Checks if a topic is mirrored in any link and it is covered by an
+     * autocreate filter
+     */
+    bool is_autocreate_mirror_topic(const model::topic& topic) const;
+
+    /**
+     * @brief Utility function to simplify deleting a mirrored topic.
+     *
+     * This is a wrapper around the delete_mirror_topic command that retrieves
+     * the link id and forwards the call.
+     *
+     */
+    ss::future<topic_result>
+      delete_mirror_topic(model::topic, model::timeout_clock::time_point);
+
+    /**
+     * @brief Utility function to simplify deleting multiple mirrored topics at
+     * once.
+     */
+    ss::future<chunked_vector<topic_result>> delete_mirror_topics(
+      chunked_vector<model::topic>, model::timeout_clock::time_point);
 
 private:
     ss::future<errc>
