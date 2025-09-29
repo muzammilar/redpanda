@@ -167,6 +167,7 @@ redpanda_cc_library(
 redpanda_cc_library(
     name = "admin",
     srcs = [
+        "cluster_recovery.cc",
         "debug.cc",
         "debug_bundle.cc",
         "kafka.cc",
