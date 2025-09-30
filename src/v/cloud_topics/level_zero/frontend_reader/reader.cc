@@ -146,6 +146,42 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
     return std::nullopt;
 }
 
+storage::local_log_reader_config level_zero_log_reader_impl::ctp_read_config() {
+    /*
+     * The requested offset range in the cloud topic reader configuration are
+     * specified as offsets in the kafka adddress space and need to first be
+     * converted into physical log offsets for log reader configuration.
+     */
+    auto ot_state = _ctp->get_offset_translator_state();
+    auto start_offset = ot_state->to_log_offset(
+      kafka::offset_cast(_config.start_offset));
+    auto max_offset = ot_state->to_log_offset(
+      kafka::offset_cast(_config.max_offset));
+    storage::local_log_reader_config cfg(
+      start_offset,
+      max_offset,
+      _config.max_bytes,
+      // We need to fetch both raft data batches for transaction control
+      // markers as well as placeholder batches to hydrate from object
+      // storage, so we don't include a typefilter and instead postfilter
+      // here.
+      /*type_filter=*/std::nullopt,
+      _config.first_timestamp,
+      _config.abort_source,
+      _config.client_address);
+    cfg.translate_offsets = model::translate_offsets::yes;
+    // This parameter defines how many bytes we want to fetch
+    // from the underlying partition in one go.
+    // The L0 meta batches are small, so we can fetch a lot of them in a
+    // single request and then gradually materialize them.
+    // The 'cfg.max_bytes' doesn't limit the size of the materialized
+    // batches, because it is fetching L0 meta batches, which have different
+    // size. In order to know the size of the materialized batches we need
+    // to fetch L0 meta batches first and then parse them.
+    cfg.max_bytes = L0_max_bytes_per_metadata_fetch;
+    return cfg;
+}
+
 ss::future<> level_zero_log_reader_impl::fetch_metadata(
   model::timeout_clock::time_point deadline) {
     vassert(
@@ -158,35 +194,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
         co_return;
     }
     try {
-        // Fetch metadata from the _ctp
-        auto ot_state = _ctp->get_offset_translator_state();
-        auto start_offset = ot_state->to_log_offset(
-          kafka::offset_cast(_config.start_offset));
-        auto max_offset = ot_state->to_log_offset(
-          kafka::offset_cast(_config.max_offset));
-        storage::local_log_reader_config cfg(
-          start_offset,
-          max_offset,
-          _config.max_bytes,
-          // We need to fetch both raft data batches for transaction control
-          // markers as well as placeholder batches to hydrate from object
-          // storage, so we don't include a typefilter and instead postfilter
-          // here.
-          /*type_filter=*/std::nullopt,
-          _config.first_timestamp,
-          _config.abort_source,
-          _config.client_address);
-        cfg.translate_offsets = model::translate_offsets::yes;
-        // This parameter defines how many bytes we want to fetch
-        // from the underlying partition in one go.
-        // The L0 meta batches are small, so we can fetch a lot of them in a
-        // single request and then gradually materialize them.
-        // The 'cfg.max_bytes' doesn't limit the size of the materialized
-        // batches, because it is fetching L0 meta batches, which have different
-        // size. In order to know the size of the materialized batches we need
-        // to fetch L0 meta batches first and then parse them.
-        cfg.max_bytes = L0_max_bytes_per_metadata_fetch;
-
+        auto cfg = ctp_read_config();
         auto reader = co_await _ctp->make_local_reader(cfg);
         auto placeholders = co_await model::consume_reader_to_chunked_vector(
           std::move(reader), deadline);
