@@ -146,7 +146,7 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
 storage::local_log_reader_config level_zero_log_reader_impl::ctp_read_config() {
     /*
      * The requested offset range in the cloud topic reader configuration are
-     * specified as offsets in the kafka adddress space and need to first be
+     * specified as offsets in the kafka address space and need to first be
      * converted into physical log offsets for log reader configuration.
      */
     auto ot_state = _ctp->get_offset_translator_state();
