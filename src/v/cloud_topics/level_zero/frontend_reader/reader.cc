@@ -206,11 +206,11 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
     try {
         auto cfg = ctp_read_config();
         auto reader = co_await _ctp->make_local_reader(cfg);
-        auto placeholders = co_await model::consume_reader_to_chunked_vector(
+        auto batches = co_await model::consume_reader_to_chunked_vector(
           std::move(reader), deadline);
 
         // Convert L0 meta batches to extent_meta structures.
-        for (auto&& batch : placeholders) {
+        for (auto&& batch : batches) {
             auto& header = batch.header();
             if (header.type == model::record_batch_type::raft_data) {
                 local_log_batch local_batch{.header = header};
