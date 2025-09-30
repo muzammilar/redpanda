@@ -18,3 +18,11 @@ $ bazel build //bazel/clang_tidy/plugins:plugins.so
    - The name should start with "redpanda-".
 
 Checks introduced in this way are automatically loaded in `bazel build --config=clang-tidy //...`.
+
+If you want to try your check on some source file in isolation, you can invoke the tool directly:
+
+```sh
+$ bazel build //bazel/clang_tidy/plugins:plugins.so
+$ ./tools/clang-tidy --checks=-*,redpanda-my-fancy-check -list-checks
+$ ./tools/clang-tidy --checks=-*,redpanda-my-fancy-check /path/to/some/foo.cc
+```
