@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "cloud_topics/level_zero/common/extent_meta.h"
 #include "cloud_topics/types.h"
 #include "model/record.h"
 #include "serde/envelope.h"
@@ -36,6 +37,9 @@ enum class dl_placeholder_record_key {
     // The record is used to align with raft_data batch
     empty,
 };
+
+model::record_batch
+  encode_placeholder_batch(model::record_batch_header, extent_meta);
 
 dl_placeholder parse_placeholder_batch(model::record_batch);
 
