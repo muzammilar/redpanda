@@ -6,6 +6,9 @@ package(default_visibility = [
 
 redpanda_cc_library(
     name = "placeholder",
+    srcs = [
+        "placeholder.cc",
+    ],
     hdrs = [
         "placeholder.h",
     ],

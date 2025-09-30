@@ -11,15 +11,14 @@
 #pragma once
 
 #include "cloud_topics/types.h"
+#include "model/record.h"
 #include "serde/envelope.h"
 #include "serde/rw/named_type.h"
 #include "serde/rw/uuid.h"
 
-// This header contains definition of the dl_placeholder batch
-
 namespace cloud_topics {
 
-struct dl_placeholder // NOLINT
+struct dl_placeholder
   : serde::
       envelope<dl_placeholder, serde::version<0>, serde::compat_version<0>> {
     // unique object id
@@ -37,5 +36,7 @@ enum class dl_placeholder_record_key {
     // The record is used to align with raft_data batch
     empty,
 };
+
+dl_placeholder parse_placeholder_batch(model::record_batch);
 
 } // namespace cloud_topics
