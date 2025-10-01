@@ -101,11 +101,12 @@ cluster_recovery_manager::initialize_recovery(
         co_return cluster::errc::not_leader_controller;
     }
     const auto& ignored_uuid = _storage.local().get_cluster_uuid().value();
+    auto cluster_name = config::shard_local_cfg().cloud_storage_cluster_name();
     // TODO: protect with semaphore with a term check.
     auto fib = retry_chain_node{_sharded_as.local(), 30s, 1s};
     auto cluster_manifest_res
       = co_await cluster::cloud_metadata::download_highest_manifest_in_bucket(
-        _remote.local(), bucket, fib, ignored_uuid);
+        _remote.local(), bucket, fib, cluster_name, ignored_uuid);
     if (cluster_manifest_res.has_error()) {
         vlog(
           clusterlog.warn,
