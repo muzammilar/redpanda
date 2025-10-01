@@ -60,18 +60,17 @@ public:
     }
 
     ss::future<model::record_batch_reader>
-    make_reader(cloud_topic_log_reader_config cfg) override {
+    make_reader(source::reader_config cfg) override {
         if (_fail_make_reader) {
             throw std::runtime_error("Failed to make reader");
         }
         chunked_vector<model::record_batch> log;
         size_t size = 0;
         for (const auto& batch : _source_log) {
-            if (model::offset_cast(batch.base_offset()) < cfg.start_offset) {
+            if (
+              model::offset_cast(batch.base_offset())
+              < last_reconciled_offset()) {
                 continue;
-            }
-            if (model::offset_cast(batch.last_offset()) > cfg.max_offset) {
-                break;
             }
             size += batch.size_bytes();
             log.push_back(batch.copy());
@@ -445,17 +444,16 @@ TEST_F(ReconcilerTest, MultipleSourcesWithFailures) {
 
     reconcile();
 
-    // When one source in an object fails, the entire object fails so none of
-    // the sources in that object get reconciled
+    // When one source in an object fails, then the entire object doesn't fail.
     // NB: This depends on the simple_metastore grouping all sources into the
     //     same object.
-    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{9});
     EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{});
-    EXPECT_EQ(src3->last_reconciled_offset(), kafka::offset{});
+    EXPECT_EQ(src3->last_reconciled_offset(), kafka::offset{29});
 
-    EXPECT_EQ(metastore_next_offset(src1), std::nullopt);
+    EXPECT_EQ(metastore_next_offset(src1), kafka::offset{10});
     EXPECT_EQ(metastore_next_offset(src2), std::nullopt);
-    EXPECT_EQ(metastore_next_offset(src3), std::nullopt);
+    EXPECT_EQ(metastore_next_offset(src3), kafka::offset{30});
 }
 
 TEST_F(ReconcilerTest, TermTracking) {
