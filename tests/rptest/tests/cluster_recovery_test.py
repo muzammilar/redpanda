@@ -237,7 +237,7 @@ class ClusterRecoveryWithNameTest(RedpandaTest):
     @cluster(
         num_nodes=1,
         log_allow_list=[
-            "Error starting cluster recovery request: Cluster misconfiguration",
+            "Error starting cluster recovery request. Check logs for details.",
             "Error starting cluster recovery request: No matching metadata",
         ],
     )
@@ -257,7 +257,7 @@ class ClusterRecoveryWithNameTest(RedpandaTest):
         assert excinfo.value.response.status_code == 500
         assert (
             excinfo.value.response.json()["message"]
-            == "Error starting cluster recovery request: Cluster misconfiguration"
+            == "Error starting cluster recovery request. Check logs for details."
         ), excinfo.value.response.json()["message"]
 
         self.logger.info(
@@ -285,6 +285,91 @@ class ClusterRecoveryWithNameTest(RedpandaTest):
         )
         self.redpanda._admin.initialize_cluster_recovery()
         wait_until(self._cluster_recovery_complete, timeout_sec=60, backoff_sec=1)
+
+    @cluster(num_nodes=1)
+    def test_admin_recovery_uuid_override(self):
+        rpk = RpkTool(self.redpanda)
+
+        self.redpanda._admin.patch_cluster_config(
+            {
+                "cloud_storage_cluster_name": "test-my-cluster",
+            }
+        )
+        self._wait_for_metadata_upload()
+        initial_cluster_uuid = self.redpanda._admin.get_cluster_uuid()
+        self.logger.debug(f"Initial cluster uuid: {initial_cluster_uuid}")
+
+        self.logger.info(
+            "Recreating the cluster with the same name but do not attempt recovery"
+        )
+        self._stop_and_recreate_cluster(
+            {
+                "cloud_storage_cluster_name": "test-my-cluster",
+            }
+        )
+        self._wait_for_metadata_upload()
+
+        self.logger.info("Verifying that no recovery happened")
+        topics_on_cluster = set(rpk.list_topics())
+        assert len(topics_on_cluster) == 0, (
+            f"Expected no topics to be restored but have: {topics_on_cluster}"
+        )
+
+        self.logger.info("Recreate the cluster and attempt recovery from the first one")
+        self._stop_and_recreate_cluster(
+            {
+                # Do not set the name yet, we want to validate that recovery fails without it first.
+                "cloud_storage_cluster_name": None,
+            }
+        )
+        self.logger.info(
+            "Verifying that recovery without name fails if uuid override is provided, name is not set but bucket contains multiple clusters"
+        )
+        with pytest.raises(requests.exceptions.HTTPError) as excinfo:
+            self.redpanda._admin.initialize_cluster_recovery(
+                cluster_uuid_override=initial_cluster_uuid
+            )
+        assert excinfo.value.response.status_code == 400, (
+            f"Status: {excinfo.value.response.status_code}"
+        )
+        assert (
+            excinfo.value.response.json()["message"]
+            == "Cluster is misconfigured for recovery. Check logs for details."
+        ), excinfo.value.response.json()["message"]
+
+        self.logger.info("Set a different cluster name and attempt to recovery")
+        self.redpanda._admin.patch_cluster_config(
+            {
+                "cloud_storage_cluster_name": "some-random-name",
+            }
+        )
+        with pytest.raises(requests.exceptions.HTTPError) as excinfo:
+            self.redpanda._admin.initialize_cluster_recovery(
+                cluster_uuid_override=initial_cluster_uuid
+            )
+        assert excinfo.value.response.status_code == 400, (
+            f"Status: {excinfo.value.response.status_code}"
+        )
+        assert (
+            excinfo.value.response.json()["message"]
+            == "Cluster is misconfigured for recovery. Check logs for details."
+        ), excinfo.value.response.json()["message"]
+
+        self.logger.info("Set the correct cluster name and attempt to recovery")
+        self.redpanda._admin.patch_cluster_config(
+            {
+                "cloud_storage_cluster_name": "test-my-cluster",
+            }
+        )
+        self.redpanda._admin.initialize_cluster_recovery(
+            cluster_uuid_override=initial_cluster_uuid
+        )
+        wait_until(self._cluster_recovery_complete, timeout_sec=60, backoff_sec=1)
+
+        topics_on_cluster = set(rpk.list_topics())
+        assert len(topics_on_cluster) == len(self.topics), (
+            f"Incorrect topics restored {topics_on_cluster} but expected {[t.name for t in self.topics]}"
+        )
 
     @cluster(num_nodes=1)
     def test_bootstrap_with_recovery(self):
@@ -410,4 +495,6 @@ class ClusterRecoveryWithNameTest(RedpandaTest):
     def _cluster_recovery_complete(self):
         state = self.redpanda._admin.get_cluster_recovery_status().json()["state"]
         self.logger.debug(f"Cluster recovery state: {state}")
+        if "failed" in state:
+            raise RuntimeError(f"Cluster recovery failed with state: {state}")
         return "inactive" in state

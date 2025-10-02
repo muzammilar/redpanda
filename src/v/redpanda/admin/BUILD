@@ -167,6 +167,7 @@ redpanda_cc_library(
 redpanda_cc_library(
     name = "admin",
     srcs = [
+        "cluster_recovery.cc",
         "debug.cc",
         "debug_bundle.cc",
         "kafka.cc",
@@ -207,6 +208,7 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         "//src/v/features:enterprise_feature_messages",
+        "//src/v/utils:uuid",
     ],
     visibility = ["//visibility:public"],
     deps = [

@@ -59,7 +59,6 @@ redpanda_cc_gtest(
         "//src/v/cloud_storage",
         "//src/v/cloud_storage:types",
         "//src/v/cluster",
-        "//src/v/cluster/tests:topic_properties_generator",
         "//src/v/cluster/tests:tx_compaction_utils_gtest",
         "//src/v/config",
         "//src/v/model",
