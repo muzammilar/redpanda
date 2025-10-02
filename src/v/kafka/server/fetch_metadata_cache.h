@@ -10,7 +10,7 @@
  */
 #pragma once
 
-#include "absl/container/node_hash_map.h"
+#include "container/chunked_hash_map.h"
 #include "model/fundamental.h"
 #include "model/ktp.h"
 
@@ -98,7 +98,7 @@ private:
 
     constexpr static std::chrono::seconds eviction_timeout{60};
     bool _stopped = false;
-    absl::node_hash_map<model::ktp_with_hash, entry> _cache;
+    chunked_hash_map<model::ktp_with_hash, entry> _cache;
     ss::timer<> _eviction_timer;
 };
 } // namespace kafka
