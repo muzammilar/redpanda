@@ -762,14 +762,11 @@ frontend::get_partition_info() const {
 }
 
 size_t frontend::estimate_size_between(kafka::offset, kafka::offset) const {
-    // TODO: implement this function
-    // This function can't be implemented yet because the L1 read path is not
-    // completely implemented.
+    // TODO(iceberg): implement this function
     return 0;
 }
 
 ss::future<std::error_code> frontend::linearizable_barrier() {
-    // TODO: implement linearizable barrier for cloud topics
     auto r = co_await _partition->linearizable_barrier();
     if (r) {
         co_return raft::errc::success;
