@@ -15,6 +15,7 @@ import requests
 from ducktape.mark import matrix, parametrize
 from ducktape.utils.util import wait_until
 
+from ducktape.cluster.cluster import ClusterNode
 from rptest.clients.default import DefaultClient
 from rptest.clients.kafka_cat import KafkaCat
 from rptest.clients.rpk import RpkTool
@@ -60,13 +61,13 @@ class NodesDecommissioningTest(PreallocNodesTest):
         # retry on timeout and service unavailable
         return Admin(self.redpanda, retry_codes=[503, 504])
 
-    def _create_topics(self, replication_factors=[1, 3]):
+    def _create_topics(self, replication_factors: list[int] = [1, 3]):
         """
         :return: total number of partitions in all topics
         """
         total_partitions = 0
-        topics = []
-        for i in range(10):
+        topics: list[TopicSpec] = []
+        for _ in range(10):
             partitions = random.randint(1, 10)
             spec = TopicSpec(
                 partition_count=partitions,
@@ -154,7 +155,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         wait_for_recovery_throttle_rate(redpanda=self.redpanda, new_rate=new_rate)
 
     # after node was removed the state should be consistent on all other not removed nodes
-    def _check_state_consistent(self, decommissioned_id):
+    def _check_state_consistent(self, decommissioned_id: int):
         not_decommissioned = [
             n
             for n in self.redpanda.started_nodes()
@@ -184,7 +185,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
             err_msg="Timeout waiting for nodes reported from configuration and cluster state to be consistent",
         )
 
-    def _wait_for_node_removed(self, decommissioned_id):
+    def _wait_for_node_removed(self, decommissioned_id: int):
         waiter = NodeDecommissionWaiter(
             self.redpanda, decommissioned_id, self.logger, progress_timeout=60
         )
@@ -192,7 +193,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
 
         self._check_state_consistent(decommissioned_id)
 
-    def _wait_for_allocation_failures_to_be_reported(self, decommissioned_id):
+    def _wait_for_allocation_failures_to_be_reported(self, decommissioned_id: int):
         def _failures_are_present():
             status = self.admin.get_decommission_status(decommissioned_id)
             failed_to_reallocate_topics = {
@@ -210,10 +211,10 @@ class NodesDecommissioningTest(PreallocNodesTest):
             err_msg="Timeout waiting for allocation failures to be reported",
         )
 
-    def _decommission(self, node_id, node=None):
+    def _decommission(self, node_id: int, node: ClusterNode | None = None):
         def decommissioned():
             try:
-                results = []
+                results: list[bool] = []
                 for n in self.redpanda.nodes:
                     if self.redpanda.node_id(n) == node_id:
                         continue
@@ -327,7 +328,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
             f"Invalid reads in topic: {self._topic}, invalid reads count: {self.consumer.consumer_status.validator.invalid_reads}"
         )
 
-    def start_redpanda(self, new_bootstrap=True):
+    def start_redpanda(self, new_bootstrap: bool = True):
         if new_bootstrap:
             self.redpanda.set_seed_servers(self.redpanda.nodes)
 
