@@ -2841,7 +2841,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         self.for_nodes(self.nodes, prune)
 
-    def node_id(self, node, force_refresh=False, timeout_sec=30):
+    def node_id(self, node: ClusterNode, force_refresh=False, timeout_sec=30) -> int:
         """
         Returns the node ID of a given node. Uses a cached value unless
         'force_refresh' is set to True.
