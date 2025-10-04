@@ -127,7 +127,7 @@ private:
         auto norm = nanos.count() / _resolution.count();
         return normalized_timestamp_t(norm);
     }
-    const size_t _num_buckets;
+    size_t _num_buckets;
     std::chrono::nanoseconds _resolution;
     std::vector<bucket> _buckets;
     normalized_timestamp_t _end;
