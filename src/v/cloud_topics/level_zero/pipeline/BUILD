@@ -164,6 +164,7 @@ redpanda_cc_library(
         "//src/v/bytes",
         "//src/v/bytes:iobuf",
         "//src/v/cloud_topics:types",
+        "//src/v/cloud_topics/level_zero/common:level_zero_probe",
         "//src/v/config",
         "//src/v/model",
         "//src/v/ssx:semaphore",
