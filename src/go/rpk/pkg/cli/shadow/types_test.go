@@ -554,7 +554,7 @@ func TestTLSSettingsUnmarshalJSON(t *testing.T) {
 		{
 			name: "PEM-based TLS settings",
 			jsonData: `{
-				"enabled": false,	
+				"enabled": false,
 				"ca": "ca-content",
 				"key": "key-content",
 				"cert": "cert-content"
