@@ -241,5 +241,47 @@ void write_request_scheduler_probe::setup_internal_metrics(bool disable) {
          sm::description("Total number of bytes received from another shard."),
          labels)});
 }
+batcher_probe::batcher_probe(bool disable) { setup_internal_metrics(disable); }
+
+void batcher_probe::setup_internal_metrics(bool disable) {
+    if (disable) {
+        return;
+    }
+    namespace sm = ss::metrics;
+    std::vector<sm::label_instance> labels;
+
+    // Set up private metrics
+    _metrics.add_group(
+      prometheus_sanitize::metrics_name("cloud_topics_batcher"),
+      {
+        sm::make_counter(
+          "objects_uploaded",
+          [this] { return _objects_uploaded; },
+          sm::description(
+            "Number of L0 objects successfully uploaded by the batcher."),
+          labels),
+
+        sm::make_counter(
+          "bytes_uploaded",
+          [this] { return _bytes_uploaded; },
+          sm::description(
+            "Total number of bytes successfully uploaded by the batcher."),
+          labels),
+
+        sm::make_counter(
+          "upload_errors",
+          [this] { return _upload_errors; },
+          sm::description(
+            "Number of upload errors encountered by the batcher."),
+          labels),
+
+        sm::make_counter(
+          "epoch_errors",
+          [this] { return _epoch_errors; },
+          sm::description("Number of epoch errors encountered by the batcher."),
+          labels),
+
+      });
+}
 
 } // namespace cloud_topics::l0

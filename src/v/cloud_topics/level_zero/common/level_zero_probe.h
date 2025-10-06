@@ -155,4 +155,28 @@ private:
     metrics::internal_metric_groups _metrics;
 };
 
+class batcher_probe {
+public:
+    explicit batcher_probe(bool disable);
+
+    void register_upload(uint64_t size_bytes) {
+        _objects_uploaded += 1;
+        _bytes_uploaded += size_bytes;
+    }
+
+    void register_error() { ++_upload_errors; }
+
+    void register_epoch_error() { ++_epoch_errors; }
+
+private:
+    void setup_internal_metrics(bool disable);
+
+    uint64_t _objects_uploaded{0};
+    uint64_t _bytes_uploaded{0};
+    uint64_t _upload_errors{0};
+    uint64_t _epoch_errors{0};
+
+    metrics::internal_metric_groups _metrics;
+};
+
 } // namespace cloud_topics::l0
