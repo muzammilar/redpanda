@@ -110,6 +110,11 @@ std::optional<uint64_t> get_offset_corrections() {
       "cloud_topics_reconciler_offset_corrections");
 }
 
+std::optional<uint64_t> get_rounds_failed() {
+    return test_utils::find_metric_value<uint64_t>(
+      "cloud_topics_reconciler_rounds_failed");
+}
+
 } // namespace
 
 TEST_F(ReconcilerMetricsTest, ThroughputCounters) {
@@ -282,4 +287,35 @@ TEST_F(ReconcilerMetricsTest, OffsetCorrection) {
 
     EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{19});
     EXPECT_THAT(get_offset_corrections(), Optional(1));
+}
+
+TEST_F(ReconcilerMetricsTest, ReconciliationRoundsFailed) {
+    EXPECT_THAT(get_rounds_failed(), Optional(0));
+
+    auto src = add_source();
+
+    // Reconciling with nothing to do is not a failure.
+    reconcile();
+
+    EXPECT_THAT(get_rounds_failed(), Optional(0));
+    EXPECT_THAT(get_objects_uploaded(), Optional(0));
+
+    // OK, now let's do some work and fail it.
+    src->add_batch({.count = 10});
+
+    metastore().fail_add_objects(true);
+
+    reconcile();
+
+    // We create an orphan T_T.
+    EXPECT_THAT(get_rounds_failed(), Optional(1));
+    EXPECT_THAT(get_objects_uploaded(), Optional(1));
+
+    // Finally, let reconciliation succeed.
+    metastore().fail_add_objects(false);
+
+    reconcile();
+
+    EXPECT_THAT(get_rounds_failed(), Optional(1));
+    EXPECT_THAT(get_objects_uploaded(), Optional(2));
 }

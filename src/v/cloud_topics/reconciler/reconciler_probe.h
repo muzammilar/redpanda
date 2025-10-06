@@ -35,6 +35,7 @@ public:
     void setup_metrics();
 
     void increment_rounds() { ++_rounds; }
+    void increment_rounds_failed() { ++_rounds_failed; }
     void increment_objects_uploaded() { ++_objects_uploaded; }
     void add_bytes_reconciled(uint64_t bytes) { _bytes_reconciled += bytes; }
     void add_batches_reconciled(uint64_t batches) {
@@ -80,6 +81,7 @@ private:
     metrics::internal_metric_groups _metrics;
 
     uint64_t _rounds{0};
+    uint64_t _rounds_failed{0};
     uint64_t _objects_uploaded{0};
     uint64_t _bytes_reconciled{0};
     uint64_t _batches_reconciled{0};

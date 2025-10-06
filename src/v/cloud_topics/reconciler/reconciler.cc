@@ -209,6 +209,7 @@ ss::future<> reconciler::reconcile() {
           lg.warn,
           "Could not create object metadata builder: {}",
           metadata_builder_res.error());
+        _probe.increment_rounds_failed();
         co_return;
     }
     auto& metadata_builder = metadata_builder_res.value();
@@ -219,6 +220,7 @@ ss::future<> reconciler::reconcile() {
           src->topic_id_partition());
         if (!oid.has_value()) {
             vlog(lg.warn, "Could not get object: {}", oid.error());
+            _probe.increment_rounds_failed();
             co_return;
         }
         oid_to_sources[oid.value()].push_back(src);
@@ -285,6 +287,8 @@ ss::future<> reconciler::reconcile() {
 
     // Check if we have any successful objects to commit.
     if (successful_objects.empty()) {
+        // NB: This doesn't count as failing the round because it may be that
+        // all sources are fully reconciled.
         vlog(lg.debug, "No successful objects to commit to metastore");
         co_return;
     }
@@ -296,6 +300,7 @@ ss::future<> reconciler::reconcile() {
         log_error(commit_result.error().with_context(
           "Abandoning reconciliation run because the L1 metastore operation "
           "failed"));
+        _probe.increment_rounds_failed();
         co_return;
     }
 }

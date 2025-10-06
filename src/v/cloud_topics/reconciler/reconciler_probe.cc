@@ -34,6 +34,10 @@ void reconciler_probe::setup_metrics() {
           [this] { return _rounds; },
           sm::description("Number of reconciliation rounds")),
         sm::make_counter(
+          "rounds_failed",
+          [this] { return _rounds_failed; },
+          sm::description("Number of reconciliation rounds that failed")),
+        sm::make_counter(
           "objects_uploaded",
           [this] { return _objects_uploaded; },
           sm::description("Total objects uploaded, including orphans")),
