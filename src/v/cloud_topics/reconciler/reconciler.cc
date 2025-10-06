@@ -374,6 +374,9 @@ reconciler::build_and_put_object(
     }
 
     _probe.increment_objects_uploaded();
+    _probe.add_bytes_reconciled(obj_meta.object_info.size_bytes);
+    _probe.record_object_size_bytes(obj_meta.object_info.size_bytes);
+    _probe.record_sources_per_object(obj_meta.commits.size());
 
     co_return obj_meta;
 }

@@ -193,3 +193,33 @@ TEST_F(ReconcilerMetricsTest, HistogramMetrics) {
       = probe.get_metastore_add_objects_duration_for_tests();
     EXPECT_GT(metastore_add_objects_duration.sample_count, 0);
 }
+
+// This test depends on the simple metastore packing all sources into one
+// object.
+TEST_F(ReconcilerMetricsTest, ObjectMetrics) {
+    auto src1 = add_source();
+    auto src2 = add_source();
+
+    src1->add_batch({.count = 10});
+    src2->add_batch({.count = 5});
+
+    reconcile();
+
+    const auto& probe = reconciler().get_probe_for_tests();
+
+    auto object_size = probe.get_object_size_bytes_for_tests();
+    EXPECT_EQ(object_size.sample_count, 1);
+
+    auto sources_per_object = probe.get_sources_per_object_for_tests();
+    EXPECT_EQ(sources_per_object.sample_count, 1);
+
+    src1->add_batch({.count = 15});
+
+    reconcile();
+
+    object_size = probe.get_object_size_bytes_for_tests();
+    EXPECT_EQ(object_size.sample_count, 2);
+
+    sources_per_object = probe.get_sources_per_object_for_tests();
+    EXPECT_EQ(sources_per_object.sample_count, 2);
+}

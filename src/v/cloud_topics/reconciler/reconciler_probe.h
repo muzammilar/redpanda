@@ -45,6 +45,13 @@ public:
     void increment_object_upload_failed() { ++_object_upload_failed; }
     void increment_empty_objects_skipped() { ++_empty_objects_skipped; }
 
+    void record_object_size_bytes(uint64_t size) {
+        _object_size_bytes.record(size);
+    }
+    void record_sources_per_object(uint64_t count) {
+        _sources_per_object.record(count);
+    }
+
     std::unique_ptr<hist_t::measurement> measure_object_upload_duration() {
         return _object_upload_duration.auto_measure();
     }
@@ -59,6 +66,12 @@ public:
     }
     auto get_metastore_add_objects_duration_for_tests() const {
         return _metastore_add_objects_duration.internal_histogram_logform();
+    }
+    auto get_object_size_bytes_for_tests() const {
+        return _object_size_bytes.internal_histogram_logform();
+    }
+    auto get_sources_per_object_for_tests() const {
+        return _sources_per_object.internal_histogram_logform();
     }
 
 private:
@@ -76,6 +89,8 @@ private:
     // Histograms.
     hist_t _object_upload_duration;
     hist_t _metastore_add_objects_duration;
+    hist_t _object_size_bytes;
+    hist_t _sources_per_object;
 };
 
 } // namespace cloud_topics::reconciler

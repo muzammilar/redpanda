@@ -77,6 +77,15 @@ void reconciler_probe::setup_metrics() {
                 .internal_histogram_logform();
           },
           sm::description("Duration of add_objects to metastore")),
+        sm::make_histogram(
+          "object_size_bytes",
+          [this] { return _object_size_bytes.internal_histogram_logform(); },
+          sm::description("Distribution of built L1 object sizes in bytes")),
+        sm::make_histogram(
+          "sources_per_object",
+          [this] { return _sources_per_object.internal_histogram_logform(); },
+          sm::description(
+            "Distribution of number of sources packed into each L1 object")),
       });
 }
 
