@@ -96,8 +96,10 @@ public:
     }
 
     ss::future<::cluster::cluster_link::errc> delete_link(
-      model::name_t name, ::model::timeout_clock::time_point timeout) override {
-        return _plf->remove_cluster_link(std::move(name), timeout);
+      model::name_t name,
+      bool force,
+      ::model::timeout_clock::time_point timeout) override {
+        return _plf->remove_cluster_link(std::move(name), force, timeout);
     }
 
     std::optional<std::reference_wrapper<const model::metadata>>

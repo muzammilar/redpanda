@@ -390,7 +390,7 @@ manager::delete_cluster_link(model::name_t name, bool force_delete_link) {
     }
 
     auto ec = co_await _registry->delete_link(
-      std::move(name), ::model::timeout_clock::now() + 30s);
+      std::move(name), force_delete_link, ::model::timeout_clock::now() + 30s);
     auto err = map_cluster_errc(ec);
     if (err != errc::success) {
         co_return err_info(
