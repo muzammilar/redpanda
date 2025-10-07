@@ -88,4 +88,17 @@ class AdminV2ListKafkaConnectionsTest(RedpandaTest):
             err_msg="Did not observe a valid ListKafkaConnectionsResponse",
         )
 
+        self.logger.info(
+            "Test the filtering integration by filtering for an unknown UUID, expect an empty response"
+        )
+        filtered_resp = admin_v2.broker().list_kafka_connections(
+            broker_pb.ListKafkaConnectionsRequest(
+                node_id=-1,
+                filter='uid = "ba26cadd-90f6-4999-b2c9-a89b5f033507"',
+            )
+        )
+        self.logger.debug(f"Filtered response: {filtered_resp}")
+        assert len(filtered_resp.connections) == 0
+        assert filtered_resp.total_size == 0
+
         self.consumer.stop()

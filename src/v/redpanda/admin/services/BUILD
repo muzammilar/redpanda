@@ -9,6 +9,7 @@ redpanda_cc_library(
     deps = [
         "//proto/redpanda/core/admin/v2:broker_redpanda_proto",
         "//src/v/kafka/server",
+        "//src/v/redpanda/admin:aip_filter",
         "//src/v/redpanda/admin/proxy:client",
         "//src/v/ssx:async_algorithm",
         "//src/v/version",

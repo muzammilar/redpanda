@@ -14,6 +14,7 @@
 #include "kafka/server/connection_context.h"
 #include "kafka/server/server.h"
 #include "proto/redpanda/core/admin/v2/kafka_connections.proto.h"
+#include "redpanda/admin/aip_filter.h"
 #include "ssx/async_algorithm.h"
 #include "version/version.h"
 
@@ -93,19 +94,18 @@ struct connection_gather_result {
     size_t total_matching_count;
 };
 
-ss::future<connection_gather_result>
-gather_connections(const kafka::server& server, size_t limit) {
+ss::future<connection_gather_result> gather_connections(
+  const kafka::server& server, size_t limit, const filter_predicate& filter) {
     auto result = connection_gather_result{};
 
     auto conn_ptrs = server.list_connections();
     co_await ss::maybe_yield();
 
     co_await ssx::async_for_each(
-      conn_ptrs, [&result, limit](const auto& conn_ptr) {
+      conn_ptrs, [&result, limit, &filter](const auto& conn_ptr) {
           auto conn_proto = conn_ptr->to_proto();
 
-          // TODO: Apply filtering here when implemented
-          bool matches_filter = true;
+          bool matches_filter = filter(conn_proto);
 
           if (matches_filter) {
               result.total_matching_count++;
@@ -142,6 +142,10 @@ broker_service_impl::list_kafka_connections(
     auto limit = (req.get_page_size() == 0) ? default_limit
                                             : req.get_page_size();
 
+    auto filter_cfg = make_aip_filter_config<proto::kafka_connection>(
+      req.get_filter());
+    auto filter = aip_filter_parser::create_aip_filter(std::move(filter_cfg));
+
     // Iterate across shards sequentially to bound memory usage while
     // calculating total size
     auto result_connections = chunked_vector<proto::kafka_connection>{};
@@ -152,9 +156,9 @@ broker_service_impl::list_kafka_connections(
         auto remaining_limit = limit - result_connections.size();
         auto shard_result = co_await _kafka_server.invoke_on(
           shard,
-          [remaining_limit](
+          [remaining_limit, &filter](
             kafka::server& server) -> ss::future<connection_gather_result> {
-              return gather_connections(server, remaining_limit);
+              return gather_connections(server, remaining_limit, filter);
           });
 
         total_matching_connections += shard_result.total_matching_count;
