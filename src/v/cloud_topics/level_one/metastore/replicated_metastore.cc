@@ -387,6 +387,12 @@ replicated_metastore::set_start_offset(
     co_return std::expected<void, metastore::errc>{};
 }
 
+ss::future<std::expected<metastore::topic_removal_response, metastore::errc>>
+replicated_metastore::remove_topics(const chunked_vector<model::topic_id>&) {
+    // XXX: implemented in the next commit!
+    co_return std::unexpected(metastore::errc::invalid_request);
+}
+
 ss::future<std::expected<metastore::object_response, metastore::errc>>
 replicated_metastore::get_first_ge(
   const model::topic_id_partition& tidp, kafka::offset offset) {
