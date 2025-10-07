@@ -27,32 +27,39 @@ using internal::chars;
 
 using seed_type = rng::seed_type;
 
+namespace internal {
+// get the default seeding mode from the environment
+seeding_mode default_seeding_policy() {
+    static const seeding_mode global_seeding_mode = [] {
+        // REDPANDA_RNG_SEEDING_MODE overrides REDPANDA_RNG_SEEDING_MODE_DEFAULT
+        // which overrides the default
+        auto mode_cstr = std::getenv("REDPANDA_RNG_SEEDING_MODE");
+        if (!mode_cstr) {
+            mode_cstr = std::getenv("REDPANDA_RNG_SEEDING_MODE_DEFAULT");
+        }
+        if (!mode_cstr) {
+            // default mode when nothing is specified
+            return seeding_mode::random_seed;
+        }
+
+        std::string_view mode = mode_cstr;
+        if (mode == "random") {
+            return seeding_mode::random_seed;
+        } else if (mode == "fixed") {
+            return seeding_mode::fixed_seed;
+        }
+        vassert(false, "Invalid REDPANDA_RNG_SEEDING_MODE: {}", mode);
+    }();
+
+    return global_seeding_mode;
+}
+
+} // namespace internal
+
 namespace {
 constexpr seed_type fixed_seed = 0xDEADBEEF;
 
 std::atomic<int64_t> seed_generation = 0;
-
-// get the default seeding mode from the environment
-const seeding_mode global_seeding_mode = [] {
-    // REDPANDA_RNG_SEEDING_MODE overrides REDPANDA_RNG_SEEDING_MODE_DEFAULT
-    // which overrides the default
-    auto mode_cstr = std::getenv("REDPANDA_RNG_SEEDING_MODE");
-    if (!mode_cstr) {
-        mode_cstr = std::getenv("REDPANDA_RNG_SEEDING_MODE_DEFAULT");
-    }
-    if (!mode_cstr) {
-        // default mode when nothing is specified
-        return seeding_mode::random_seed;
-    }
-
-    std::string_view mode = mode_cstr;
-    if (mode == "random") {
-        return seeding_mode::random_seed;
-    } else if (mode == "fixed") {
-        return seeding_mode::fixed_seed;
-    }
-    vassert(false, "Invalid REDPANDA_RNG_SEEDING_MODE: {}", mode);
-}();
 
 seed_type random_seed() {
     // use a thread-local random device as random_device creation is
@@ -85,14 +92,11 @@ struct global_state_state {
 static thread_local global_state_state global_state;
 
 seed_type get_initial_seed() {
-    return global_seeding_mode == seeding_mode::fixed_seed ? fixed_seed
-                                                           : random_seed();
+    return internal::default_seeding_policy() == seeding_mode::fixed_seed
+             ? fixed_seed
+             : random_seed();
 }
 } // namespace
-
-namespace internal {
-seeding_mode default_seeding_policy() { return global_seeding_mode; }
-} // namespace internal
 
 rng::rng() noexcept
   : rng(get_initial_seed()) {}
