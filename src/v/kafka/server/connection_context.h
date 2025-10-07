@@ -164,6 +164,8 @@ struct connection_attributes {
     request_state produce_bytes;
     request_state produce_batch_count;
     request_state fetch_bytes;
+
+    uuid_t connection_id{uuid_t::create()};
 };
 
 class connection_context final

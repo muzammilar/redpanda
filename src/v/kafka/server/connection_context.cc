@@ -823,6 +823,7 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     res.set_shard_id(ss::this_shard_id());
     res.set_node_id(
       config::node().node_id.value().value_or(model::unassigned_node_id));
+    res.set_uid(ssx::sformat("{}", _attributes.connection_id));
     res.set_listener_name(ss::sstring{listener()});
     res.set_state(
       _as.abort_requested() ? kafka_connection_state::aborting
