@@ -91,6 +91,7 @@ redpanda_cc_library(
         "//src/v/cluster_link:logger",
         "//src/v/container:chunked_hash_map",
         "//src/v/kafka/client/direct_consumer",
+        "//src/v/kafka/server",
         "//src/v/ssx:future_util",
         "@seastar",
     ],

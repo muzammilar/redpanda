@@ -13,6 +13,7 @@
 #include "cluster_link/replication/partition_data_queue.h"
 #include "container/chunked_hash_map.h"
 #include "kafka/client/direct_consumer/direct_consumer.h"
+#include "kafka/server/snc_quota_manager.h"
 
 #include <expected>
 #include <memory>
@@ -44,10 +45,14 @@ public:
     using result = std::expected<void, errc>;
 
     explicit mux_remote_consumer(
+      ss::sstring client_id,
       std::unique_ptr<kafka::client::direct_consumer> consumer,
+      kafka::snc_quota_manager& snc_quota_mgr,
       size_t partition_max_buffered,
       std::chrono::milliseconds fetch_max_wait)
-      : _consumer(std::move(consumer))
+      : _client_id(std::move(client_id))
+      , _consumer(std::move(consumer))
+      , _snc_quota_mgr(snc_quota_mgr)
       , _partition_max_buffered(partition_max_buffered)
       , _fetch_max_wait(fetch_max_wait) {}
 
@@ -85,7 +90,10 @@ private:
       ::model::topic_partition,
       std::unique_ptr<partition_data_queue>>
       _partitions;
+    ss::sstring _client_id;
     std::unique_ptr<kafka::client::direct_consumer> _consumer;
+    std::unique_ptr<kafka::snc_quota_context> _snc_quota_ctx;
+    kafka::snc_quota_manager& _snc_quota_mgr;
     /// Maps topics to their pending partition assignments that are waiting to
     /// be processed. Each topic is associated with a set of partition IDs that
     /// need to be assigned to this consumer but have not yet been fully

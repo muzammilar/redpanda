@@ -28,8 +28,13 @@ public:
         basic_consumer_fixture::SetUp();
         auto consumer = make_consumer();
         _raw_consumer = consumer.get();
+        auto* rp = instance(model::node_id{0});
         _mux_consumer = std::make_unique<mux_remote_consumer>(
-          std::move(consumer), partition_max_buffered, fetch_max_wait);
+          client_id,
+          std::move(consumer),
+          rp->app.snc_quota_mgr.local(),
+          partition_max_buffered,
+          fetch_max_wait);
         _mux_consumer->start().get();
     }
     void TearDown() override {
@@ -56,6 +61,7 @@ public:
     void StopConsumer() override {}
 
 protected:
+    const ss::sstring client_id = "mux_consumer_test";
     std::unique_ptr<mux_remote_consumer> _mux_consumer;
     const kafka::client::direct_consumer* _raw_consumer;
 };
