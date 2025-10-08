@@ -349,6 +349,20 @@ shadow_link_status_report_response::format_to(fmt::iterator it) const {
 
 } // namespace cluster_link::rpc
 
+namespace cluster_link::model {
+fmt::iterator shadow_link_status_report::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
+      "{{ link_id: {}, topic_responses: {} }}",
+      link_id,
+      fmt::join(
+        topic_responses | std::views::transform([](auto& t) {
+            return fmt::format("{}: {}", t.first, t.second);
+        }),
+        ", "));
+}
+} // namespace cluster_link::model
+
 auto fmt::formatter<cluster_link::model::task_state>::format(
   cluster_link::model::task_state st, format_context& ctx) const
   -> decltype(ctx.out()) {

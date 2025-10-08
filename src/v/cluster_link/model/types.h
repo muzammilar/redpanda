@@ -1124,6 +1124,19 @@ struct shadow_link_status_report_response
 
 } // namespace cluster_link::rpc
 
+namespace cluster_link::model {
+struct shadow_link_status_report {
+    id_t link_id;
+
+    chunked_hash_map<::model::topic, rpc::shadow_link_status_topic_response>
+      topic_responses;
+
+    fmt::iterator format_to(fmt::iterator) const;
+};
+
+using status_report_ret_t = std::expected<shadow_link_status_report, errc>;
+} // namespace cluster_link::model
+
 template<>
 struct fmt::formatter<cluster_link::model::mirror_topic_status>
   : fmt::formatter<string_view> {
