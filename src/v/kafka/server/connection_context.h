@@ -178,6 +178,8 @@ struct connection_attributes {
     uuid_t connection_id{uuid_t::create()};
     sys_clock::time_point open_time{sys_clock::now()};
     last_value last_client_id{};
+    last_value last_client_software_name{};
+    last_value last_client_software_version{};
 };
 
 class connection_context final

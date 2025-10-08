@@ -906,6 +906,10 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     };
 
     res.set_client_id(get_last_str(_attributes.last_client_id));
+    res.set_client_software_name(
+      get_last_str(_attributes.last_client_software_name));
+    res.set_client_software_version(
+      get_last_str(_attributes.last_client_software_version));
 
     using tracker_t = connection_attributes::request_state::tracker_t;
     auto now = tracker_t::clock::now();
