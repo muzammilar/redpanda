@@ -266,11 +266,10 @@ class LargeMessagesTest(RedpandaTest):
 
     @cluster(num_nodes=7, log_allow_list=RESTART_LOG_ALLOW_LIST)
     @matrix(
-        message_size_mib=[8, 16],
+        message_size_mib=[8, 16, 32],
         apply_throughput_limits=[False, True],
         mode=[Mode.MANY_PARTS, Mode.TEN_TOPICS],
     )
-    # @parametrize(message_size_mib=16, apply_throughput_limits=True)
     def test_large_messages_throughput(
         self, message_size_mib: float, apply_throughput_limits: bool, mode: Mode
     ):
