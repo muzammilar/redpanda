@@ -148,6 +148,9 @@ public:
     rpc::shadow_link_status_report_response
       shard_local_shadow_link_report(model::id_t);
 
+    ss::future<model::status_report_ret_t>
+    shadow_link_report(model::name_t name);
+
 private:
     void register_notifications();
     void unregister_notifications();
@@ -175,6 +178,9 @@ private:
         }
         return func(_manager.get());
     }
+
+    ss::future<rpc::shadow_link_status_report_response> shadow_link_report(
+      ::model::node_id, rpc::shadow_link_status_report_request);
 
 private:
     /**

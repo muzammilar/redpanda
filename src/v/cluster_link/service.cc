@@ -12,7 +12,9 @@
 #include "cluster_link/service.h"
 
 #include "cluster/cluster_link/frontend.h"
+#include "cluster/controller.h"
 #include "cluster/health_monitor_frontend.h"
+#include "cluster/members_table.h"
 #include "cluster/partition_manager.h"
 #include "cluster_link/group_mirroring_task.h"
 #include "cluster_link/link.h"
@@ -855,6 +857,78 @@ service::shard_local_shadow_link_report(model::id_t id) {
       result);
 
     return result;
+}
+
+ss::future<model::status_report_ret_t>
+service::shadow_link_report(model::name_t name) {
+    vlog(cllog.trace, "Generating shadow link report for link {}", name);
+    auto link_id = _plf->local().find_link_id_by_name(name);
+    if (!link_id.has_value()) {
+        co_return std::unexpected<errc>(errc::link_id_not_found);
+    }
+    auto& members_table = _controller->get_members_table();
+    const auto& node_ids = members_table.local().node_ids();
+    vlog(cllog.trace, "Issuing rpcs to nodes {}", node_ids);
+    model::shadow_link_status_report results;
+    results.link_id = link_id.value();
+    try {
+        co_await ss::max_concurrent_for_each(
+          node_ids,
+          32,
+          [this, &results, link_id = link_id.value()](::model::node_id node) {
+              rpc::shadow_link_status_report_request request{
+                .link_id = link_id};
+              return shadow_link_report(node, std::move(request))
+                .then([&results](rpc::shadow_link_status_report_response resp) {
+                    for (const auto& [topic, topic_response] :
+                         resp.topic_responses) {
+                        auto& existing = results.topic_responses[topic];
+                        for (const auto& [pid, report] :
+                             topic_response.partition_reports) {
+                            existing.partition_reports.emplace(pid, report);
+                        }
+                    }
+                });
+          });
+    } catch (const std::exception& e) {
+        vlog(cllog.warn, "Exception during shadow link reporting: {}", e);
+        co_return std::unexpected<errc>(errc::rpc_error);
+    }
+
+    co_return results;
+}
+
+ss::future<rpc::shadow_link_status_report_response> service::shadow_link_report(
+  ::model::node_id node, rpc::shadow_link_status_report_request req) {
+    using resp_t = rpc::shadow_link_status_report_response;
+    if (node == _self) {
+        co_return co_await node_local_shadow_link_report(std::move(req));
+    }
+
+    static constexpr auto rpc_timeout = 5s;
+    vlog(cllog.trace, "Issuing rpc to node {}", node);
+    auto resp = co_await _connections->local()
+                  .with_node_client<rpc::shadow_linking_rpc_client_protocol>(
+                    _self,
+                    ss::this_shard_id(),
+                    node,
+                    ::model::timeout_clock::now() + rpc_timeout,
+                    [request = std::move(req)](
+                      rpc::shadow_linking_rpc_client_protocol client) mutable {
+                        return client
+                          .shadow_link_report(
+                            std::move(request), ::rpc::client_opts(rpc_timeout))
+                          .then(&::rpc::get_ctx_data<resp_t>);
+                    });
+    if (resp.has_error()) {
+        vlog(
+          cllog.warn,
+          "Error getting shadow link report for node {}: {}",
+          node,
+          resp.error());
+        co_return resp_t{.err_code = errc::rpc_error};
+    }
+    co_return std::move(resp.value());
 }
 
 } // namespace cluster_link
