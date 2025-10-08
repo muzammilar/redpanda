@@ -54,6 +54,9 @@ class LargeMessagesTest(RedpandaTest):
     # actually accept a message payload of 1 MIB.
     MAX_DEFAULT_MSG_SIZE_MIB = 0.9
 
+    # The maximum response size a client will tell RP its willing to receive.
+    FETCH_MAX_BYTES_MIB = 90
+
     def __init__(self, *args, **kwargs):
         # Topics
         # Prepare RP
@@ -81,6 +84,11 @@ class LargeMessagesTest(RedpandaTest):
                 # job. We should figure out how to make it faster for this
                 # use-case.
                 "cloud_storage_enable_scrubbing": False,
+                # Raise the broker-imposed fetch max bytes to allow for fetches
+                # to return more than just the obligatory read.
+                "fetch_max_bytes": self.FETCH_MAX_BYTES_MIB * 2**20,
+                # Similar to above, is deprecated in later versions of RP.
+                "kafka_max_bytes_per_fetch": self.FETCH_MAX_BYTES_MIB * 2**20,
             },
             # Reduce per-partition log spam
             log_config=LoggingConfig(
@@ -196,6 +204,12 @@ class LargeMessagesTest(RedpandaTest):
     def _run_consumers(self, group):
         swarm_node_consumers: list[ConsumerSwarm] = []
         node_message_count = int(0.95 * (self.message_count * self.n_clients))
+        max_fetch_bytes = min(self.FETCH_MAX_BYTES_MIB * 2**20, 4 * self.message_size)
+        # Set properties to allow for more than just the obligatory read to be returned.
+        properties = {
+            "fetch.max.bytes": max_fetch_bytes,
+            "max.partition.fetch.bytes": min(2 * self.message_size, max_fetch_bytes),
+        }
 
         for topic in self.topic_prefixes:
             swarm_node_consumers.append(
@@ -208,6 +222,7 @@ class LargeMessagesTest(RedpandaTest):
                     node_message_count,
                     unique_topics=self.unique,
                     unique_groups=self.unique,
+                    properties=properties if not self.default_consumer_config else {},
                 )
             )
 
@@ -269,9 +284,14 @@ class LargeMessagesTest(RedpandaTest):
         message_size_mib=[8, 16, 32],
         apply_throughput_limits=[False, True],
         mode=[Mode.MANY_PARTS, Mode.TEN_TOPICS],
+        default_consumer_config=[False, True],
     )
     def test_large_messages_throughput(
-        self, message_size_mib: float, apply_throughput_limits: bool, mode: Mode
+        self,
+        message_size_mib: float,
+        apply_throughput_limits: bool,
+        mode: Mode,
+        default_consumer_config: bool,
     ):
         """Test creates 10 topics, and uses client-swarm to
         generate 100 messages with parametrized size and sends this count
@@ -285,6 +305,7 @@ class LargeMessagesTest(RedpandaTest):
         self.message_size = int(message_size_mib * 2**20)
         self.replication_factor = 3
         self.swarm_nodes = 2
+        self.default_consumer_config = default_consumer_config
 
         # Scale tests are not run on debug builds
         assert not self.debug_mode
