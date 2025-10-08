@@ -42,6 +42,7 @@ func NewNetTuner(
 		fs, t, irqProcFile, irqDeviceInfo, ethtool, irqBalanceService, cpuMasks, executor)
 	return NewAggregatedTunable(
 		[]Tunable{
+			factory.NewAllNicsSameModeTuner(interfaces, mode, cpuMask),
 			// RX/TX queue count tuner should always be first in order as others will re-read queue counts
 			factory.NewRxTxQueueCountTuner(interfaces, mode, cpuMask),
 			factory.NewNICsBalanceServiceTuner(interfaces),
@@ -57,6 +58,7 @@ func NewNetTuner(
 }
 
 type NetTunersFactory interface {
+	NewAllNicsSameModeTuner(interfaces []string, mode irq.Mode, cpuMask string) Tunable
 	NewRxTxQueueCountTuner(interfaces []string, mode irq.Mode, cpuMask string) Tunable
 	NewNICsBalanceServiceTuner(interfaces []string) Tunable
 	NewNICsIRQsAffinityTuner(interfaces []string, mode irq.Mode, cpuMask string) Tunable
@@ -103,6 +105,53 @@ func NewNetTunersFactory(
 		checkersFactory: NewNetCheckersFactory(
 			fs, t, irqProcFile, irqDeviceInfo, ethtool, balanceService, cpuMasks),
 	}
+}
+
+type NicsEqualTunable struct {
+	f          *netTunersFactory
+	interfaces []string
+	mode       irq.Mode
+	cpuMask    string
+}
+
+func (*NicsEqualTunable) CheckIfSupported() (bool, string) {
+	return true, ""
+}
+
+func (net *NicsEqualTunable) Tune() TuneResult {
+	var currentEffectiveConfig *network.EffectiveNicConfig
+
+	for _, iface := range net.interfaces {
+		nic := network.NewNic(net.f.fs, net.f.irqProcFile, net.f.irqDeviceInfo, net.f.ethtool, iface)
+		if !nic.IsHwInterface() && !nic.IsBondIface() {
+			zap.L().Sugar().Debugf("Skipping tuning of '%s' virtual interface", nic.Name())
+			continue
+		}
+
+		effectiveConfig, err := network.GetEffectiveNicConfig(nic, net.mode, net.cpuMask, net.f.cpuMasks, net.f.t)
+		if err != nil {
+			return NewTuneError(err)
+		}
+
+		zap.L().Sugar().Debugf("interface %s: effective config: %v", nic.Name(), effectiveConfig)
+		if currentEffectiveConfig == nil {
+			currentEffectiveConfig = &effectiveConfig
+		} else {
+			if *currentEffectiveConfig != effectiveConfig {
+				return NewTuneError(fmt.Errorf("interfaces %s has different effective configuration than the rest: %v vs %v",
+					nic.Name(), *currentEffectiveConfig, effectiveConfig))
+			}
+		}
+	}
+	return NewTuneResult(false)
+}
+
+// This is a meta tuner that checks that all given NICs use the same mode and IRQ masks.
+// It's really only needed like this because of the way the different subtuners are implemented.
+// Once we rewrite everything to be a single function this can just be at the top and won't be a separate "tuner".
+func (f *netTunersFactory) NewAllNicsSameModeTuner(interfaces []string, mode irq.Mode, cpuMask string) Tunable {
+	tuneable := NicsEqualTunable{f: f, interfaces: interfaces, mode: mode, cpuMask: cpuMask}
+	return &tuneable
 }
 
 func (f *netTunersFactory) NewRxTxQueueCountTuner(interfaces []string, mode irq.Mode, cpuMask string) Tunable {
