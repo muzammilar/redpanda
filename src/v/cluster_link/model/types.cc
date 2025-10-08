@@ -286,7 +286,20 @@ fmt::iterator shadow_topic_report_request::format_to(fmt::iterator it) const {
 
 fmt::iterator
 shadow_topic_partition_leader_report::format_to(fmt::iterator it) const {
-    return fmt::format_to(it, "{{ partition: {} }}", partition);
+    auto time_point = std::chrono::system_clock::time_point{
+      std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        last_update_time)};
+
+    auto time = std::format("Time: {:%FT%H:%M:%S.3}", time_point);
+    return fmt::format_to(
+      it,
+      "{{ source_start_offset: {}, source_hwm: {}, source_lso: {}, "
+      "last_update_time: {}, shadow_hwm: {} }}",
+      source_partition_start_offset,
+      source_partition_high_watermark,
+      source_partition_last_stable_offset,
+      time,
+      shadow_partition_high_watermark);
 }
 
 fmt::iterator shadow_topic_report_response::format_to(fmt::iterator it) const {
