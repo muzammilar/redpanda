@@ -311,6 +311,42 @@ fmt::iterator shadow_topic_report_response::format_to(fmt::iterator it) const {
       err_code);
 }
 
+fmt::iterator
+shadow_link_status_report_request::format_to(fmt::iterator it) const {
+    return fmt::format_to(it, "{{ link_id: {} }}", link_id);
+}
+
+fmt::iterator
+shadow_link_status_topic_response::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
+      "{{ status: {}, partition_reports: {} }}",
+      status,
+      fmt::join(
+        partition_reports | std::views::transform([](auto& p) {
+            return fmt::format("{}: {}", p.first, p.second);
+        }),
+        ","));
+}
+
+fmt::iterator
+shadow_link_status_report_response::format_to(fmt::iterator it) const {
+    fmt::format_to(
+      it,
+      "{{ err_code: {}, link_id: {}, topic_responses: [",
+      err_code,
+      link_id);
+    bool first = true;
+    for (const auto& [topic, response] : topic_responses) {
+        if (!first) {
+            fmt::format_to(it, ", ");
+        }
+        first = false;
+        fmt::format_to(it, "{}: {}", topic, response);
+    }
+    return fmt::format_to(it, "] }}");
+}
+
 } // namespace cluster_link::rpc
 
 auto fmt::formatter<cluster_link::model::task_state>::format(

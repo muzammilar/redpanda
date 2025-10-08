@@ -18,8 +18,11 @@
 #include "kafka/protocol/topic_properties.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
+#include "serde/envelope.h"
+#include "serde/rw/chrono.h"
 #include "serde/rw/enum.h"
 #include "serde/rw/envelope.h"
+#include "serde/rw/map.h"
 #include "serde/rw/named_type.h"
 #include "serde/rw/variant.h"
 #include "serde/rw/vector.h"
@@ -1057,6 +1060,66 @@ struct shadow_topic_report_response
     auto serde_fields() {
         return std::tie(node_id, link_update_revision, leaders, err_code);
     }
+};
+
+// request a full report of all topics on a shadow link
+struct shadow_link_status_report_request
+  : serde::envelope<
+      shadow_link_status_report_request,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    model::id_t link_id;
+
+    friend bool operator==(
+      const shadow_link_status_report_request&,
+      const shadow_link_status_report_request&)
+      = default;
+
+    fmt::iterator format_to(fmt::iterator) const;
+
+    auto serde_fields() { return std::tie(link_id); }
+};
+
+struct shadow_link_status_topic_response
+  : serde::envelope<
+      shadow_link_status_topic_response,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    model::mirror_topic_status status;
+    chunked_hash_map<
+      ::model::partition_id,
+      shadow_topic_partition_leader_report>
+      partition_reports;
+
+    friend bool operator==(
+      const shadow_link_status_topic_response&,
+      const shadow_link_status_topic_response&)
+      = default;
+
+    fmt::iterator format_to(fmt::iterator) const;
+
+    auto serde_fields() { return std::tie(status, partition_reports); }
+};
+
+struct shadow_link_status_report_response
+  : serde::envelope<
+      shadow_link_status_report_response,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    errc err_code{errc::success};
+    model::id_t link_id;
+
+    chunked_hash_map<::model::topic, shadow_link_status_topic_response>
+      topic_responses;
+
+    friend bool operator==(
+      const shadow_link_status_report_response&,
+      const shadow_link_status_report_response&)
+      = default;
+
+    fmt::iterator format_to(fmt::iterator) const;
+
+    auto serde_fields() { return std::tie(err_code, link_id, topic_responses); }
 };
 
 } // namespace cluster_link::rpc
