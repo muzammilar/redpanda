@@ -360,6 +360,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
                     "kafka/client": "trace",
                     "kafka": "trace",
                     "tx": "trace",
+                    "shadow_link_service": "trace",
                 },
             ),
             *args,
