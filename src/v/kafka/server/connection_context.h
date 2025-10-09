@@ -14,6 +14,7 @@
 #include "base/seastarx.h"
 #include "config/property.h"
 #include "container/chunked_hash_map.h"
+#include "kafka/protocol/types.h"
 #include "kafka/server/fwd.h"
 #include "kafka/server/handlers/details/security.h"
 #include "kafka/server/handlers/handler_probe.h"
@@ -180,6 +181,8 @@ struct connection_attributes {
         }
     };
 
+    void record_api_version(api_key key, api_version);
+
     request_state request_count;
     request_state produce_bytes;
     request_state produce_batch_count;
@@ -194,6 +197,8 @@ struct connection_attributes {
     last_value last_group_id{};
     last_value last_group_instance_id{};
     last_value last_group_member_id{};
+
+    chunked_hash_map<api_key, api_version> api_versions{};
 };
 
 class connection_context final

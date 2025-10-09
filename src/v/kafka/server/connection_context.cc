@@ -19,6 +19,7 @@
 #include "cluster/types.h"
 #include "config/configuration.h"
 #include "config/node_config.h"
+#include "container/chunked_hash_map.h"
 #include "kafka/protocol/sasl_authenticate.h"
 #include "kafka/server/datalake_throttle_manager.h"
 #include "kafka/server/handlers/fetch.h"
@@ -453,6 +454,7 @@ ss::future<> connection_context::process_one_request() {
     }
     _server.handler_probe(h->key).add_bytes_received(sz.value());
     _attributes.last_client_id.update(h->client_id);
+    _attributes.record_api_version(h->key, h->version);
     /**
      * An entry point for the MPX serverless extensions. If the first request
      * for a given connection has a special client_id then MPX extensions are
@@ -915,6 +917,10 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     res.set_group_instance_id(get_last_str(_attributes.last_group_instance_id));
     res.set_group_member_id(get_last_str(_attributes.last_group_member_id));
 
+    res.set_api_versions(
+      chunked_hash_map<int32_t, int32_t>{
+        _attributes.api_versions.cbegin(), _attributes.api_versions.cend()});
+
     using tracker_t = connection_attributes::request_state::tracker_t;
     auto now = tracker_t::clock::now();
 
@@ -1178,6 +1184,14 @@ std::ostream& operator<<(std::ostream& o, const virtual_connection_id& id) {
 void last_value::update(std::optional<std::string_view> new_value) {
     if (new_value && value != *new_value) {
         value = ss::sstring{*new_value};
+    }
+}
+
+void connection_attributes::record_api_version(
+  api_key key, api_version version) {
+    auto [it, inserted] = api_versions.try_emplace(key, version);
+    if (!inserted) {
+        it->second = std::max(it->second, version);
     }
 }
 
