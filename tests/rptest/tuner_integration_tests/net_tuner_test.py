@@ -52,31 +52,10 @@ class NetTunerTest(RedpandaTest):
     def teardown(self):
         super().teardown()
 
-        # Reset the important bits to MQ like
-
-        # just assume CORE_COUNT for now, otherwise would have to parse
-        try:
-            self.node.account.ssh(
-                f"sudo ethtool -L {self.interface_name} rx {CORE_COUNT} tx {CORE_COUNT}"
-            )
-        except Exception:
-            self.node.account.ssh(
-                f"sudo ethtool -L {self.interface_name} combined {CORE_COUNT}"
-            )
-
-        interrupt_ids = self._get_interrupt_ids()
-        for interrupt_id in interrupt_ids:
-            self.node.account.ssh(
-                f"cat /proc/irq/default_smp_affinity | sudo tee /proc/irq/{interrupt_id}/smp_affinity"
-            )
-
-        self.node.account.ssh(
-            f"echo 0 | sudo tee /sys/class/net/{self.interface_name}/queues/rx-*/rps_flow_cnt"
-        )
-
-        self.node.account.ssh(
-            f"echo 0 | sudo tee /sys/class/net/{self.interface_name}/queues/rx-*/rps_cpus"
-        )
+        # Reset to what ansible gives you out of the box
+        self.node.account.ssh("rm -rf /etc/redpanda/redpanda.yaml")
+        self.node.account.ssh("sudo rpk redpanda mode prod")
+        self.node.account.ssh("sudo systemctl restart redpanda-tuner")
 
     def start_rp(self):
         # Need to explicitly pass listener config otherwise RP will complain about 0.0.0.0 listeners
