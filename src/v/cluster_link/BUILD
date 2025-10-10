@@ -194,6 +194,7 @@ redpanda_cc_library(
         ":security_migrator",
         ":source_topic_syncer",
         "//src/v/cluster_link/model",
+        "//src/v/ssx:future_util",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -210,6 +211,8 @@ redpanda_cc_library(
         "//src/v/model",
         "//src/v/raft",
         "//src/v/rpc",
+        "//src/v/ssx:work_queue",
+        "//src/v/utils:mutex",
         "@seastar",
     ],
 )

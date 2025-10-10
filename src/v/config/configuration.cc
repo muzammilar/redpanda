@@ -4454,10 +4454,11 @@ configuration::configuration()
       false)
   , enable_shadow_linking(
       *this,
+      true,
       "enable_shadow_linking",
       "Enable creating Shadow Links from this cluster to a remote source "
       "cluster for data replication.",
-      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      meta{.needs_restart = needs_restart::no, .visibility = visibility::user},
       false)
   , development_enable_cloud_topics(
       *this,
