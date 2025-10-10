@@ -102,3 +102,30 @@ class AdminV2ListKafkaConnectionsTest(RedpandaTest):
         assert filtered_resp.total_size == 0
 
         self.consumer.stop()
+
+
+class AdminV2ListKafkaConnectionsLicenseTest(RedpandaTest):
+    """
+    Tests that list_kafka_connections requires a valid license.
+    """
+
+    def __init__(self, test_ctx: TestContext, *args: Any, **kwargs: Any):
+        super().__init__(test_ctx, *args, **kwargs)
+
+    def setUp(self):
+        self.redpanda.set_environment(
+            {"__REDPANDA_DISABLE_BUILTIN_TRIAL_LICENSE": "true"}
+        )
+        super().setUp()
+
+    @cluster(num_nodes=1)
+    def test_without_license(self):
+        admin = AdminV2(self.redpanda)
+        resp = admin.broker().call_list_kafka_connections(
+            broker_pb.ListKafkaConnectionsRequest(node_id=-1)
+        )
+        err = resp.error()
+        assert err is not None, f"expected error response without license, got {err}"
+        assert "license" in err.message, (
+            f"expected license in error message, got {err.message}"
+        )

@@ -11,10 +11,12 @@
 
 #include "redpanda/admin/services/broker.h"
 
+#include "features/feature_table.h"
 #include "kafka/server/connection_context.h"
 #include "kafka/server/server.h"
 #include "proto/redpanda/core/admin/v2/kafka_connections.proto.h"
 #include "redpanda/admin/aip_filter.h"
+#include "serde/protobuf/rpc.h"
 #include "ssx/async_algorithm.h"
 #include "version/version.h"
 
@@ -35,10 +37,12 @@ ss::logger brlog{"admin_api_server/broker_service"};
 broker_service_impl::broker_service_impl(
   admin::proxy::client client,
   std::vector<std::unique_ptr<serde::pb::rpc::base_service>>* services,
-  ss::sharded<kafka::server>& kafka_server)
+  ss::sharded<kafka::server>& kafka_server,
+  ss::sharded<features::feature_table>& feature_table)
   : _proxy_client(std::move(client))
   , _services(services)
-  , _kafka_server(kafka_server) {}
+  , _kafka_server(kafka_server)
+  , _feature_table(feature_table) {}
 
 ss::future<proto::admin::get_broker_response> broker_service_impl::get_broker(
   serde::pb::rpc::context ctx, proto::admin::get_broker_request req) {
@@ -119,6 +123,19 @@ ss::future<connection_gather_result> gather_connections(
     co_return result;
 }
 
+void check_license(const features::feature_table& ft) {
+    if (ft.should_sanction()) {
+        const auto& license = ft.get_license();
+        auto status = [&license]() {
+            return !license.has_value()    ? "not present"
+                   : license->is_expired() ? "expired"
+                                           : "unknown error";
+        };
+        throw serde::pb::rpc::failed_precondition_exception(
+          fmt::format("Invalid license: {}", status()));
+    }
+}
+
 } // namespace
 
 ss::future<proto::admin::list_kafka_connections_response>
@@ -126,6 +143,8 @@ broker_service_impl::list_kafka_connections(
   serde::pb::rpc::context ctx,
   proto::admin::list_kafka_connections_request req) {
     vlog(brlog.trace, "list_kafka_connections: {}", req);
+
+    check_license(_feature_table.local());
 
     // Proxy to the target node id specified in the request
     auto target = model::node_id{req.get_node_id()};
