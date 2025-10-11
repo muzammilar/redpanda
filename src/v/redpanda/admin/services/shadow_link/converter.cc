@@ -849,6 +849,14 @@ create_shadow_link_status(const cluster_link::model::metadata& md) {
     shadow_link_status status;
     status.set_state(convert_link_status(md.state.status));
     status.set_shadow_topic_statuses(create_shadow_topic_statuses(md.state));
+
+    chunked_vector<ss::sstring> properties_synced;
+    auto props = md.configuration.topic_metadata_mirroring_cfg
+                   .get_topic_properties_to_mirror();
+    properties_synced.reserve(props.size());
+    std::ranges::copy(props, std::back_inserter(properties_synced));
+
+    status.set_synced_shadow_topic_properties(std::move(properties_synced));
     return status;
 }
 
