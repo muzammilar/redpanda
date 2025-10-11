@@ -405,6 +405,8 @@ struct topic_metadata_mirroring_config
       = absl::flat_hash_set<ss::sstring, sstring_hash, sstring_eq>;
     /// List of topic properties to mirror
     properties_set topic_properties_to_mirror;
+    /// If set, do not include the default properties
+    bool exclude_default{false};
 
     ss::lowres_clock::duration get_task_interval() const {
         return task_interval.value_or(task_interval_default);
@@ -420,7 +422,8 @@ struct topic_metadata_mirroring_config
           is_enabled,
           task_interval,
           topic_name_filters,
-          topic_properties_to_mirror);
+          topic_properties_to_mirror,
+          exclude_default);
     }
 
     topic_metadata_mirroring_config copy() const;
