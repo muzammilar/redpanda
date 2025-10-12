@@ -206,7 +206,7 @@ class ClusterLinkingTopicSyncingTestBase(ShadowLinkTestBase):
         expected_topics.append(include_specific)
 
         for t in expected_topics:
-            t.replication_factor = self.default_topic_replication
+            t.replication_factor = 3
 
         self.logger.info(
             f"expected_topics: {[{'name': t.name, 'partition_count': t.partition_count, 'replication_factor': t.replication_factor} for t in expected_topics]}"
