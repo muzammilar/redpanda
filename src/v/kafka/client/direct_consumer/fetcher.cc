@@ -541,6 +541,8 @@ fetcher::process_fetch_response(
                 dirty_partitions[topic_data.topic].insert(
                   part_data.partition_id);
             } else {
+                part_data.start_offset = model::offset_cast(
+                  part_response.log_start_offset);
                 part_data.high_watermark = model::offset_cast(
                   part_response.high_watermark);
                 part_data.last_stable_offset = model::offset_cast(

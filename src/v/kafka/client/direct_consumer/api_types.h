@@ -61,6 +61,7 @@ struct topic_assignment {
 struct fetched_partition_data {
     model::partition_id partition_id;
     kafka::leader_epoch leader_epoch;
+    kafka::offset start_offset;
     kafka::offset high_watermark;
     kafka::offset last_stable_offset;
     chunked_vector<model::record_batch> data;
