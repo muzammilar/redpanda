@@ -13,6 +13,8 @@ package network
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/ethtool"
@@ -54,6 +56,104 @@ func GetEffectiveNicConfig(
 	return effectiveConfig, nil
 }
 
+func checkAdditionalFlagsHasCpuset(additionalFlags map[string]string) bool {
+	if _, hasCpuset := additionalFlags["cpuset"]; hasCpuset {
+		return true
+	}
+	return false
+}
+
+func checkHasTunerCliCpuset(cpuMask string, cpuMasks irq.CPUMasks) (bool, error) {
+	allMask, err := cpuMasks.GetAllCpusMask()
+	if err != nil {
+		return false, err
+	}
+	return allMask != cpuMask, nil
+}
+
+func maybeGetSmp(rnc config.RpkNodeConfig, additionalFlags map[string]string) (*int, error) {
+	// Get either from additional flags or from the special rpk.smp config field
+	// Note we don't need to handle the case where both are set as that is already rejected by rpk:start
+	if smpStr, ok := additionalFlags["smp"]; ok {
+		smp, err := strconv.Atoi(smpStr)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse smp value '%s': %w", smpStr, err)
+		}
+		return &smp, nil
+	}
+	return rnc.SMP, nil
+}
+
+func checkHasAcceptableSmp(numOfPUs int, additionalFlags map[string]string, rnc config.RpkNodeConfig) (bool, string, error) {
+	// Handle custom SMP flags
+	smp, err := maybeGetSmp(rnc, additionalFlags)
+	if err != nil {
+		return false, "", err
+	}
+	if smp != nil {
+		// We differentiate between two cases here:
+
+		// smp is slightly lowered, specifically we define "slightly" as lowered
+		// less than amount of potential interrupt cores. This is to still allow
+		// dedicated mode in case where people already lowered smp to give room
+		// to the "OS". Likely in practice.
+		potentialInterruptCores := int(math.Ceil(float64(numOfPUs) / float64(rnc.Tuners.GetCoresPerDedicatedInterruptCore())))
+		if numOfPUs >= *smp && potentialInterruptCores >= (numOfPUs-*smp) {
+			zap.L().Sugar().Debugf("allowing dedicated mode as smp is only slightly lowered - smp: %d, interrupt-cores: %d, num PUs: %d",
+				*smp, potentialInterruptCores, numOfPUs)
+			return true, "", nil
+		}
+
+		// smp is lowered by a larger amount. In this case we disallow dedicated
+		// mode as we are likely not running on a RP-only system
+		reason := fmt.Sprintf("smp: %d, interrupt-cores: %d, num PUs: %d", *smp, potentialInterruptCores, numOfPUs)
+
+		return false, reason, nil
+	}
+
+	return true, "", nil
+}
+
+func canDefaultToDedicatedMode(numOfPUs int, cpuMask string, cpuMasks irq.CPUMasks, rnc config.RpkNodeConfig) (bool, error) {
+	additionalFlags := config.ParseAdditionalStartFlags(rnc.AdditionalStartFlags)
+
+	// Handle a custom cpuset, note this is incredibly unlikely to be the case in
+	// practice as additional_start_flags isn't even documented and it's
+	// unlikely anybody invokes the tuner with a custom cpuset.
+
+	// If a custom cpuset is specified don't bother with defaulting to dedicated
+	// mode. Just going to get it wrong and we are likely not running in a
+	// RP-only environment.
+	if checkAdditionalFlagsHasCpuset(additionalFlags) {
+		zap.L().Sugar().Debugf("additional_start_flags contains cpuset, won't default to dedicated mode")
+		return false, nil
+	}
+
+	// If the user specified a custom cpu-set to the tuner (likely via manual
+	// non-systemd invocation) then we also bail out. We would still get things
+	// right but it's safer to just require explicitly passing the mode in that
+	// case as well.
+	hasTunerCpuset, err := checkHasTunerCliCpuset(cpuMask, cpuMasks)
+	if err != nil {
+		return false, err
+	}
+	if hasTunerCpuset {
+		zap.L().Sugar().Debugf("--cpu-mask passed on the tuner command line, won't default to dedicated mode")
+		return false, nil
+	}
+
+	checkHasAcceptableSmp, reason, err := checkHasAcceptableSmp(numOfPUs, additionalFlags, rnc)
+	if err != nil {
+		return false, err
+	}
+	if !checkHasAcceptableSmp {
+		zap.L().Sugar().Debugf("not defaulting to dedicated mode as smp is not acceptable: %s", reason)
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func GetDefaultMode(
 	nic Nic, cpuMask string, cpuMasks irq.CPUMasks, rnc config.RpkNodeConfig,
 ) (irq.Mode, error) {
@@ -63,11 +163,12 @@ func GetDefaultMode(
 			return "", err
 		}
 
-		// TODO: check
-		//   - no cpuset specified in config
-		//   - --smp is compatible
+		canDoDedicated, err := canDefaultToDedicatedMode(int(numOfPUs), cpuMask, cpuMasks, rnc)
+		if err != nil {
+			return "", err
+		}
 		var mode irq.Mode
-		if numOfPUs >= uint(rnc.Tuners.GetCoresPerDedicatedInterruptCore()) && rnc.Tuners.GetAllowDedicatedInterruptMode() {
+		if numOfPUs >= uint(rnc.Tuners.GetCoresPerDedicatedInterruptCore()) && rnc.Tuners.GetAllowDedicatedInterruptMode() && canDoDedicated {
 			mode = irq.Dedicated
 		} else {
 			mode = irq.Mq
