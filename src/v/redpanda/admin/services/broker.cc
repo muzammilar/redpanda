@@ -103,7 +103,7 @@ ss::future<connection_gather_result> gather_connections(
     auto result = connection_gather_result{};
 
     auto conn_ptrs = server.list_connections();
-    co_await ss::maybe_yield();
+    co_await ss::coroutine::maybe_yield();
 
     co_await ssx::async_for_each(
       conn_ptrs, [&result, limit, &filter](const auto& conn_ptr) {
@@ -184,7 +184,7 @@ broker_service_impl::list_kafka_connections(
         std::ranges::move(
           shard_result.connections, std::back_inserter(result_connections));
 
-        co_await ss::maybe_yield();
+        co_await ss::coroutine::maybe_yield();
     }
 
     resp.set_total_size(total_matching_connections);
