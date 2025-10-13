@@ -48,7 +48,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
         self.topic = self.s3_topic_name
 
         conf = dict(
-            development_enable_cloud_topics=True,
+            cloud_topics_enabled=True,
             enable_cluster_metadata_upload_loop=False,
         )
 

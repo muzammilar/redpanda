@@ -636,7 +636,7 @@ topic_result topics_frontend::validate_topic_configuration(
 
     // the only way that cloud topics can be enabled on a topic is if the cloud
     // topics development feature is also enabled.
-    if (!config::shard_local_cfg().development_enable_cloud_topics()) {
+    if (!config::shard_local_cfg().cloud_topics_enabled()) {
         if (assignable_config.cfg.properties.cloud_topic_enabled) {
             auto msg = ssx::sformat(
               "Cloud topic flag on {} is set but development feature is "

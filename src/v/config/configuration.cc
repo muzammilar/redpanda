@@ -4460,9 +4460,9 @@ configuration::configuration()
       "cluster for data replication.",
       meta{.needs_restart = needs_restart::no, .visibility = visibility::user},
       false)
-  , development_enable_cloud_topics(
+  , cloud_topics_enabled(
       *this,
-      "development_enable_cloud_topics",
+      "cloud_topics_enabled",
       "Enable cloud topics.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       false)

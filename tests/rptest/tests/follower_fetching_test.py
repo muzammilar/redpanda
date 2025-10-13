@@ -69,7 +69,7 @@ class FollowerFetchingTest(PreallocNodesTest):
                 "enable_rack_awareness": True,
                 # disable leader balancer to prevent leaders from moving and causing additional client retries
                 "enable_leader_balancer": False,
-                "development_enable_cloud_topics": True,
+                "cloud_topics_enabled": True,
             },
             si_settings=si_settings,
         )
