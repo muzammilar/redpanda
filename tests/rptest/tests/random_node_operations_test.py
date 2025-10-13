@@ -123,6 +123,7 @@ class RandomNodeOperationsBase(PreallocNodesTest):
                     "cloud_io": "debug",
                     "kafka": "debug",
                     "reconciler": "debug",
+                    "cloud_topics": "debug",
                 },
             ),
             *args,
