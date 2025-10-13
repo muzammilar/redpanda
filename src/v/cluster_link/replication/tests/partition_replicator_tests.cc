@@ -76,6 +76,11 @@ public:
 
     size_t available_memory() const { return _max_memory.current(); }
 
+    std::optional<data_source::source_partition_offsets_report>
+    get_offsets() final {
+        return std::nullopt;
+    }
+
 private:
     std::optional<kafka::offset> _start_offset{};
     kafka::offset _next_to_consume;

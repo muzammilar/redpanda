@@ -98,6 +98,20 @@ remote_partition_source::fetch_next(ss::abort_source& as) {
       .batches = std::move(batches), .units = std::move(units)};
 }
 
+std::optional<data_source::source_partition_offsets_report>
+remote_partition_source::get_offsets() {
+    auto offsets = _consumer.get_source_offsets(_tp);
+    if (!offsets.has_value()) {
+        return std::nullopt;
+    }
+    return data_source::source_partition_offsets_report{
+      .source_start_offset = offsets->log_start_offset,
+      .source_hwm = offsets->high_watermark,
+      .source_lso = offsets->last_stable_offset,
+      .update_time = offsets->last_offset_update_timestamp,
+    };
+}
+
 std::unique_ptr<data_sink>
 local_partition_data_sink_factory::make_sink(const ::model::ntp& ntp) {
     auto partition = _partition_manager.local().get(ntp);

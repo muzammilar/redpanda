@@ -44,6 +44,10 @@ public:
         batches.push_back(std::move(batch));
         co_return data_source::data{std::move(batches), ssx::semaphore_units{}};
     }
+    std::optional<data_source::source_partition_offsets_report>
+    get_offsets() final {
+        return std::nullopt;
+    }
 
 private:
     ss::gate _gate;

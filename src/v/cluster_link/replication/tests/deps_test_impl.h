@@ -39,6 +39,7 @@ public:
     ss::future<> stop() noexcept override;
     ss::future<> reset(kafka::offset) override;
     ss::future<data_source::data> fetch_next(ss::abort_source&) override;
+    std::optional<source_partition_offsets_report> get_offsets() final;
 
 private:
     kafka::offset _next{};

@@ -17,6 +17,9 @@ redpanda_cc_library(
 
 redpanda_cc_library(
     name = "deps",
+    srcs = [
+        "deps.cc",
+    ],
     hdrs = [
         "deps.h",
     ],
@@ -26,6 +29,7 @@ redpanda_cc_library(
         "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/raft",
+        "//src/v/ssx:semaphore",
     ],
 )
 
