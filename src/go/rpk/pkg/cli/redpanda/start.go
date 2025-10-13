@@ -572,7 +572,7 @@ func buildRedpandaFlags(
 	}
 	flagsMap = flagsFromConf(y, flagsMap, flags)
 	finalFlags := mergeMaps(
-		parseFlags(y.Rpk.AdditionalStartFlags),
+		config.ParseAdditionalStartFlags(y.Rpk.AdditionalStartFlags),
 		extraFlags(flags, args),
 	)
 	for n, v := range flagsMap {
@@ -754,54 +754,6 @@ func check(
 	return nil
 }
 
-func parseFlags(flags []string) map[string]string {
-	parsed := map[string]string{}
-	for i := 0; i < len(flags); i++ {
-		f := flags[i]
-		isFlag := strings.HasPrefix(f, "-")
-		trimmed := strings.Trim(f, " -")
-
-		// Filter out elements that aren't flags or are empty.
-		if !isFlag || trimmed == "" {
-			continue
-		}
-
-		// Check if it's in name=value format
-		// Split only into 2 tokens, since some flags can have multiple '='
-		// in them, like --logger-log-level=archival=debug:cloud_storage=debug
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) >= 2 {
-			name := strings.Trim(parts[0], " ")
-			value := strings.Trim(parts[1], ` "`)
-			parsed[name] = value
-			continue
-		}
-		// Otherwise, it can be a boolean flag (i.e. -v) or in
-		// name<space>value format
-
-		if i == len(flags)-1 {
-			// We've reached the last element, so it's a single flag
-			parsed[trimmed] = ""
-			continue
-		}
-
-		// Check if the next element starts with a hyphen
-		// If it does, it's another flag, and the current element is a
-		// boolean flag
-		next := flags[i+1]
-		if strings.HasPrefix(next, "-") {
-			parsed[trimmed] = ""
-			continue
-		}
-
-		// Otherwise, the current element is the name of the flag and
-		// the next one is its value
-		parsed[trimmed] = next
-		i += 1
-	}
-	return parsed
-}
-
 func parseSeeds(seeds []string) ([]config.SeedServer, error) {
 	seedServers := []config.SeedServer{}
 	defaultPort := config.DevDefault().Redpanda.RPCServer.Port
@@ -946,7 +898,7 @@ func stringSliceOr(a, b []string) []string {
 
 // Returns the set of unknown flags passed.
 func extraFlags(flags *pflag.FlagSet, args []string) map[string]string {
-	allFlagsMap := parseFlags(args)
+	allFlagsMap := config.ParseAdditionalStartFlags(args)
 	extra := map[string]string{}
 
 	for k, v := range allFlagsMap {
