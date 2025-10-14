@@ -96,7 +96,7 @@ std::unique_ptr<iceberg::struct_value> build_rp_struct(
             auto header_kv_struct = std::make_unique<iceberg::struct_value>();
             header_kv_struct->fields.emplace_back(
               k ? std::make_optional<iceberg::value>(
-                    iceberg::binary_value(k->copy()))
+                    iceberg::string_value(k->copy()))
                 : std::nullopt);
             header_kv_struct->fields.emplace_back(
               v ? std::make_optional<iceberg::value>(

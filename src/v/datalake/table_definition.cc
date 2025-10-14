@@ -24,7 +24,7 @@ struct_type schemaless_struct_type() {
 
     struct_type headers_kv;
     headers_kv.fields.emplace_back(
-      nested_field::create(7, "key", field_required::no, binary_type{}));
+      nested_field::create(7, "key", field_required::no, string_type{}));
     headers_kv.fields.emplace_back(
       nested_field::create(8, "value", field_required::no, binary_type{}));
     system_fields.fields.emplace_back(
