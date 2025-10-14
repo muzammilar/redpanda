@@ -31,6 +31,30 @@ size_t move_bench() {
     return inner_iters * 2;
 }
 
+template<size_t Size>
+size_t eq_bench() {
+    iobuf a = iobuf::from(random_generators::gen_alphanum_string(Size));
+    iobuf a_shared = a.share();
+    iobuf a_copy = a.copy();
+    iobuf b = iobuf::from(random_generators::gen_alphanum_string(Size));
+    iobuf b_copy;
+    for (const auto& frag : b) {
+        for (char c : std::string_view(frag.get(), frag.size())) {
+            b_copy.append(&c, 1);
+        }
+    }
+    perf_tests::start_measuring_time();
+    for (auto i = inner_iters; i--;) {
+        perf_tests::do_not_optimize(a == a_shared);
+        perf_tests::do_not_optimize(a == a_copy);
+        perf_tests::do_not_optimize(a == b);
+        perf_tests::do_not_optimize(a_copy == b_copy);
+        perf_tests::do_not_optimize(b_copy == b);
+    }
+    perf_tests::stop_measuring_time();
+    return inner_iters * 5;
+}
+
 // This microbench mocks common pattern in Redpanda where smaller iobufs will be
 // parsed out of a larger iobuf then appendded together. This pattern is heavily
 // used in the datalake impl.
@@ -59,6 +83,10 @@ size_t append_bench() {
 PERF_TEST(iobuf, move_bench_small) { return move_bench<71>(); }
 PERF_TEST(iobuf, move_bench_medium) { return move_bench<300_KiB>(); }
 PERF_TEST(iobuf, move_bench_large) { return move_bench<965_KiB>(); }
+
+PERF_TEST(iobuf, eq_bench_small) { return eq_bench<71>(); }
+PERF_TEST(iobuf, eq_bench_medium) { return eq_bench<300_KiB>(); }
+PERF_TEST(iobuf, eq_bench_large) { return eq_bench<965_KiB>(); }
 
 PERF_TEST(iobuf, append_bench_small) { return append_bench<1'000, 4>(); }
 PERF_TEST(iobuf, append_bench_medium) { return append_bench<1'000, 40_KiB>(); }

@@ -106,18 +106,34 @@ bool iobuf::operator==(const iobuf& o) const {
     if (_size != o._size) {
         return false;
     }
-    auto lhs_begin = byte_iterator(cbegin(), cend());
-    auto lhs_end = byte_iterator(cend(), cend());
-    auto rhs = byte_iterator(o.cbegin(), o.cend());
-    auto rhs_end = byte_iterator(o.cend(), o.cend());
-    while (lhs_begin != lhs_end && rhs != rhs_end) {
-        char l = *lhs_begin;
-        char r = *rhs;
-        if (l != r) {
-            return false;
+    // We know these have the same amount of bytes in them, but they might be
+    // chunked differently.
+    auto o_it = o.cbegin();
+    auto other_next_view = [&o, &o_it] -> std::string_view {
+        while (o_it != o.cend() && o_it->is_empty()) {
+            ++o_it;
         }
-        ++lhs_begin;
-        ++rhs;
+        if (o_it == o.cend()) {
+            return {};
+        }
+        std::string_view s{o_it->get(), o_it->size()};
+        ++o_it;
+        return s;
+    };
+    std::string_view rhs = other_next_view();
+    for (const auto& frag : *this) {
+        std::string_view lhs{frag.get(), frag.size()};
+        while (!lhs.empty()) {
+            auto n = std::min(lhs.size(), rhs.size());
+            if (lhs.substr(0, n) != rhs.substr(0, n)) {
+                return false;
+            }
+            lhs.remove_prefix(n);
+            rhs.remove_prefix(n);
+            if (rhs.empty()) {
+                rhs = other_next_view();
+            }
+        }
     }
     return true;
 }
