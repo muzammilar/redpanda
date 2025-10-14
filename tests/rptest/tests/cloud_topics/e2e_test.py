@@ -48,10 +48,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
         self.topic = self.s3_topic_name
 
         conf = dict(
-            enable_developmental_unrecoverable_data_corrupting_features=int(
-                time.time()
-            ),
-            development_enable_cloud_topics=True,
+            cloud_topics_enabled=True,
             enable_cluster_metadata_upload_loop=False,
         )
 
