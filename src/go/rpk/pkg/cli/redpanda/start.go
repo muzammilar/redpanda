@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -459,47 +460,84 @@ func prestart(
 
 // Tries to read the tuner config file and extract the RedpandaCpuset from it.
 // Returns empty string in case no cpuset/file was found.
-func readTunerConfigCpuset(fs afero.Fs, configFilePath string) (string, error) {
+func readTunerConfigCpuset(fs afero.Fs, configFilePath string) (*tuners.CpusetConfig, error) {
 	filePath := network.DefaultNodeTunerStateFile
 	if configFilePath != "" {
 		filePath = configFilePath
 	}
 	exists, err := afero.Exists(fs, filePath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if !exists {
 		if filePath != network.DefaultNodeTunerStateFile {
-			return "", fmt.Errorf("--tuner-config-path specified but file %s not found", filePath)
+			return nil, fmt.Errorf("--tuner-config-path specified but file %s not found", filePath)
 		}
-		return "", nil
+		return nil, nil
 	}
 
 	content, err := afero.ReadFile(fs, filePath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// We allow an empty file to mean no cpuset. k8s will create an empty file
 	// when mounting in FileOrCreate mode and no file on the host exists.
 	if len(content) == 0 {
 		fmt.Println("Net tuner config file found but empty")
-		return "", nil
+		return nil, nil
 	}
 
 	config := tuners.NodeTunerState{}
 	err = yaml.Unmarshal(content, &config)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if config.Cpusets == nil {
 		fmt.Println("Net tuner config file found but no cpusets (v1) section")
-		return "", nil
+		return nil, nil
 	}
 
-	return config.Cpusets.RedpandaCpuset, nil
+	return config.Cpusets, nil
+}
+
+func checkTunerConfigCpusetCompatibilityAndUpdateFlags(
+	finalFlags map[string]string,
+	cpusets *tuners.CpusetConfig,
+) error {
+	if finalFlags[cpuSetFlag] != "" {
+		return errors.New(
+			"cpuset is set both via --cpuset flag and via tuner config file which is incompatible; " +
+				"either use MQ tuner mode or remove the cpuset flag from additional_start_flags",
+		)
+	}
+
+	finalFlags[cpuSetFlag] = cpusets.RedpandaCpuset
+
+	if finalFlags[smpFlag] != "" {
+		wantSmp, err := strconv.Atoi(finalFlags[smpFlag])
+		if err != nil {
+			return fmt.Errorf("unable to parse smp flag value %q: %w", finalFlags[smpFlag], err)
+		}
+
+		// We are lenient in regards to --smp in rpk:start, the system is already tuned so we just need to adapt.
+		// All the hard checks are already done on the tuner side.
+
+		if wantSmp > cpusets.RedpandaCpusetSize {
+			// if the user has --smp configured larger than the cpuset size we
+			// are just lowering it. Otherwise seastar will fail to start. We
+			// know this is the optimal config we have tuned for anyway. This
+			// scenario is likely in cases where people hardcode --smp=N on an N
+			// core machine (the chart helm does this for example).
+
+			fmt.Printf("Lowering smp from %d to tuner config cpuset size %d\n", wantSmp, cpusets.RedpandaCpusetSize)
+			finalFlags[smpFlag] = strconv.Itoa(cpusets.RedpandaCpusetSize)
+		}
+	}
+
+	return nil
 }
 
 func buildRedpandaFlags(
@@ -586,9 +624,12 @@ func buildRedpandaFlags(
 		return nil, fmt.Errorf("failed to read tuner config file: %w", err)
 	}
 
-	if tunerConfigCpuset != "" {
-		sFlags.cpuSet = tunerConfigCpuset
-		fmt.Printf("Using cpuset from tuner config: %s\n", tunerConfigCpuset)
+	if tunerConfigCpuset != nil {
+		err := checkTunerConfigCpusetCompatibilityAndUpdateFlags(finalFlags, tunerConfigCpuset)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("Using cpuset from tuner config: %s\n", tunerConfigCpuset.RedpandaCpuset)
 	}
 
 	return &rp.RedpandaArgs{

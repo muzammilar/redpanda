@@ -18,6 +18,7 @@ import (
 
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/redpanda"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/iotune"
 	"github.com/spf13/afero"
 	"github.com/spf13/pflag"
@@ -83,6 +84,55 @@ func TestParseNamedAuthNAddress(t *testing.T) {
 				return
 			}
 			require.Exactly(st, tt.expected, *res)
+		})
+	}
+}
+
+func TestCheckTunerConfigCpusetCompatibilityAndUpdateFlags(t *testing.T) {
+	tests := []struct {
+		name       string
+		finalFlags map[string]string
+		cpusets    *tuners.CpusetConfig
+		wantErr    bool
+		wantFlags  map[string]string
+	}{
+		{
+			name:       "conflict with existing cpuset flag",
+			finalFlags: map[string]string{cpuSetFlag: "0-1"},
+			cpusets:    &tuners.CpusetConfig{RedpandaCpuset: "0-2", RedpandaCpusetSize: 3},
+			wantErr:    true,
+		},
+		{
+			name:       "sets cpuset when none present",
+			finalFlags: map[string]string{},
+			cpusets:    &tuners.CpusetConfig{RedpandaCpuset: "0-2", RedpandaCpusetSize: 3},
+			wantErr:    false,
+			wantFlags:  map[string]string{cpuSetFlag: "0-2"},
+		},
+		{
+			name:       "lowers smp when larger than cpuset size",
+			finalFlags: map[string]string{smpFlag: "4"},
+			cpusets:    &tuners.CpusetConfig{RedpandaCpuset: "0-2", RedpandaCpusetSize: 3},
+			wantErr:    false,
+			wantFlags:  map[string]string{cpuSetFlag: "0-2", smpFlag: "3"},
+		},
+		{
+			name:       "smp parse error",
+			finalFlags: map[string]string{smpFlag: "notanint"},
+			cpusets:    &tuners.CpusetConfig{RedpandaCpuset: "0-2", RedpandaCpusetSize: 3},
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkTunerConfigCpusetCompatibilityAndUpdateFlags(tt.finalFlags, tt.cpusets)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantFlags, tt.finalFlags)
 		})
 	}
 }
