@@ -125,6 +125,12 @@ mux_remote_consumer::fetch(
     co_return co_await it->second->fetch(as);
 }
 
+std::optional<kafka::client::source_partition_offsets>
+mux_remote_consumer::get_source_offsets(
+  const ::model::topic_partition& tp) const {
+    return _consumer->get_source_offsets(tp);
+}
+
 ss::future<> mux_remote_consumer::assign_pending_partitions() {
     if (_pending_assignment.empty()) {
         co_return;
