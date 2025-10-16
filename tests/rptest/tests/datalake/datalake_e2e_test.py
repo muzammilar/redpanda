@@ -276,12 +276,12 @@ AVRO_SCHEMA_TEST_CASES = {
         expected_trino=[
             ("number", "bigint", "", ""),
             ("timestamp_us", "timestamp(6)", "", ""),
-            ("optional_long", "row(union_opt_1 bigint)", "", ""),
+            ("optional_long", "bigint", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
             ("timestamp_us", "timestamp_ntz", None),
-            ("optional_long", "struct<union_opt_1:bigint>", None),
+            ("optional_long", "bigint", None),
             ("", "", ""),
             ("# Partitioning", "", ""),
             ("Part 0", "hours(redpanda.timestamp)", ""),

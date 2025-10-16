@@ -12,6 +12,7 @@
 
 #include "bytes/iobuf_parser.h"
 #include "iceberg/avro_decimal.h"
+#include "iceberg/conversion/avro_utils.h"
 #include "serde/avro/parser.h"
 
 #include <seastar/core/coroutine.hh>
@@ -188,7 +189,17 @@ struct parsed_msg_visitor {
     ss::future<optional_value_outcome>
     operator()(serde::avro::parsed::avro_union v) {
         // union is represented as a struct with all possible types but only one
-        // present
+        // present. if the union follows the "optional" pattern, flatten the
+        // taken branch into either an instance of the non-null alternative or
+        // nullopt
+        if (auto opt = iceberg::maybe_flatten_union(node); opt.has_value()) {
+            if (node->leafAt(v.branch) == opt.value()) {
+                co_return co_await avro_parsed_to_value(
+                  std::move(v.message), opt.value());
+            }
+            co_return std::nullopt;
+        }
+
         auto ret = std::make_unique<iceberg::struct_value>();
         ret->fields.reserve(node->leaves());
         for (size_t i = 0; i < node->leaves(); ++i) {

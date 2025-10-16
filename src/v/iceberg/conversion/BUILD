@@ -51,6 +51,9 @@ redpanda_cc_library(
     hdrs = [
         "schema_avro.h",
     ],
+    implementation_deps = [
+        ":avro_utils",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":conversion_outcome",
@@ -100,6 +103,7 @@ redpanda_cc_library(
     srcs = ["values_avro.cc"],
     hdrs = ["values_avro.h"],
     implementation_deps = [
+        ":avro_utils",
         "//src/v/bytes:iobuf",
         "//src/v/bytes:iobuf_parser",
         "//src/v/iceberg:avro_decimal",
