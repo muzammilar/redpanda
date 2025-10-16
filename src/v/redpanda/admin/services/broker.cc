@@ -93,30 +93,57 @@ proto::admin::broker broker_service_impl::self_broker() const {
 
 namespace {
 
+struct connection_collector {
+    virtual ~connection_collector() = default;
+    virtual void add(proto::kafka_connection conn) = 0;
+    virtual chunked_vector<proto::kafka_connection> extract() && = 0;
+    virtual size_t size() const = 0;
+};
+
+class unordered_collector : public connection_collector {
+    chunked_vector<proto::kafka_connection> _connections;
+    size_t _limit;
+
+public:
+    explicit unordered_collector(size_t limit)
+      : _limit(limit) {}
+
+    void add(proto::kafka_connection conn) final {
+        if (_connections.size() < _limit) {
+            _connections.emplace_back(std::move(conn));
+        }
+    }
+
+    chunked_vector<proto::kafka_connection> extract() && final {
+        return std::move(_connections);
+    }
+
+    size_t size() const final { return _connections.size(); }
+};
+
 struct connection_gather_result {
     chunked_vector<proto::kafka_connection> connections;
     size_t total_matching_count;
 };
 
 ss::future<connection_gather_result> gather_connections(
-  const kafka::server& server, size_t limit, const filter_predicate& filter) {
+  const kafka::server& server,
+  const filter_predicate& filter,
+  ss::shared_ptr<connection_collector> collector) {
     auto result = connection_gather_result{};
 
     auto conn_ptrs = server.list_connections();
     co_await ss::coroutine::maybe_yield();
 
-    auto process_conn =
-      [&result, limit, &filter](proto::admin::kafka_connection&& conn_proto) {
-          bool matches_filter = filter(conn_proto);
+    auto process_conn = [&result, &collector, &filter](
+                          proto::admin::kafka_connection&& conn_proto) {
+        bool matches_filter = filter(conn_proto);
 
-          if (matches_filter) {
-              result.total_matching_count++;
-
-              if (result.connections.size() < limit) {
-                  result.connections.emplace_back(std::move(conn_proto));
-              }
-          }
-      };
+        if (matches_filter) {
+            result.total_matching_count++;
+            collector->add(std::move(conn_proto));
+        }
+    };
 
     co_await ssx::async_for_each(
       conn_ptrs, [&process_conn](const auto& conn_ptr) {
@@ -130,7 +157,37 @@ ss::future<connection_gather_result> gather_connections(
         process_conn(std::move(elem_copy));
     }
 
+    result.connections = std::move(*collector).extract();
     co_return result;
+}
+
+ss::future<size_t> gather_all_shards(
+  ss::sharded<kafka::server>& kafka_server,
+  const filter_predicate& filter,
+  const auto& make_local_collector,
+  connection_collector& global_collector) {
+    size_t total_matching_connections = 0;
+
+    for (ss::shard_id shard = 0; shard < ss::smp::count; ++shard) {
+        auto accumulated_count = global_collector.size();
+        auto shard_result = co_await kafka_server.invoke_on(
+          shard,
+          [accumulated_count, &filter, &make_local_collector](
+            kafka::server& server) {
+              return gather_connections(
+                server, filter, make_local_collector(accumulated_count));
+          });
+
+        total_matching_connections += shard_result.total_matching_count;
+
+        for (auto& conn : shard_result.connections) {
+            global_collector.add(std::move(conn));
+        }
+
+        co_await ss::coroutine::maybe_yield();
+    }
+
+    co_return total_matching_connections;
 }
 
 void check_license(const features::feature_table& ft) {
@@ -175,30 +232,17 @@ broker_service_impl::list_kafka_connections(
       req.get_filter());
     auto filter = aip_filter_parser::create_aip_filter(std::move(filter_cfg));
 
-    // Iterate across shards sequentially to bound memory usage while
-    // calculating total size
-    auto result_connections = chunked_vector<proto::kafka_connection>{};
-    auto total_matching_connections = size_t{0};
+    auto global_collector = unordered_collector{limit};
 
-    for (ss::shard_id shard = 0; shard < ss::smp::count; ++shard) {
-        // Get connections from this shard with the remaining limit
-        auto remaining_limit = limit - result_connections.size();
-        auto shard_result = co_await _kafka_server.invoke_on(
-          shard,
-          [remaining_limit, &filter](
-            kafka::server& server) -> ss::future<connection_gather_result> {
-              return gather_connections(server, remaining_limit, filter);
-          });
+    auto make_local_collector = [limit](size_t accumulated_count) {
+        return ss::make_shared<unordered_collector>(limit - accumulated_count);
+    };
 
-        total_matching_connections += shard_result.total_matching_count;
-        std::ranges::move(
-          shard_result.connections, std::back_inserter(result_connections));
+    auto total_matching_connections = co_await gather_all_shards(
+      _kafka_server, filter, make_local_collector, global_collector);
 
-        co_await ss::coroutine::maybe_yield();
-    }
-
+    resp.set_connections(std::move(global_collector).extract());
     resp.set_total_size(total_matching_connections);
-    resp.set_connections(std::move(result_connections));
 
     vlog(
       brlog.trace,
