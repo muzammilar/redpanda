@@ -62,7 +62,7 @@ namespace cloud_topics {
 class level_one_log_reader_impl : public model::record_batch_reader::impl {
 public:
     level_one_log_reader_impl(
-      cloud_topic_log_reader_config& cfg,
+      const cloud_topic_log_reader_config& cfg,
       model::ntp ntp,
       model::topic_id_partition tidp,
       l1::metastore* metastore,

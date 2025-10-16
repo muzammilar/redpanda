@@ -299,13 +299,13 @@ frontend::ntp_to_topic_id_partition(const model::ntp& ntp) const {
 }
 
 std::unique_ptr<model::record_batch_reader::impl>
-frontend::make_l0_reader(cloud_topic_log_reader_config& cfg) const {
+frontend::make_l0_reader(const cloud_topic_log_reader_config& cfg) const {
     return std::make_unique<level_zero_log_reader_impl>(
       cfg, _partition, _data_plane);
 }
 
 std::unique_ptr<model::record_batch_reader::impl>
-frontend::make_l1_reader(cloud_topic_log_reader_config& cfg) const {
+frontend::make_l1_reader(const cloud_topic_log_reader_config& cfg) const {
     auto ct_state = _partition->get_cloud_topics_state();
     auto l1_metastore = ct_state->local().get_l1_metastore();
     auto l1_io = ct_state->local().get_l1_io();

@@ -36,7 +36,7 @@ ss::future<> level_one_log_reader_impl::close_reader_safe(
 }
 
 level_one_log_reader_impl::level_one_log_reader_impl(
-  cloud_topic_log_reader_config& cfg,
+  const cloud_topic_log_reader_config& cfg,
   model::ntp ntp,
   model::topic_id_partition tidp,
   l1::metastore* metastore,

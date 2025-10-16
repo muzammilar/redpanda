@@ -25,7 +25,7 @@
 namespace cloud_topics {
 
 level_zero_log_reader_impl::level_zero_log_reader_impl(
-  cloud_topic_log_reader_config& cfg,
+  const cloud_topic_log_reader_config& cfg,
   ss::lw_shared_ptr<cluster::partition> ctp,
   data_plane_api* ct_api)
   : _config(cfg)
