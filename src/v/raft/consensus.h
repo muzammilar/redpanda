@@ -880,7 +880,7 @@ private:
     /// used for votes only. heartbeats are done by heartbeat_manager
     timer_type _vote_timeout;
 
-    /// used for keepint tally on followers
+    /// used for keeping tally on followers
     follower_stats _fstats;
 
     replicate_batcher _batcher;
