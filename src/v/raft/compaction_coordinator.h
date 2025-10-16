@@ -179,5 +179,13 @@ private:
     bool _need_force_update{false};
 
     bool _started{false};
+
+public:
+    struct test_accessor {
+        static clock_t::duration
+        mcco_getting_delay(const compaction_coordinator& coco);
+
+        static clock_t::duration mtro_distribution_delay();
+    };
 };
 } // namespace raft

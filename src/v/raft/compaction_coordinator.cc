@@ -420,4 +420,15 @@ void compaction_coordinator::arm_timer_if_needed(bool jitter_only) {
     _timer.arm(duration);
 }
 
+compaction_coordinator::clock_t::duration
+compaction_coordinator::test_accessor::mcco_getting_delay(
+  const compaction_coordinator& coco) {
+    return coco._jitter.base_duration() + coco._jitter.jitter_duration();
+}
+
+compaction_coordinator::clock_t::duration
+compaction_coordinator::test_accessor::mtro_distribution_delay() {
+    return compaction_coordinator::mtro_send_delay;
+}
+
 } // namespace raft
