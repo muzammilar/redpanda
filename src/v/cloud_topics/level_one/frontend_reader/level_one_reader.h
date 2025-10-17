@@ -97,15 +97,23 @@ private:
     ss::future<std::optional<current_object>> lookup_object_for_offset(
       kafka::offset, model::timeout_clock::time_point deadline);
 
-    ss::future<> materialize_batches(model::timeout_clock::time_point deadline);
+    ss::future<chunked_circular_buffer<model::record_batch>>
+    materialize_batches(model::timeout_clock::time_point deadline);
+
+    /*
+     * Return batches from the reader's current position until the next
+     * partition or the end of the object is reached. The set of batches
+     * returned may further be limited by restrictions (e.g. byte limit)
+     * imposed by the reader configuration.
+     */
+    ss::future<chunked_circular_buffer<model::record_batch>>
+    read_batches(l1::object_reader& reader);
 
     void consume_materialized_batches(
       chunked_circular_buffer<model::record_batch>* dest);
 
     ss::future<l1::footer>
     read_footer(l1::object_id oid, size_t footer_pos, size_t object_size);
-
-    ss::future<> read_batches(l1::object_reader& reader);
 
     bool is_over_limit(size_t size) const;
 

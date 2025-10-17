@@ -77,7 +77,7 @@ level_one_log_reader_impl::do_load_slice(
         }
             [[fallthrough]];
         case state::ready:
-            co_await materialize_batches(deadline);
+            _batches = co_await materialize_batches(deadline);
             [[fallthrough]];
         case state::materialized:
         case state::end_of_stream:
@@ -250,8 +250,10 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
     co_return std::get<l1::footer>(std::move(footer_result));
 }
 
-ss::future<>
+ss::future<chunked_circular_buffer<model::record_batch>>
 level_one_log_reader_impl::read_batches(l1::object_reader& reader) {
+    chunked_circular_buffer<model::record_batch> batches;
+
     while (true) {
         auto result = co_await reader.read_next();
 
@@ -276,15 +278,18 @@ level_one_log_reader_impl::read_batches(l1::object_reader& reader) {
             _config.bytes_consumed += batch_size;
 
             // If we make it past all that, emit the batch.
-            _batches.push_back(std::move(batch));
+            batches.push_back(std::move(batch));
         } else {
             // End of data.
             break;
         }
     }
+
+    co_return batches;
 }
 
-ss::future<> level_one_log_reader_impl::materialize_batches(
+ss::future<chunked_circular_buffer<model::record_batch>>
+level_one_log_reader_impl::materialize_batches(
   model::timeout_clock::time_point /*deadline*/) {
     // Could be EOS because there are no more objects, but
     // there should never be materialized batches remaining.
@@ -293,7 +298,7 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
       "Materialize batches called with batches already materialized");
 
     if (_state == state::end_of_stream) {
-        co_return;
+        co_return chunked_circular_buffer<model::record_batch>{};
     }
 
     vassert(
@@ -316,7 +321,7 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
           "No data in object {}: materializing 0 batches",
           _current_obj->oid);
         _state = state::materialized;
-        co_return;
+        co_return chunked_circular_buffer<model::record_batch>{};
     }
 
     l1::object_extent extent{
@@ -376,7 +381,9 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
       "Materialized {} batches from L1 object {}",
       _batches.size(),
       _current_obj->oid);
+
     _state = state::materialized;
+    co_return read_fut.get();
 }
 
 void level_one_log_reader_impl::consume_materialized_batches(
