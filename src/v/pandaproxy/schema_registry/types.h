@@ -491,8 +491,6 @@ struct subject_version_entry {
     schema_version version;
     schema_id id;
     is_deleted deleted{is_deleted::no};
-
-    std::vector<seq_marker> written_at;
 };
 
 enum class compatibility_level {
