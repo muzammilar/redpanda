@@ -21,6 +21,7 @@ redpanda_cc_library(
         "//src/v/config",
         "//src/v/model",
         "//src/v/model:timeout_clock",
+        "//src/v/utils:prefix_logger",
         "//src/v/utils:retry_chain_node",
         "@seastar",
     ],

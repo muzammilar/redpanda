@@ -25,20 +25,18 @@
 
 namespace cloud_topics {
 
-static ss::future<>
-close_reader_safe(std::unique_ptr<l1::object_reader>& reader) {
+ss::future<> level_one_log_reader_impl::close_reader_safe(
+  std::unique_ptr<l1::object_reader>& reader) {
     try {
         co_await reader->close();
     } catch (const std::exception& e) {
         vlog(
-          cd_log.warn,
-          "Exception while closing L1 object reader: {}",
-          e.what());
+          _log.warn, "Exception while closing L1 object reader: {}", e.what());
     }
 }
 
 level_one_log_reader_impl::level_one_log_reader_impl(
-  cloud_topic_log_reader_config& cfg,
+  const cloud_topic_log_reader_config& cfg,
   model::ntp ntp,
   model::topic_id_partition tidp,
   l1::metastore* metastore,
@@ -48,7 +46,10 @@ level_one_log_reader_impl::level_one_log_reader_impl(
   , _tidp(tidp)
   , _next_offset(cfg.start_offset)
   , _metastore(metastore)
-  , _io(io_interface) {}
+  , _io(io_interface)
+  , _log(cd_log, fmt::format("[{}/{}/{}]", fmt::ptr(this), _ntp, _tidp)) {
+    vlog(_log.debug, "New reader created {}", _config);
+}
 
 ss::future<model::record_batch_reader::storage_t>
 level_one_log_reader_impl::do_load_slice(
@@ -103,23 +104,17 @@ ss::future<> level_one_log_reader_impl::fetch_metadata(
 
     if (_next_offset > _config.max_offset) {
         vlog(
-          cd_log.debug,
-          "L1 reader next_offset {} > max_offset {} for {} ({}): ending "
+          _log.debug,
+          "L1 reader next_offset {} > max_offset {}: ending "
           "stream",
           _next_offset,
-          _config.max_offset,
-          _ntp,
-          _tidp);
+          _config.max_offset);
         _state = state::end_of_stream;
         co_return;
     }
 
     if (is_over_limit(0)) {
-        vlog(
-          cd_log.debug,
-          "L1 reader over byte budget for {} ({}): ending stream",
-          _ntp,
-          _tidp);
+        vlog(_log.debug, "L1 reader over byte budget: ending stream");
         _state = state::end_of_stream;
         co_return;
     }
@@ -140,48 +135,31 @@ ss::future<> level_one_log_reader_impl::fetch_metadata(
         switch (response.error()) {
         case l1::metastore::errc::out_of_range:
             vlog(
-              cd_log.debug,
-              "No L1 objects found for {} ({}) at offset {} or later",
-              _ntp,
-              _tidp,
+              _log.debug,
+              "No L1 objects found at offset {} or later",
               _next_offset);
             _state = state::end_of_stream;
             co_return;
         case l1::metastore::errc::missing_ntp:
-            vlog(
-              cd_log.debug,
-              "Partition {} ({}) not tracked in metastore",
-              _ntp,
-              _tidp);
+            vlog(_log.debug, "Partition not tracked in metastore");
             _state = state::end_of_stream;
             co_return;
         default:
             vlog(
-              cd_log.error,
-              "Failed to query metastore for {} ({}) offset {}: {}",
-              _ntp,
-              _tidp,
+              _log.error,
+              "Failed to query metastore offset {}: {}",
               _next_offset,
               response.error());
             _state = state::end_of_stream;
-            throw std::runtime_error(
-              fmt::format(
-                "Metastore query failed for {} ({}) offset {}: {}",
-                _ntp,
-                _tidp,
-                _next_offset,
-                response.error()));
+            throw std::runtime_error(_log.format(
+              "Metastore query failed offset {}: {}",
+              _next_offset,
+              response.error()));
         }
     }
 
     auto& obj = response.value();
-    vlog(
-      cd_log.debug,
-      "Found L1 object {} for {} ({}) at offset {}",
-      obj.oid,
-      _ntp,
-      _tidp,
-      _next_offset);
+    vlog(_log.debug, "Found L1 object {} at offset {}", obj.oid, _next_offset);
 
     auto footer = co_await read_footer(
       obj.oid, obj.footer_pos, obj.object_size);
@@ -212,7 +190,7 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
     if (read_fut.failed()) {
         auto ex = read_fut.get_exception();
         vlog(
-          cd_log.error,
+          _log.error,
           "Exception opening stream for footer from object {} (pos {} object "
           "size {}): {}",
           oid,
@@ -225,19 +203,18 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
     auto read_result = read_fut.get();
     if (!read_result.has_value()) {
         vlog(
-          cd_log.error,
+          _log.error,
           "Failed to read footer from object {} (pos {} object size {}): {}",
           oid,
           extent.position,
           object_size,
           std::to_underlying(read_result.error()));
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to read footer from object {} (pos {} size {}): {}",
-            oid,
-            extent.position,
-            object_size,
-            std::to_underlying(read_result.error())));
+        throw std::runtime_error(_log.format(
+          "Failed to read footer from object {} (pos {} size {}): {}",
+          oid,
+          extent.position,
+          object_size,
+          std::to_underlying(read_result.error())));
     }
 
     // Parse the footer - we have the complete footer so this should succeed.
@@ -246,18 +223,17 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
 
     if (!std::holds_alternative<l1::footer>(footer_result)) {
         vlog(
-          cd_log.error,
+          _log.error,
           "Failed to parse footer from object {} despite reading complete "
           "footer (pos {} object size {})",
           oid,
           extent.position,
           object_size);
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to parse footer from object {} (pos {} size {})",
-            oid,
-            extent.position,
-            object_size));
+        throw std::runtime_error(_log.format(
+          "Failed to parse footer from object {} (pos {} size {})",
+          oid,
+          extent.position,
+          object_size));
     }
 
     co_return std::get<l1::footer>(std::move(footer_result));
@@ -325,10 +301,8 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
         // Perhaps this object spans offsets in the metastore but has
         // no data because of compaction.
         vlog(
-          cd_log.debug,
-          "No data for {} ({}) in object {}: materializing 0 batches",
-          _ntp,
-          _tidp,
+          _log.debug,
+          "No data in object {}: materializing 0 batches",
           _current_obj->oid);
         _state = state::materialized;
         co_return;
@@ -348,11 +322,9 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
     if (stream_fut.failed()) {
         auto ex = stream_fut.get_exception();
         vlog(
-          cd_log.error,
-          "Exception opening stream for L1 object {} for {} ({}): {}",
+          _log.error,
+          "Exception opening stream for L1 object {}: {}",
           _current_obj->oid,
-          _ntp,
-          _tidp,
           ex);
         _state = state::end_of_stream;
         std::rethrow_exception(ex);
@@ -360,20 +332,15 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
     auto stream_result = stream_fut.get();
     if (!stream_result.has_value()) {
         vlog(
-          cd_log.error,
-          "Failed to open stream for L1 object {} for {} ({}): {}",
+          _log.error,
+          "Failed to open stream for L1 object {}: {}",
           _current_obj->oid,
-          _ntp,
-          _tidp,
           std::to_underlying(stream_result.error()));
         _state = state::end_of_stream;
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to open stream for L1 object {} for {} ({}): {}",
-            _current_obj->oid,
-            _ntp,
-            _tidp,
-            std::to_underlying(stream_result.error())));
+        throw std::runtime_error(_log.format(
+          "Failed to open stream for L1 object {}: {}",
+          _current_obj->oid,
+          std::to_underlying(stream_result.error())));
     }
 
     auto reader = l1::object_reader::create(std::move(stream_result).value());
@@ -381,11 +348,9 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
     if (read_fut.failed()) {
         auto ex = read_fut.get_exception();
         vlog(
-          cd_log.error,
-          "Exception reading L1 object {} for {} ({}): {}",
+          _log.error,
+          "Exception reading L1 object {}: {}",
           _current_obj->oid,
-          _ntp,
-          _tidp,
           ex);
         co_await close_reader_safe(reader);
         _state = state::end_of_stream;
@@ -396,23 +361,16 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
 
     // Note that it's possible to materialize zero batches.
     vlog(
-      cd_log.debug,
-      "Materialized {} batches from L1 object {} for {} ({})",
+      _log.debug,
+      "Materialized {} batches from L1 object {}",
       _batches.size(),
-      _current_obj->oid,
-      _ntp,
-      _tidp);
+      _current_obj->oid);
     _state = state::materialized;
 }
 
 void level_one_log_reader_impl::consume_materialized_batches(
   chunked_circular_buffer<model::record_batch>* dest) {
-    vlog(
-      cd_log.debug,
-      "Consuming {} materialized batches for {} ({})",
-      _batches.size(),
-      _ntp,
-      _tidp);
+    vlog(_log.debug, "Consuming {} materialized batches", _batches.size());
 
     dest->swap(_batches);
 

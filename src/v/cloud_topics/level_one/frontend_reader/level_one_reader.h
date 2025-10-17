@@ -15,6 +15,7 @@
 #include "cloud_topics/level_one/metastore/metastore.h"
 #include "cloud_topics/log_reader_config.h"
 #include "model/record_batch_reader.h"
+#include "utils/prefix_logger.h"
 
 namespace cloud_topics {
 
@@ -61,7 +62,7 @@ namespace cloud_topics {
 class level_one_log_reader_impl : public model::record_batch_reader::impl {
 public:
     level_one_log_reader_impl(
-      cloud_topic_log_reader_config& cfg,
+      const cloud_topic_log_reader_config& cfg,
       model::ntp ntp,
       model::topic_id_partition tidp,
       l1::metastore* metastore,
@@ -103,6 +104,8 @@ private:
 
     bool is_over_limit(size_t size) const;
 
+    ss::future<> close_reader_safe(std::unique_ptr<l1::object_reader>&);
+
     state _state{state::empty};
 
     // Current object being processed.
@@ -118,6 +121,7 @@ private:
     kafka::offset _next_offset;
     l1::metastore* _metastore;
     l1::io* _io;
+    prefix_logger _log;
 };
 
 } // namespace cloud_topics
