@@ -18,7 +18,7 @@
 
 namespace compaction {
 
-bool is_compactible_control_batch(
+bool is_removable_control_batch(
   const model::ntp& ntp, const model::record_batch_type batch_type) {
     // Control batches in consumer offsets are special compared to
     // the ones in data partitions can be safely compacted away.
@@ -44,9 +44,9 @@ bool is_filterable(model::record_batch_type t) {
     return n == 0;
 }
 
-bool is_compactible(
-  const model::ntp& ntp, const model::record_batch_header& h) {
-    if (h.attrs.is_control() && !is_compactible_control_batch(ntp, h.type)) {
+bool is_compactible(const model::record_batch_header& h) {
+    // Control batches are filterable but not compactible.
+    if (h.attrs.is_control()) {
         return false;
     }
     return is_filterable(h.type);

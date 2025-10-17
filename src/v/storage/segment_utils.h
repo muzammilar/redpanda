@@ -323,8 +323,7 @@ inline bool can_discard(
   const model::record& r,
   const model::ntp& ntp,
   bool past_tombstone_delete_horizon) {
-    // Compactible control batches are always removable
-    if (compaction::is_compactible_control_batch(ntp, b.header().type)) {
+    if (compaction::is_removable_control_batch(ntp, b.header().type)) {
         return true;
     }
 

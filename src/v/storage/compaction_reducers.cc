@@ -307,7 +307,7 @@ ss::future<ss::stop_iteration> copy_data_segment_reducer::filter_and_append(
     auto batch = std::move(maybe_batch.value());
     const auto records_to_remove = record_count_before - batch.record_count();
     _stats.records_discarded += records_to_remove;
-    bool compactible_batch = compaction::is_compactible(_ntp, batch.header());
+    bool compactible_batch = compaction::is_compactible(batch.header());
     if (!compactible_batch) {
         ++_stats.non_compactible_batches;
     }
@@ -438,7 +438,7 @@ bool tx_reducer::can_discard_consumer_offsets_batch(
     // committed data has already been rewritten as separate raft_data
     // batches, so no need to retain originally written group_prepare_tx
     // batches while the transaction is in progress.
-    return compaction::is_compactible_control_batch(_ntp, b.header().type);
+    return compaction::is_removable_control_batch(_ntp, b.header().type);
 }
 
 ss::future<ss::stop_iteration> tx_reducer::operator()(model::record_batch&& b) {
