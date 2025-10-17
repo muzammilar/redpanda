@@ -207,13 +207,12 @@ class NetTunerTest(RedpandaTest):
                 assert line.endswith("true"), f"NIC check failed: {line}"
 
     def _test_tune_net_mq(self, expected_interrupt_setup: ExpectedInterruptSetup):
-        # Create an empty dummy file. This should be deleted by the tuner
-        self.redpanda.nodes[0].account.ssh(f"sudo touch {NET_TUNER_CONFIG_FILE_PATH}")
+        # Create a dummy file. This should be emptied by the tuner
+        self.redpanda.nodes[0].account.ssh(f"echo 123 > {NET_TUNER_CONFIG_FILE_PATH}")
         self.rpk.tune("net")
-        self.redpanda.nodes[0].account.ssh(f"test ! -e {NET_TUNER_CONFIG_FILE_PATH}")
+        self.redpanda.nodes[0].account.ssh(f"test ! -s {NET_TUNER_CONFIG_FILE_PATH}")
 
-        # Create it again. It should be ignored by rpk start as it's empty
-        self.redpanda.nodes[0].account.ssh(f"sudo touch {NET_TUNER_CONFIG_FILE_PATH}")
+        # rpk start should ignore the empty file
         self.start_rp()
 
         self._test_interrupt_config(self.node, self.rpk, expected_interrupt_setup)
