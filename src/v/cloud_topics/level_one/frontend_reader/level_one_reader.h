@@ -97,8 +97,14 @@ private:
     ss::future<std::optional<current_object>> lookup_object_for_offset(
       kafka::offset, model::timeout_clock::time_point deadline);
 
+    /*
+     * Materialize batches from the L1 object starting from the given offset.
+     */
     ss::future<chunked_circular_buffer<model::record_batch>>
-    materialize_batches(model::timeout_clock::time_point deadline);
+    materialize_batches_from_object_offset(
+      const current_object&,
+      kafka::offset,
+      model::timeout_clock::time_point deadline);
 
     /*
      * Return batches from the reader's current position until the next

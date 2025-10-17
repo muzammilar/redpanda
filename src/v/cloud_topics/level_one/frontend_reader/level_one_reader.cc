@@ -80,7 +80,11 @@ level_one_log_reader_impl::do_load_slice(
             if (_state == state::end_of_stream) {
                 break;
             }
-            _batches = co_await materialize_batches(deadline);
+            vassert(
+              _current_obj.has_value(),
+              "Expected to have current object in ready state");
+            _batches = co_await materialize_batches_from_object_offset(
+              _current_obj.value(), _next_offset, deadline);
             _state = state::materialized;
             [[fallthrough]];
         case state::materialized:
@@ -293,7 +297,9 @@ level_one_log_reader_impl::read_batches(l1::object_reader& reader) {
 }
 
 ss::future<chunked_circular_buffer<model::record_batch>>
-level_one_log_reader_impl::materialize_batches(
+level_one_log_reader_impl::materialize_batches_from_object_offset(
+  const current_object& object,
+  kafka::offset offset,
   model::timeout_clock::time_point /*deadline*/) {
     // Could be EOS because there are no more objects, but
     // there should never be materialized batches remaining.
@@ -306,25 +312,20 @@ level_one_log_reader_impl::materialize_batches(
       "Invalid state to materialize batches: {}",
       std::to_underlying(_state));
 
-    // I wish I had ADTs to enforce these invariants...
-    vassert(
-      _current_obj.has_value(),
-      "Expected to have current object in ready state");
-
-    auto seek_res = _current_obj->footer.file_position_before_kafka_offset(
-      _tidp, _next_offset);
+    auto seek_res = object.footer.file_position_before_kafka_offset(
+      _tidp, offset);
     if (seek_res == l1::footer::npos) {
         // Perhaps this object spans offsets in the metastore but has
         // no data because of compaction.
         vlog(
           _log.debug,
           "No data in object {}: materializing 0 batches",
-          _current_obj->oid);
+          object.oid);
         co_return chunked_circular_buffer<model::record_batch>{};
     }
 
     l1::object_extent extent{
-      .id = _current_obj->oid,
+      .id = object.oid,
       .position = seek_res.file_position,
       .size = seek_res.length,
     };
@@ -339,7 +340,7 @@ level_one_log_reader_impl::materialize_batches(
         vlog(
           _log.error,
           "Exception opening stream for L1 object {}: {}",
-          _current_obj->oid,
+          object.oid,
           ex);
         std::rethrow_exception(ex);
     }
@@ -348,11 +349,11 @@ level_one_log_reader_impl::materialize_batches(
         vlog(
           _log.error,
           "Failed to open stream for L1 object {}: {}",
-          _current_obj->oid,
+          object.oid,
           std::to_underlying(stream_result.error()));
         throw std::runtime_error(_log.format(
           "Failed to open stream for L1 object {}: {}",
-          _current_obj->oid,
+          object.oid,
           std::to_underlying(stream_result.error())));
     }
 
@@ -360,11 +361,7 @@ level_one_log_reader_impl::materialize_batches(
     auto read_fut = co_await ss::coroutine::as_future(read_batches(*reader));
     if (read_fut.failed()) {
         auto ex = read_fut.get_exception();
-        vlog(
-          _log.error,
-          "Exception reading L1 object {}: {}",
-          _current_obj->oid,
-          ex);
+        vlog(_log.error, "Exception reading L1 object {}: {}", object.oid, ex);
         co_await close_reader_safe(reader);
         std::rethrow_exception(ex);
     }
@@ -376,7 +373,7 @@ level_one_log_reader_impl::materialize_batches(
       _log.debug,
       "Materialized {} batches from L1 object {}",
       _batches.size(),
-      _current_obj->oid);
+      object.oid);
 
     co_return read_fut.get();
 }
