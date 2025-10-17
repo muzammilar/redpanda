@@ -9,10 +9,8 @@
  */
 #include "cloud_topics/level_one/frontend_reader/level_one_reader.h"
 
-#include "bytes/iostream.h"
 #include "cloud_topics/level_one/metastore/retry.h"
 #include "cloud_topics/logger.h"
-#include "config/configuration.h"
 #include "model/fundamental.h"
 #include "model/timeout_clock.h"
 #include "utils/retry_chain_node.h"
@@ -20,7 +18,6 @@
 #include <seastar/coroutine/as_future.hh>
 
 #include <exception>
-#include <iterator>
 #include <utility>
 
 namespace cloud_topics {
