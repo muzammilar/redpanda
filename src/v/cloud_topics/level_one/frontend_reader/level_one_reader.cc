@@ -56,9 +56,15 @@ level_one_log_reader_impl::do_load_slice(
     // First switch: ensure batches are materialized or the reader
     // reaches end-of-stream.
     switch (_state) {
-    case state::empty:
-        _current_obj = co_await lookup_object_for_offset(
-          _next_offset, deadline);
+    case state::empty: {
+        auto obj = co_await lookup_object_for_offset(_next_offset, deadline);
+        if (obj.has_value()) {
+            _state = state::ready;
+          _current_obj = std::move(obj.value());
+        } else {
+            _state = state::end_of_stream;
+        }
+    }
         [[fallthrough]];
     case state::ready:
         co_await materialize_batches(deadline);
@@ -108,13 +114,11 @@ level_one_log_reader_impl::lookup_object_for_offset(
           "stream",
           offset,
           _config.max_offset);
-        _state = state::end_of_stream;
         co_return std::nullopt;
     }
 
     if (is_over_limit(0)) {
         vlog(_log.debug, "L1 reader over byte budget: ending stream");
-        _state = state::end_of_stream;
         co_return std::nullopt;
     }
 
@@ -135,12 +139,12 @@ level_one_log_reader_impl::lookup_object_for_offset(
         case l1::metastore::errc::out_of_range:
             vlog(
               _log.debug, "No L1 objects found at offset {} or later", offset);
-            _state = state::end_of_stream;
             co_return std::nullopt;
+
         case l1::metastore::errc::missing_ntp:
             vlog(_log.debug, "Partition not tracked in metastore");
-            _state = state::end_of_stream;
             co_return std::nullopt;
+
         default:
             vlog(
               _log.error,
@@ -161,7 +165,6 @@ level_one_log_reader_impl::lookup_object_for_offset(
     auto footer = co_await read_footer(
       obj.oid, obj.footer_pos, obj.object_size);
 
-    _state = state::ready;
     co_return current_object{
       .oid = obj.oid,
       .footer = std::move(footer),
