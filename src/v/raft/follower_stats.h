@@ -27,7 +27,7 @@ struct follower_index_metadata {
     follower_index_metadata& operator=(const follower_index_metadata&) = delete;
     follower_index_metadata(follower_index_metadata&&) = default;
     follower_index_metadata& operator=(follower_index_metadata&&) = delete;
-    // resets the follower state i.e. all indicies and sequence numbers
+    // resets the follower state i.e. all indices and sequence numbers
     void reset();
 
     bool has_inflight_appends() const {
@@ -107,7 +107,7 @@ struct follower_index_metadata {
 
     follower_req_seq last_sent_seq{0};
     follower_req_seq last_received_seq{0};
-    // sequence number of last received successfull append entries request
+    // sequence number of last received successful append entries request
     follower_req_seq last_successful_received_seq{0};
     bool is_learner = true;
     bool is_recovering = false;
