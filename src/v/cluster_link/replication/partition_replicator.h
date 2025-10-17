@@ -10,6 +10,7 @@
 #pragma once
 
 #include "cluster_link/replication/deps.h"
+#include "cluster_link/replication/replication_probe.h"
 #include "cluster_link/replication/types.h"
 #include "ssx/semaphore.h"
 #include "utils/prefix_logger.h"
@@ -61,7 +62,8 @@ public:
       link_configuration_provider& config_provider,
       std::unique_ptr<data_source> source,
       std::unique_ptr<data_sink> sink,
-      ss::scheduling_group sg = ss::default_scheduling_group());
+      ss::scheduling_group sg = ss::default_scheduling_group(),
+      std::optional<replication_probe::configuration> cfg = std::nullopt);
     ss::future<> start();
     ss::future<> stop();
 
@@ -108,6 +110,7 @@ private:
       max_in_flight_requests, "partition_replicator"};
     backoff_policy _backoff_policy;
     std::optional<kafka::offset> _in_progress_truncate_offset{std::nullopt};
+    std::optional<replication_probe> _probe;
 };
 
 } // namespace cluster_link::replication

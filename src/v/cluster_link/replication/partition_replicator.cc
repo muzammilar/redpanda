@@ -11,6 +11,7 @@
 #include "cluster_link/replication/partition_replicator.h"
 
 #include "cluster_link/logger.h"
+#include "cluster_link/replication/replication_probe.h"
 #include "ssx/future-util.h"
 
 #include <seastar/coroutine/switch_to.hh>
@@ -28,7 +29,8 @@ partition_replicator::partition_replicator(
   link_configuration_provider& config_provider,
   std::unique_ptr<data_source> source,
   std::unique_ptr<data_sink> sink,
-  ss::scheduling_group scheduling_group)
+  ss::scheduling_group scheduling_group,
+  std::optional<replication_probe::configuration> cfg)
   : _ntp(ntp)
   , _term(term)
   , _config_provider(config_provider)
@@ -38,7 +40,12 @@ partition_replicator::partition_replicator(
   , _scheduling_group(scheduling_group)
   , _backoff_policy(
       make_exponential_backoff_policy<ss::lowres_clock>(
-        base_backoff, max_backoff)) {}
+        base_backoff, max_backoff))
+  , _probe{} {
+    if (cfg.has_value()) {
+        _probe.emplace(std::move(cfg.value()), ntp, *this);
+    }
+}
 
 ss::future<> partition_replicator::start() {
     co_await ss::coroutine::switch_to(_scheduling_group);
@@ -131,6 +138,7 @@ ss::future<> partition_replicator::replicate_and_wait(
   replicate_ctx ctx, ss::gate& gate, ss::abort_source& as) {
     static constexpr auto large_timeout
       = std::chrono::duration_cast<model::timeout_clock::duration>(5min);
+
     auto stages = _sink->replicate(
       std::move(ctx.fdata.batches), large_timeout, as);
     auto enqueue_f = co_await ss::coroutine::as_future(
