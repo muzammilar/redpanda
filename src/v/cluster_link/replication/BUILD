@@ -1,7 +1,25 @@
 load("//bazel:build.bzl", "redpanda_cc_library")
 
 redpanda_cc_library(
+    name = "types",
+    srcs = [
+        "types.cc",
+    ],
+    hdrs = [
+        "types.h",
+    ],
+    visibility = ["//src/v/cluster_link:__subpackages__"],
+    deps = [
+        "//src/v/base",
+        "//src/v/model",
+    ],
+)
+
+redpanda_cc_library(
     name = "deps",
+    srcs = [
+        "deps.cc",
+    ],
     hdrs = [
         "deps.h",
     ],
@@ -11,6 +29,7 @@ redpanda_cc_library(
         "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/raft",
+        "//src/v/ssx:semaphore",
     ],
 )
 
@@ -25,6 +44,7 @@ redpanda_cc_library(
     visibility = ["__subpackages__"],
     deps = [
         ":deps",
+        ":types",
         "//src/v/cluster_link:logger",
         "//src/v/container:chunked_vector",
         "//src/v/model",
@@ -88,6 +108,7 @@ redpanda_cc_library(
     visibility = ["//src/v/cluster_link:__subpackages__"],
     deps = [
         ":partition_data_queue",
+        ":types",
         "//src/v/cluster_link:logger",
         "//src/v/config",
         "//src/v/container:chunked_hash_map",

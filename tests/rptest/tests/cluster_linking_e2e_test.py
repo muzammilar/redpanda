@@ -13,6 +13,7 @@ import google.protobuf.field_mask_pb2
 import random
 import re
 import threading
+import time
 
 from ducktape.cluster.cluster_spec import ClusterSpec
 from connectrpc.errors import ConnectError, ConnectErrorCode
@@ -259,6 +260,31 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             assert target_configs["cleanup.policy"][0] == t.cleanup_policy, (
                 f"Expected cleanup policy {t.cleanup_policy} for topic {t.name}, "
                 f"got {target_configs['cleanup.policy']}"
+            )
+
+        shadow_topics = self.list_shadow_topics(shadow_link_name="test-link")
+        assert len(shadow_topics) == len(topics), (
+            f"Expected {len(topics)} shadow topics, got {len(shadow_topics)}"
+        )
+
+        for t in topics:
+            found = False
+            for st in shadow_topics:
+                if st.name == t.name:
+                    found = True
+                    break
+            assert found, f"Did not find shadow topic for {t.name}"
+
+        for t in topics:
+            self.get_shadow_topic(
+                shadow_link_name="test-link", shadow_topic_name=t.name
+            )
+
+        with expect_exception(
+            ConnectError, lambda e: e.code == ConnectErrorCode.NOT_FOUND
+        ):
+            self.get_shadow_topic(
+                shadow_link_name="test-link", shadow_topic_name="non-existent-topic"
             )
 
     @cluster(num_nodes=6)
@@ -978,6 +1004,63 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
 
         return leadership_transfer_thread(redpanda, topic)
 
+    def _get_shadow_topic(
+        self,
+        shadow_link_name: str,
+        shadow_topic_name: str,
+        expected_partitions: int | None = None,
+    ) -> tuple[bool, shadow_link_pb2.ShadowTopic | None]:
+        shadow_topic = self.get_shadow_topic(
+            shadow_link_name=shadow_link_name, shadow_topic_name=shadow_topic_name
+        )
+        self.logger.debug(f"Received ShadowTopic: {shadow_topic}")
+
+        if expected_partitions is None:
+            return True, shadow_topic
+
+        if len(shadow_topic.status.partition_information) == expected_partitions:
+            return True, shadow_topic
+
+        return False, None
+
+    def _check_partitions_match(
+        self, rpk: RpkTool, topic_name: str, shadow_topic: shadow_link_pb2.ShadowTopic
+    ) -> bool:
+        source_topic_info = rpk.describe_topic(topic_name)
+        for p in source_topic_info:
+            partition_id = p.id
+            hwm = p.high_watermark
+
+            for p_info in shadow_topic.status.partition_information:
+                if p_info.partition_id == partition_id:
+                    self.logger.debug(
+                        f"Partition {partition_id}: source hwm={hwm}, shadow_hwm{p_info.source_high_watermark}, last_update={p_info.source_last_updated_timestamp}"
+                    )
+                    if p_info.source_high_watermark != hwm:
+                        return False
+        return True
+
+    def _fetch_shadow_topic_and_compare_results(
+        self,
+        rpk: RpkTool,
+        shadow_link_name: str,
+        shadow_topic_name: str,
+        expected_partitions: int,
+    ) -> bool:
+        try:
+            shadow_topic = wait_until_result(
+                lambda: self._get_shadow_topic(
+                    shadow_link_name, shadow_topic_name, expected_partitions
+                ),
+                timeout_sec=5,
+                err_msg=f"Shadow topic {shadow_topic_name} not found or does not have expected {expected_partitions} partitions",
+            )
+        except ducktape.errors.TimeoutError as e:
+            self.logger.debug(f"Timeout fetching shadow topic {shadow_topic_name}: {e}")
+            return False
+
+        return self._check_partitions_match(rpk, shadow_topic_name, shadow_topic)
+
     @cluster(num_nodes=8)
     @matrix(
         shuffle_leadership=[True, False],
@@ -989,7 +1072,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         ],
     )
     def test_replication_basic(self, shuffle_leadership, source_cluster_spec):
-        topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
+        partition_count = 5
+        topic = TopicSpec(
+            name="source-topic", partition_count=partition_count, replication_factor=3
+        )
 
         self.source_default_client().create_topic(topic)
         self.create_link("test-link")
@@ -1006,6 +1092,17 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             self.start_producer_consumer(topic=topic.name, msg_size=128, msg_cnt=100000)
             self.verify()
 
+        self.logger.info("Starting cycle looking for shadow topic status")
+        wait_until(
+            lambda: self._fetch_shadow_topic_and_compare_results(
+                self.source_cluster_rpk, "test-link", topic.name, partition_count
+            ),
+            timeout_sec=60,
+            backoff_sec=1,
+            err_msg=f"Shadow topic {topic.name} partition info does not match source topic",
+            retry_on_exc=True,
+        )
+
     @cluster(
         num_nodes=8,
         log_allow_list=[
@@ -1013,7 +1110,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         ],
     )
     def test_replication_with_failures(self):
-        topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
+        partition_count = 5
+        topic = TopicSpec(
+            name="source-topic", partition_count=partition_count, replication_factor=3
+        )
 
         self.source_default_client().create_topic(topic)
         self.create_link("test-link")
@@ -1025,12 +1125,52 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             err_msg=f"Topic {topic.name} not found in target cluster",
         )
 
+        encountered_errors: list[str] = []
+        running = True
+
+        def poll_shadow_topic_status(shadow_link_name: str, shadow_topic_name: str):
+            while running:
+                try:
+                    shadow_topic = self.get_shadow_topic(
+                        shadow_link_name=shadow_link_name,
+                        shadow_topic_name=shadow_topic_name,
+                    )
+                    assert shadow_topic is not None, "Shadow topic not found"
+                    assert len(shadow_topic.status.partition_information) > 0, (
+                        "No partition information found"
+                    )
+                except Exception as e:
+                    encountered_errors.append(str(e))
+                time.sleep(1)
+
         self.start_producer_consumer(topic=topic.name, msg_size=128, msg_cnt=100000)
+        poll_thread = threading.Thread(
+            target=poll_shadow_topic_status, args=("test-link", topic.name)
+        )
         with (
             self.create_source_failure_injector(),
             self.create_target_failure_injector(),
         ):
+            poll_thread.start()
             self.verify()
+
+        running = False
+        poll_thread.join()
+
+        assert len(encountered_errors) == 0, (
+            f"Encountered errors while polling: {encountered_errors}"
+        )
+
+        self.logger.info("Starting cycle looking for shadow topic status")
+        wait_until(
+            lambda: self._fetch_shadow_topic_and_compare_results(
+                self.source_cluster_rpk, "test-link", topic.name, partition_count
+            ),
+            timeout_sec=60,
+            backoff_sec=1,
+            err_msg=f"Shadow topic {topic.name} partition info does not match source topic",
+            retry_on_exc=True,
+        )
 
     @cluster(num_nodes=8)
     @matrix(
@@ -1085,9 +1225,9 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         # Now the topic should be deletable, as it is not in the autocreate filters
         target_client.delete_topic(topic.name)
         link_state = self.get_link("test-link")
-        assert len(link_state.status.shadow_topic_statuses) == 0, (
-            "Expected empty shadow_topic_statuses. "
-            f"Instead got {link_state.status.shadow_topic_statuses}"
+        assert len(link_state.status.shadow_topics) == 0, (
+            "Expected empty shadow_topic list. "
+            f"Instead got {link_state.status.shadow_topics}"
         )
 
     @cluster(num_nodes=8)
@@ -1484,8 +1624,8 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 self.logger.debug(f"Failover response: {metadata}")
 
                 topic_status = [
-                    s.state
-                    for s in metadata.status.shadow_topic_statuses
+                    s.status.state
+                    for s in metadata.status.shadow_topics
                     if s.name == topic.name
                 ]
                 assert next(iter(topic_status), None) in [

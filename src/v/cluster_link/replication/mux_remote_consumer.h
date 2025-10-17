@@ -12,6 +12,7 @@
 
 #include "cluster_link/replication/partition_data_queue.h"
 #include "container/chunked_hash_map.h"
+#include "kafka/client/direct_consumer/api_types.h"
 #include "kafka/client/direct_consumer/direct_consumer.h"
 #include "kafka/server/snc_quota_manager.h"
 
@@ -73,6 +74,12 @@ public:
      */
     ss::future<std::expected<partition_data_queue::fetch_data, errc>>
     fetch(const ::model::topic_partition&, ss::abort_source&);
+
+    /**
+     * @brief Get the source offsets object
+     */
+    std::optional<kafka::client::source_partition_offsets>
+    get_source_offsets(const ::model::topic_partition& tp) const;
 
 private:
     bool should_throttle_produce();

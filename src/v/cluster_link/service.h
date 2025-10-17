@@ -122,7 +122,7 @@ public:
     /**
      * @brief Reports the status of a shard-local topic in the given link
      */
-    ss::future<rpc::shadow_topic_report_response>
+    rpc::shadow_topic_report_response
     shard_local_topic_report(const model::id_t&, const ::model::topic&);
 
     /**
@@ -138,6 +138,18 @@ public:
      */
     ss::future<model::report_result_t>
     shadow_topic_report(model::id_t, const ::model::topic&);
+
+    /**
+     * @brief Returns a node local shadow link report
+     */
+    ss::future<rpc::shadow_link_status_report_response>
+      node_local_shadow_link_report(rpc::shadow_link_status_report_request);
+
+    rpc::shadow_link_status_report_response
+      shard_local_shadow_link_report(model::id_t);
+
+    ss::future<model::status_report_ret_t>
+    shadow_link_report(model::name_t name);
 
 private:
     void register_notifications();
@@ -166,6 +178,9 @@ private:
         }
         return func(_manager.get());
     }
+
+    ss::future<rpc::shadow_link_status_report_response> shadow_link_report(
+      ::model::node_id, rpc::shadow_link_status_report_request);
 
 private:
     /**
