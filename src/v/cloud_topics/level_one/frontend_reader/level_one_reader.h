@@ -76,8 +76,7 @@ public:
     void print(std::ostream& o) final;
 
 private:
-    // Represents the current L1 object being read.
-    struct current_object {
+    struct object_info {
         l1::object_id oid;
         l1::footer footer;
         kafka::offset last_offset;
@@ -87,7 +86,7 @@ private:
      * Contacts the L1 metastore to retrieve metadata for an L1 object that
      * contains the target offset.
      */
-    ss::future<std::optional<current_object>> lookup_object_for_offset(
+    ss::future<std::optional<object_info>> lookup_object_for_offset(
       kafka::offset, model::timeout_clock::time_point deadline);
 
     /*
@@ -95,7 +94,7 @@ private:
      */
     ss::future<chunked_circular_buffer<model::record_batch>>
     materialize_batches_from_object_offset(
-      const current_object&,
+      const object_info&,
       kafka::offset,
       model::timeout_clock::time_point deadline);
 

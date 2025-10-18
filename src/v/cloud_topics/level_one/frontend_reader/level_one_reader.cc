@@ -103,7 +103,7 @@ level_one_log_reader_impl::do_load_slice(
     }
 }
 
-ss::future<std::optional<level_one_log_reader_impl::current_object>>
+ss::future<std::optional<level_one_log_reader_impl::object_info>>
 level_one_log_reader_impl::lookup_object_for_offset(
   kafka::offset offset, model::timeout_clock::time_point /*deadline*/) {
     if (offset > _config.max_offset) {
@@ -153,7 +153,7 @@ level_one_log_reader_impl::lookup_object_for_offset(
     auto footer = co_await read_footer(
       obj.oid, obj.footer_pos, obj.object_size);
 
-    co_return current_object{
+    co_return object_info{
       .oid = obj.oid,
       .footer = std::move(footer),
       .last_offset = obj.last_offset,
@@ -268,7 +268,7 @@ level_one_log_reader_impl::read_batches(l1::object_reader& reader) {
 
 ss::future<chunked_circular_buffer<model::record_batch>>
 level_one_log_reader_impl::materialize_batches_from_object_offset(
-  const current_object& object,
+  const object_info& object,
   kafka::offset offset,
   model::timeout_clock::time_point /*deadline*/) {
     auto seek_res = object.footer.file_position_before_kafka_offset(
