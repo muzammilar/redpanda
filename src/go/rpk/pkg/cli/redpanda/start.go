@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -459,47 +460,84 @@ func prestart(
 
 // Tries to read the tuner config file and extract the RedpandaCpuset from it.
 // Returns empty string in case no cpuset/file was found.
-func readTunerConfigCpuset(fs afero.Fs, configFilePath string) (string, error) {
+func readTunerConfigCpuset(fs afero.Fs, configFilePath string) (*tuners.CpusetConfig, error) {
 	filePath := network.DefaultNodeTunerStateFile
 	if configFilePath != "" {
 		filePath = configFilePath
 	}
 	exists, err := afero.Exists(fs, filePath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if !exists {
 		if filePath != network.DefaultNodeTunerStateFile {
-			return "", fmt.Errorf("--tuner-config-path specified but file %s not found", filePath)
+			return nil, fmt.Errorf("--tuner-config-path specified but file %s not found", filePath)
 		}
-		return "", nil
+		return nil, nil
 	}
 
 	content, err := afero.ReadFile(fs, filePath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// We allow an empty file to mean no cpuset. k8s will create an empty file
 	// when mounting in FileOrCreate mode and no file on the host exists.
 	if len(content) == 0 {
 		fmt.Println("Net tuner config file found but empty")
-		return "", nil
+		return nil, nil
 	}
 
 	config := tuners.NodeTunerState{}
 	err = yaml.Unmarshal(content, &config)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if config.Cpusets == nil {
 		fmt.Println("Net tuner config file found but no cpusets (v1) section")
-		return "", nil
+		return nil, nil
 	}
 
-	return config.Cpusets.RedpandaCpuset, nil
+	return config.Cpusets, nil
+}
+
+func checkTunerConfigCpusetCompatibilityAndUpdateFlags(
+	finalFlags map[string]string,
+	cpusets *tuners.CpusetConfig,
+) error {
+	if finalFlags[cpuSetFlag] != "" {
+		return errors.New(
+			"cpuset is set both via --cpuset flag and via tuner config file which is incompatible; " +
+				"either use MQ tuner mode or remove the cpuset flag from additional_start_flags",
+		)
+	}
+
+	finalFlags[cpuSetFlag] = cpusets.RedpandaCpuset
+
+	if finalFlags[smpFlag] != "" {
+		wantSmp, err := strconv.Atoi(finalFlags[smpFlag])
+		if err != nil {
+			return fmt.Errorf("unable to parse smp flag value %q: %w", finalFlags[smpFlag], err)
+		}
+
+		// We are lenient in regards to --smp in rpk:start, the system is already tuned so we just need to adapt.
+		// All the hard checks are already done on the tuner side.
+
+		if wantSmp > cpusets.RedpandaCpusetSize {
+			// if the user has --smp configured larger than the cpuset size we
+			// are just lowering it. Otherwise seastar will fail to start. We
+			// know this is the optimal config we have tuned for anyway. This
+			// scenario is likely in cases where people hardcode --smp=N on an N
+			// core machine (the chart helm does this for example).
+
+			fmt.Printf("Lowering smp from %d to tuner config cpuset size %d\n", wantSmp, cpusets.RedpandaCpusetSize)
+			finalFlags[smpFlag] = strconv.Itoa(cpusets.RedpandaCpusetSize)
+		}
+	}
+
+	return nil
 }
 
 func buildRedpandaFlags(
@@ -522,19 +560,7 @@ func buildRedpandaFlags(
 		)
 	}
 
-	preserve := make(map[string]bool, 2)
-
-	// Check if tuner config file exists and read redpanda cpuset from it
-	tunerConfigCpuset, err := readTunerConfigCpuset(fs, nodeTunerStatePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read tuner config file: %w", err)
-	}
-
-	if tunerConfigCpuset != "" {
-		sFlags.cpuSet = tunerConfigCpuset
-		preserve[cpuSetFlag] = true
-		fmt.Printf("Using cpuset from tuner config: %s\n", tunerConfigCpuset)
-	}
+	preserve := make(map[string]bool, 1)
 
 	// We want to preserve the IOProps flags in case we find them either by
 	// finding the file in the default location or by resolving to a well known
@@ -572,7 +598,7 @@ func buildRedpandaFlags(
 	}
 	flagsMap = flagsFromConf(y, flagsMap, flags)
 	finalFlags := mergeMaps(
-		parseFlags(y.Rpk.AdditionalStartFlags),
+		config.ParseAdditionalStartFlags(y.Rpk.AdditionalStartFlags),
 		extraFlags(flags, args),
 	)
 	for n, v := range flagsMap {
@@ -591,6 +617,21 @@ func buildRedpandaFlags(
 		}
 		finalFlags[n] = fmt.Sprint(v)
 	}
+
+	// Check if tuner config file exists and read redpanda cpuset from it
+	tunerConfigCpuset, err := readTunerConfigCpuset(fs, nodeTunerStatePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tuner config file: %w", err)
+	}
+
+	if tunerConfigCpuset != nil {
+		err := checkTunerConfigCpusetCompatibilityAndUpdateFlags(finalFlags, tunerConfigCpuset)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("Using cpuset from tuner config: %s\n", tunerConfigCpuset.RedpandaCpuset)
+	}
+
 	return &rp.RedpandaArgs{
 		ConfigFilePath: y.FileLocation(),
 		SeastarFlags:   finalFlags,
@@ -671,7 +712,7 @@ func tuneAll(
 	fs afero.Fs, cpuSet string, y *config.RedpandaYaml, timeout time.Duration,
 ) error {
 	params := &factory.TunerParams{}
-	tunerFactory := factory.NewDirectExecutorTunersFactory(fs, y.Rpk.Tuners, timeout)
+	tunerFactory := factory.NewDirectExecutorTunersFactory(fs, y.Rpk, timeout)
 	hw := hwloc.NewHwLocCmd(vos.NewProc(), timeout)
 	if cpuSet == "" {
 		cpuMask, err := hw.All()
@@ -752,54 +793,6 @@ func check(
 		}
 	}
 	return nil
-}
-
-func parseFlags(flags []string) map[string]string {
-	parsed := map[string]string{}
-	for i := 0; i < len(flags); i++ {
-		f := flags[i]
-		isFlag := strings.HasPrefix(f, "-")
-		trimmed := strings.Trim(f, " -")
-
-		// Filter out elements that aren't flags or are empty.
-		if !isFlag || trimmed == "" {
-			continue
-		}
-
-		// Check if it's in name=value format
-		// Split only into 2 tokens, since some flags can have multiple '='
-		// in them, like --logger-log-level=archival=debug:cloud_storage=debug
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) >= 2 {
-			name := strings.Trim(parts[0], " ")
-			value := strings.Trim(parts[1], ` "`)
-			parsed[name] = value
-			continue
-		}
-		// Otherwise, it can be a boolean flag (i.e. -v) or in
-		// name<space>value format
-
-		if i == len(flags)-1 {
-			// We've reached the last element, so it's a single flag
-			parsed[trimmed] = ""
-			continue
-		}
-
-		// Check if the next element starts with a hyphen
-		// If it does, it's another flag, and the current element is a
-		// boolean flag
-		next := flags[i+1]
-		if strings.HasPrefix(next, "-") {
-			parsed[trimmed] = ""
-			continue
-		}
-
-		// Otherwise, the current element is the name of the flag and
-		// the next one is its value
-		parsed[trimmed] = next
-		i += 1
-	}
-	return parsed
 }
 
 func parseSeeds(seeds []string) ([]config.SeedServer, error) {
@@ -946,7 +939,7 @@ func stringSliceOr(a, b []string) []string {
 
 // Returns the set of unknown flags passed.
 func extraFlags(flags *pflag.FlagSet, args []string) map[string]string {
-	allFlagsMap := parseFlags(args)
+	allFlagsMap := config.ParseAdditionalStartFlags(args)
 	extra := map[string]string{}
 
 	for k, v := range allFlagsMap {

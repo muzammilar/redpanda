@@ -264,6 +264,16 @@ class NetTunerTest(RedpandaTest):
 
 # Targets CORE_COUNT core machines
 class AwsNetTunerTest(NetTunerTest):
+    def get_basic_dedicated_expected(self) -> NetTunerTest.ExpectedInterruptSetup:
+        return self.ExpectedInterruptSetup(
+            interrupts_masks=["8"],
+            redpanda_cores={0, 1, 2},
+            rps_cpu_mask="7",
+            rps_cpu_flow_count=int(self.TARGET_RFS_TABLE_SIZE / 1),
+            rfs_table_size=self.TARGET_RFS_TABLE_SIZE,
+            rx_tx_queue_count=1,
+        )
+
     @cluster(num_nodes=1)
     def test_tune_net_mq(self):
         expected_interrupt_setup = self.ExpectedInterruptSetup(
@@ -279,64 +289,32 @@ class AwsNetTunerTest(NetTunerTest):
 
     @cluster(num_nodes=1)
     def test_tune_net_dedicated_explicit_interfaces(self):
-        expected_interrupt_setup = self.ExpectedInterruptSetup(
-            interrupts_masks=["8"],
-            redpanda_cores={0, 1, 2},
-            rps_cpu_mask="7",
-            rps_cpu_flow_count=int(self.TARGET_RFS_TABLE_SIZE / 1),
-            rfs_table_size=self.TARGET_RFS_TABLE_SIZE,
-            rx_tx_queue_count=1,
-        )
-
         # lo should be ignored
         self._test_tune_net_dedicated_core(
-            expected_interrupt_setup,
+            self.get_basic_dedicated_expected(),
             4,
             additional_tune_args=["--nic", "lo,ens5"],
         )
 
     @cluster(num_nodes=1)
     def test_tune_net_dedicated_1_core(self):
-        expected_interrupt_setup = self.ExpectedInterruptSetup(
-            interrupts_masks=["8"],
-            redpanda_cores={0, 1, 2},
-            rps_cpu_mask="7",
-            rps_cpu_flow_count=int(self.TARGET_RFS_TABLE_SIZE / 1),
-            rfs_table_size=self.TARGET_RFS_TABLE_SIZE,
-            rx_tx_queue_count=1,
-        )
+        expected_interrupt_setup = self.get_basic_dedicated_expected()
 
         self._test_tune_net_dedicated_core(expected_interrupt_setup, 4)
 
     @cluster(num_nodes=1)
     def test_tune_net_dedicated_1_core_auto_detect(self):
-        expected_interrupt_setup = self.ExpectedInterruptSetup(
-            interrupts_masks=["8"],
-            redpanda_cores={0, 1, 2},
-            rps_cpu_mask="7",
-            rps_cpu_flow_count=int(self.TARGET_RFS_TABLE_SIZE / 1),
-            rfs_table_size=self.TARGET_RFS_TABLE_SIZE,
-            rx_tx_queue_count=1,
-        )
+        expected_interrupt_setup = self.get_basic_dedicated_expected()
 
         self._test_tune_net_dedicated_core_auto_detect(expected_interrupt_setup, 4)
 
     @cluster(num_nodes=1)
     def test_tune_net_dedicated_1_different_tuner_path(self):
-        expected_interrupt_setup = self.ExpectedInterruptSetup(
-            interrupts_masks=["8"],
-            redpanda_cores={0, 1, 2},
-            rps_cpu_mask="7",
-            rps_cpu_flow_count=int(self.TARGET_RFS_TABLE_SIZE / 1),
-            rfs_table_size=self.TARGET_RFS_TABLE_SIZE,
-            rx_tx_queue_count=1,
-        )
-
         # if we leak this it's fine as nothing else uses this path
         alternative_path = "/tmp/redpanda_net_tuner_config_123"
 
         self._test_tune_net_dedicated_core(
-            expected_interrupt_setup,
+            self.get_basic_dedicated_expected(),
             4,
             additional_tune_args=["--node-tuner-state-path", alternative_path],
             additional_start_args=f"--node-tuner-state-path={alternative_path}",
@@ -370,6 +348,32 @@ class AwsNetTunerTest(NetTunerTest):
         )
 
         self._test_tune_net_dedicated_core(expected_interrupt_setup, 2)
+
+    @cluster(num_nodes=1)
+    def test_tune_net_dedicated_1_core_extra_rpk_smp_4(self):
+        expected_interrupt_setup = self.get_basic_dedicated_expected()
+
+        self.node.account.ssh("rpk redpanda config set rpk.smp 4")
+
+        self._test_tune_net_dedicated_core(expected_interrupt_setup, 4)
+
+    @cluster(num_nodes=1)
+    def test_tune_net_dedicated_1_core_extra_rpk_smp_3(self):
+        expected_interrupt_setup = self.get_basic_dedicated_expected()
+
+        self.node.account.ssh("rpk redpanda config set rpk.smp 3")
+
+        self._test_tune_net_dedicated_core(expected_interrupt_setup, 4)
+
+    @cluster(num_nodes=1)
+    def test_tune_net_dedicated_1_core_extra_rpk_additional_args_smp_4(self):
+        expected_interrupt_setup = self.get_basic_dedicated_expected()
+
+        self.node.account.ssh(
+            "rpk redpanda config set rpk.additional_start_flags '[\"--smp=4\"]'"
+        )
+
+        self._test_tune_net_dedicated_core(expected_interrupt_setup, 4)
 
 
 # Targets CORE_COUNT core virtio (this is what our current ansible targets) machines
