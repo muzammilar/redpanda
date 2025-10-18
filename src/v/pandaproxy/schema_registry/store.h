@@ -441,7 +441,7 @@ public:
     }
 
     ///\brief Delete a subject.
-    result<std::vector<schema_version>> delete_subject(
+    result<chunked_vector<schema_version>> delete_subject(
       seq_marker marker, const subject& sub, permanent_delete permanent) {
         auto sub_it = BOOST_OUTCOME_TRYX(
           get_subject_iter(sub, include_deleted::yes));
@@ -458,7 +458,7 @@ public:
         sub_it->second.deleted = is_deleted::yes;
 
         auto& versions = sub_it->second.versions;
-        std::vector<schema_version> res;
+        chunked_vector<schema_version> res;
         res.reserve(versions.size());
         for (const auto& ver : versions) {
             if (permanent || !ver.deleted) {
