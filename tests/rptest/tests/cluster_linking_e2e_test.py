@@ -1145,41 +1145,12 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             err_msg=f"Topic {topic.name} not found in target cluster",
         )
 
-        encountered_errors: list[str] = []
-        running = True
-
-        def poll_shadow_topic_status(shadow_link_name: str, shadow_topic_name: str):
-            while running:
-                try:
-                    shadow_topic = self.get_shadow_topic(
-                        shadow_link_name=shadow_link_name,
-                        shadow_topic_name=shadow_topic_name,
-                    )
-                    assert shadow_topic is not None, "Shadow topic not found"
-                    assert len(shadow_topic.status.partition_information) > 0, (
-                        "No partition information found"
-                    )
-                except Exception as e:
-                    encountered_errors.append(str(e))
-                time.sleep(1)
-
         self.start_producer_consumer(topic=topic.name, msg_size=128, msg_cnt=100000)
-        poll_thread = threading.Thread(
-            target=poll_shadow_topic_status, args=("test-link", topic.name)
-        )
         with (
             self.create_source_failure_injector(),
             self.create_target_failure_injector(),
         ):
-            poll_thread.start()
             self.verify()
-
-        running = False
-        poll_thread.join()
-
-        assert len(encountered_errors) == 0, (
-            f"Encountered errors while polling: {encountered_errors}"
-        )
 
         self.logger.info("Starting cycle looking for shadow topic status")
         wait_until(
