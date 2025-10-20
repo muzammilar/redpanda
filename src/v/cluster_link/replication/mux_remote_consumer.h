@@ -60,7 +60,10 @@ public:
     mux_remote_consumer(
       kafka::client::cluster& cluster,
       kafka::snc_quota_manager& snc_quota_mgr,
-      configuration consumer_configuration);
+      configuration consumer_configuration,
+      std::optional<kafka::client::direct_consumer_probe::configuration>
+        probe_cfg
+      = std::nullopt);
 
     ss::future<> start();
     ss::future<> stop() noexcept;
