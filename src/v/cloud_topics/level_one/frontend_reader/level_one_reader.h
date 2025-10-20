@@ -76,15 +76,7 @@ public:
     void print(std::ostream& o) final;
 
 private:
-    enum class state {
-        empty,
-        ready,
-        materialized,
-        end_of_stream,
-    };
-
-    // Represents the current L1 object being read.
-    struct current_object {
+    struct object_info {
         l1::object_id oid;
         l1::footer footer;
         kafka::offset last_offset;
@@ -94,7 +86,7 @@ private:
      * Contacts the L1 metastore to retrieve metadata for an L1 object that
      * contains the target offset.
      */
-    ss::future<std::optional<current_object>> lookup_object_for_offset(
+    ss::future<std::optional<object_info>> lookup_object_for_offset(
       kafka::offset, model::timeout_clock::time_point deadline);
 
     /*
@@ -102,7 +94,7 @@ private:
      */
     ss::future<chunked_circular_buffer<model::record_batch>>
     materialize_batches_from_object_offset(
-      const current_object&,
+      const object_info&,
       kafka::offset,
       model::timeout_clock::time_point deadline);
 
@@ -115,28 +107,26 @@ private:
     ss::future<chunked_circular_buffer<model::record_batch>>
     read_batches(l1::object_reader& reader);
 
-    /*
-     * Prepare the result set to return to the record batch reader and configure
-     * the reader for the next request to load slice which will be the next
-     * offset that should be fetched.
-     */
-    chunked_circular_buffer<model::record_batch> consume_materialized_batches();
-
     ss::future<l1::footer>
     read_footer(l1::object_id oid, size_t footer_pos, size_t object_size);
 
-    bool is_over_limit(size_t size) const;
+    /*
+     * Returns batches starting at next offset. It will continue to advance next
+     * offset until batches are read or end-of-stream is reached.
+     */
+    ss::future<model::record_batch_reader::storage_t>
+      read_some(model::timeout_clock::time_point);
 
-    ss::future<> close_reader_safe(std::unique_ptr<l1::object_reader>&);
+    /*
+     * Returns true if accepting the given number of bytes would cause the
+     * reader to exceed its configured bytes limit.
+     */
+    bool is_over_limit_with_bytes(size_t size) const;
 
-    state _state{state::empty};
+    ss::future<> close_reader_safe(l1::object_reader&);
 
-    // Current object being processed.
-    // Present in ready and materialized states, empty in empty state.
-    std::optional<current_object> _current_obj;
-
-    // Materialized batches ready to be consumed.
-    chunked_circular_buffer<model::record_batch> _batches;
+    void set_end_of_stream();
+    bool _end_of_stream{false};
 
     cloud_topic_log_reader_config _config;
     model::ntp _ntp;
