@@ -394,17 +394,24 @@ cluster_epoch_service<Clock>::get_cached_epoch(seastar::abort_source* as) {
 template<typename Clock>
 ss::future<std::error_code>
 cluster_epoch_service<Clock>::do_update_epoch(ss::abort_source* as) {
-    auto maybe_epoch = co_await this->container().invoke_on(
-      controller_stm_shard, &cluster_epoch_service::get_current_epoch);
-    auto update_time = Clock::now();
-    if (!maybe_epoch && ss::this_shard_id() == controller_stm_shard) {
-        auto epoch_result = co_await fetch_leader_epoch(as);
-        if (!epoch_result) {
-            co_return epoch_result.error();
-        }
-        maybe_epoch = epoch_result.value();
+    std::optional<int64_t> maybe_epoch;
+    typename Clock::time_point update_time;
+    if (ss::this_shard_id() == controller_stm_shard) {
+        // If we are the leader, get our epoch
+        maybe_epoch = co_await get_current_epoch();
         update_time = Clock::now();
-    } else if (!maybe_epoch) {
+        // Otherwise go fetch from the leader the epoch
+        if (!maybe_epoch) {
+            auto epoch_result = co_await fetch_leader_epoch(as);
+            if (!epoch_result) {
+                co_return epoch_result.error();
+            }
+            maybe_epoch = epoch_result.value();
+            update_time = Clock::now();
+        }
+    } else {
+        // If we're not shard0 we have to ask shard0 for it's epoch, we strictly
+        // follow the epoch on shard0.
         ssx::sharded_abort_source sharded_as;
         co_await sharded_as.start(*as);
         using result_t = std::invoke_result_t<
