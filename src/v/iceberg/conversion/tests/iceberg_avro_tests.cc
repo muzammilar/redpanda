@@ -92,13 +92,13 @@ TEST(AvroSchema, TestNonRecordSchema) {
     iceberg::struct_type union_st;
     union_st.fields.push_back(
       iceberg::nested_field::create(
-        0, "union_opt_0", iceberg::field_required::no, iceberg::int_type{}));
+        0, "int", iceberg::field_required::no, iceberg::int_type{}));
     union_st.fields.push_back(
       iceberg::nested_field::create(
-        0, "union_opt_1", iceberg::field_required::no, iceberg::long_type{}));
+        0, "long", iceberg::field_required::no, iceberg::long_type{}));
     union_st.fields.push_back(
       iceberg::nested_field::create(
-        0, "union_opt_2", iceberg::field_required::no, iceberg::float_type{}));
+        0, "float", iceberg::field_required::no, iceberg::float_type{}));
 
     tl_type_expectations.emplace_back("root", tl_union, std::move(union_st));
 
@@ -314,7 +314,7 @@ TEST(AvroSchema, TestRecordType) {
     union_struct.fields.push_back(
       iceberg::nested_field::create(
         0,
-        "union_opt_1",
+        "map",
         iceberg::field_required::no,
         iceberg::map_type::create(
           0,
@@ -324,7 +324,7 @@ TEST(AvroSchema, TestRecordType) {
           iceberg::int_type{})));
     union_struct.fields.push_back(
       iceberg::nested_field::create(
-        0, "union_opt_2", iceberg::field_required::no, iceberg::float_type{}));
+        0, "float", iceberg::field_required::no, iceberg::float_type{}));
 
     ASSERT_TRUE(
       field_matches(struct_t.fields[6], "myunion", std::move(union_struct)));
