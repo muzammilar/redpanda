@@ -25,6 +25,7 @@ extern const std::string_view tls_v1_3_cipher_suites_strict;
  * in PEM format.
  */
 using certificate = std::variant<std::filesystem::path, ss::sstring>;
+fmt::iterator format_cert(fmt::iterator, const net::certificate&);
 
 /**
  * Path to key/cert files
@@ -61,6 +62,7 @@ struct pkcs12 {
  * container
  */
 using key_store = std::variant<key_cert, key_cert_path, pkcs12>;
+fmt::iterator format_keystore(fmt::iterator, const net::key_store&);
 
 /**
  * TLS credentials configuration, the configuration is used to create

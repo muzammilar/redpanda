@@ -10,6 +10,7 @@
  */
 
 #pragma once
+#include "base/format_to.h"
 #include "config/bounded_property.h"
 #include "config/config_store.h"
 #include "config/tls_config.h"
@@ -74,6 +75,8 @@ struct tls_configuration {
 
     bool provide_sni_hostname{false};
 
+    fmt::iterator format_to(fmt::iterator it) const;
+
     friend bool operator==(const tls_configuration&, const tls_configuration&)
       = default;
 };
@@ -82,6 +85,8 @@ struct sasl_configuration {
     ss::sstring mechanism;
     ss::sstring username;
     ss::sstring password;
+
+    fmt::iterator format_to(fmt::iterator it) const;
 
     friend bool operator==(const sasl_configuration&, const sasl_configuration&)
       = default;
@@ -103,6 +108,8 @@ struct connection_configuration {
         return client_id.value_or("kafka-client");
     }
     static connection_configuration from_config_store(const configuration& cfg);
+
+    fmt::iterator format_to(fmt::iterator it) const;
 
     friend bool
     operator==(const connection_configuration&, const connection_configuration&)
@@ -154,10 +161,3 @@ struct configuration final : public config::config_store {
 };
 
 } // namespace kafka::client
-template<>
-struct fmt::formatter<kafka::client::sasl_configuration>
-  : fmt::formatter<std::string_view> {
-    auto format(
-      const kafka::client::sasl_configuration&, fmt::format_context& ctx) const
-      -> decltype(ctx.out());
-};
