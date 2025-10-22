@@ -586,6 +586,15 @@ TEST(converter_test, metadata_to_shadow_link) {
       absl::FromChrono(
         cluster_link::model::security_settings_sync_config::
           task_interval_default));
+
+    const auto& cg_settings
+      = sl.get_configurations().get_consumer_offset_sync_options();
+    EXPECT_EQ(cg_settings.get_interval(), absl::Seconds(0));
+    EXPECT_EQ(
+      cg_settings.get_effective_interval(),
+      absl::FromChrono(
+        cluster_link::model::consumer_groups_mirroring_config::
+          default_task_interval));
 }
 
 TEST(converter_test, metadata_to_shadow_link_authn_scram_256) {

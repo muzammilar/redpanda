@@ -28,6 +28,7 @@ using proto::admin::acl_permission_type;
 using proto::admin::acl_resource;
 using proto::admin::acl_resource_filter;
 using proto::admin::authentication_configuration;
+using proto::admin::consumer_offset_sync_options;
 using proto::admin::create_shadow_link_request;
 using proto::admin::name_filter;
 using proto::admin::scram_config;
@@ -880,6 +881,18 @@ topic_metadata_sync_options create_topic_metadata_sync_options(
     return options;
 }
 
+consumer_offset_sync_options create_consumer_offset_sync_options(
+  const cluster_link::model::consumer_groups_mirroring_config& cfg) {
+    consumer_offset_sync_options options;
+    options.set_interval(
+      absl::FromChrono(
+        cfg.task_interval.value_or(ss::lowres_clock::duration::zero())));
+    options.set_effective_interval(absl::FromChrono(cfg.get_task_interval()));
+    options.set_group_filters(to_name_filters(cfg.filters));
+
+    return options;
+}
+
 shadow_link_configurations
 create_shadow_link_configuration(const cluster_link::model::metadata& md) {
     shadow_link_configurations configurations;
@@ -888,6 +901,9 @@ create_shadow_link_configuration(const cluster_link::model::metadata& md) {
     configurations.set_topic_metadata_sync_options(
       create_topic_metadata_sync_options(
         md.configuration.topic_metadata_mirroring_cfg));
+    configurations.set_consumer_offset_sync_options(
+      create_consumer_offset_sync_options(
+        md.configuration.consumer_groups_mirroring_cfg));
     configurations.set_security_sync_options(
       create_security_settings_sync_options(
         md.configuration.security_settings_sync_cfg));
