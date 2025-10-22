@@ -626,14 +626,26 @@ create_shadow_link_client_options(const cluster_link::model::metadata& md) {
 
     options.set_metadata_max_age_ms(
       md.connection.metadata_max_age_ms.value_or(0));
+    options.set_effective_metadata_max_age_ms(
+      md.connection.get_metadata_max_age_ms());
     options.set_connection_timeout_ms(
       md.connection.connection_timeout_ms.value_or(0));
+    options.set_effective_connection_timeout_ms(
+      md.connection.get_connection_timeout_ms());
     options.set_retry_backoff_ms(md.connection.retry_backoff_ms.value_or(0));
+    options.set_effective_retry_backoff_ms(
+      md.connection.get_retry_backoff_ms());
     options.set_fetch_wait_max_ms(md.connection.fetch_wait_max_ms.value_or(0));
+    options.set_effective_fetch_wait_max_ms(
+      md.connection.get_fetch_wait_max_ms());
     options.set_fetch_min_bytes(md.connection.fetch_min_bytes.value_or(0));
+    options.set_effective_fetch_min_bytes(md.connection.get_fetch_min_bytes());
     options.set_fetch_max_bytes(md.connection.fetch_max_bytes.value_or(0));
+    options.set_effective_fetch_max_bytes(md.connection.get_fetch_max_bytes());
     options.set_fetch_partition_max_bytes(
       md.connection.fetch_partition_max_bytes.value_or(0));
+    options.set_effective_fetch_partition_max_bytes(
+      md.connection.get_fetch_partition_max_bytes());
 
     return options;
 }
@@ -816,6 +828,8 @@ security_settings_sync_options create_security_settings_sync_options(
     options.set_interval(
       absl::FromChrono(
         config.task_interval.value_or(ss::lowres_clock::duration::zero())));
+    options.set_effective_interval(
+      absl::FromChrono(config.get_task_interval()));
     options.set_acl_filters(to_acl_filters(config.acl_filters));
 
     return options;
@@ -847,6 +861,7 @@ topic_metadata_sync_options create_topic_metadata_sync_options(
     options.set_interval(
       absl::FromChrono(
         cfg.task_interval.value_or(ss::lowres_clock::duration::zero())));
+    options.set_effective_interval(absl::FromChrono(cfg.get_task_interval()));
     options.set_auto_create_shadow_topic_filters(
       to_name_filters(cfg.topic_name_filters));
 

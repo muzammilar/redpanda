@@ -399,12 +399,20 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         shadow_link.configurations.client_options.fetch_partition_max_bytes = (
             500 * 1024 * 1024
         )
+        shadow_link.configurations.client_options.metadata_max_age_ms = 500
+        shadow_link.configurations.client_options.connection_timeout_ms = 100
+        shadow_link.configurations.client_options.retry_backoff_ms = 200
+        shadow_link.configurations.client_options.fetch_max_bytes = 100 * 1024 * 1024
         update_mask: google.protobuf.field_mask_pb2.FieldMask = google.protobuf.field_mask_pb2.FieldMask(
             paths=[
                 "configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters",
                 "configurations.client_options.fetch_partition_max_bytes",
                 "configurations.client_options.fetch_wait_max_ms",
                 "configurations.client_options.fetch_min_bytes",
+                "configurations.client_options.metadata_max_age_ms",
+                "configurations.client_options.connection_timeout_ms",
+                "configurations.client_options.retry_backoff_ms",
+                "configurations.client_options.fetch_max_bytes",
             ]
         )
 
@@ -419,10 +427,46 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             f"Expected updated link to be returned, {updated_link.configurations.topic_metadata_sync_options} != {shadow_link.configurations.topic_metadata_sync_options}"
         )
         assert (
-            updated_link.configurations.client_options
-            == shadow_link.configurations.client_options
+            updated_link.configurations.client_options.effective_fetch_wait_max_ms
+            == shadow_link.configurations.client_options.fetch_wait_max_ms
         ), (
-            f"Expected updated link to be returned, {updated_link.configurations.client_options} != {shadow_link.configurations.client_options}"
+            f"Expected fetch_wait_max_ms to be {shadow_link.configurations.client_options.fetch_wait_max_ms}, got {updated_link.configurations.client_options.effective_fetch_wait_max_ms}"
+        )
+        assert (
+            updated_link.configurations.client_options.effective_fetch_min_bytes
+            == shadow_link.configurations.client_options.fetch_min_bytes
+        ), (
+            f"Expected fetch_min_bytes to be {shadow_link.configurations.client_options.fetch_min_bytes}, got {updated_link.configurations.client_options.effective_fetch_min_bytes}"
+        )
+        assert (
+            updated_link.configurations.client_options.effective_fetch_partition_max_bytes
+            == shadow_link.configurations.client_options.fetch_partition_max_bytes
+        ), (
+            f"Expected fetch_partition_max_bytes to be {shadow_link.configurations.client_options.fetch_partition_max_bytes}, got {updated_link.configurations.client_options.effective_fetch_partition_max_bytes}"
+        )
+        assert (
+            updated_link.configurations.client_options.effective_metadata_max_age_ms
+            == shadow_link.configurations.client_options.metadata_max_age_ms
+        ), (
+            f"Expected metadata_max_age_ms to be {shadow_link.configurations.client_options.metadata_max_age_ms}, got {updated_link.configurations.client_options.effective_metadata_max_age_ms}"
+        )
+        assert (
+            updated_link.configurations.client_options.effective_connection_timeout_ms
+            == shadow_link.configurations.client_options.connection_timeout_ms
+        ), (
+            f"Expected connection_timeout_ms to be {shadow_link.configurations.client_options.connection_timeout_ms}, got {updated_link.configurations.client_options.effective_connection_timeout_ms}"
+        )
+        assert (
+            updated_link.configurations.client_options.effective_retry_backoff_ms
+            == shadow_link.configurations.client_options.retry_backoff_ms
+        ), (
+            f"Expected retry_backoff_ms to be {shadow_link.configurations.client_options.retry_backoff_ms}, got {updated_link.configurations.client_options.effective_retry_backoff_ms}"
+        )
+        assert (
+            updated_link.configurations.client_options.effective_fetch_max_bytes
+            == shadow_link.configurations.client_options.fetch_max_bytes
+        ), (
+            f"Expected fetch_max_bytes to be {shadow_link.configurations.client_options.fetch_max_bytes}, got {updated_link.configurations.client_options.effective_fetch_max_bytes}"
         )
 
         def _all_but_one_topic_are_present_in_target_cluster():
