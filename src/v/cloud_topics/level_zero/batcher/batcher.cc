@@ -179,17 +179,17 @@ ss::future<std::expected<std::monostate, errc>> batcher<Clock>::run_once(
             co_return std::unexpected(errc::failed_to_get_epoch);
         }
 
-        aggregator<Clock> aggregator{object_id::create(epoch_fut.get())};
+        aggregator<Clock> aggregator;
         while (!list.requests.empty()) {
             auto& wr = list.requests.back();
             wr._hook.unlink();
             aggregator.add(wr);
         }
         // TODO: skip waiting if list.completed is not true
-        auto payload = aggregator.prepare();
-        auto size_bytes = payload.size_bytes();
+        auto object = aggregator.prepare(object_id::create(epoch_fut.get()));
+        auto size_bytes = object.payload.size_bytes();
         auto result = co_await upload_object(
-          aggregator.get_object_id(), std::move(payload));
+          object.id, std::move(object.payload));
         if (!result) {
             // TODO: fix the error
             // NOTE: it should be possible to translate the

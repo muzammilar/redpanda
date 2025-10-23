@@ -36,7 +36,7 @@ struct extents_for_req {
 template<class Clock>
 class aggregator {
 public:
-    explicit aggregator(object_id id);
+    aggregator() = default;
     aggregator(const aggregator&) = delete;
     aggregator(aggregator&&) = delete;
     aggregator& operator=(const aggregator&) = delete;
@@ -61,9 +61,11 @@ public:
     cluster_epoch min_epoch() { return _min_epoch; }
 
     /// Prepare upload byte stream
-    iobuf prepare();
-
-    object_id get_object_id() const noexcept;
+    struct L0_object {
+        object_id id;
+        iobuf payload;
+    };
+    L0_object prepare(object_id);
 
     void ack();
     void ack_error(errc);
@@ -71,14 +73,13 @@ public:
 private:
     /// Generate placeholders.
     /// This method should be invoked before 'get_result'
-    chunked_vector<std::unique_ptr<extents_for_req<Clock>>> get_extents();
+    chunked_vector<std::unique_ptr<extents_for_req<Clock>>>
+      get_extents(object_id);
 
     /// Produce L0 object payload.
     /// The method messes up the state so it can only
     /// be called once.
     iobuf get_stream();
-
-    object_id _id;
 
     cluster_epoch _min_epoch;
 

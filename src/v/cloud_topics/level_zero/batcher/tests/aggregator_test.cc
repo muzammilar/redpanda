@@ -29,6 +29,10 @@ static cloud_topics::cluster_epoch min_epoch{3840};
 
 static ss::logger test_log("aggregator_test_log"); // NOLINT
 
+auto make_oid(int epoch) {
+    return cloud_topics::object_id::create(cloud_topics::cluster_epoch{epoch});
+}
+
 cloud_topics::l0::serialized_chunk get_random_serialized_chunk(
   int num_batches, int num_records_per_batch) { // NOLINT
     chunked_vector<model::record_batch> batches;
@@ -51,15 +55,14 @@ TEST(AggregatorTest, SingleRequestAck) {
     auto fut = request.response.get_future();
 
     // The aggregator produces single L0 object
-    cloud_topics::l0::aggregator<ss::manual_clock> aggregator{
-      cloud_topics::object_id::create(cloud_topics::cluster_epoch{0})};
+    cloud_topics::l0::aggregator<ss::manual_clock> aggregator;
 
     aggregator.add(request);
-    auto dest = aggregator.prepare();
+    auto dest = aggregator.prepare(make_oid(0));
 
     aggregator.ack();
     ASSERT_TRUE(fut.available());
-    ASSERT_EQ(dest.size_bytes(), aggregator.size_bytes());
+    ASSERT_EQ(dest.payload.size_bytes(), aggregator.size_bytes());
 }
 
 TEST(AggregatorTest, SingleRequestDtorWithStagedRequest) {
@@ -75,8 +78,7 @@ TEST(AggregatorTest, SingleRequestDtorWithStagedRequest) {
     auto fut = request.response.get_future();
 
     {
-        cloud_topics::l0::aggregator<ss::manual_clock> aggregator{
-          cloud_topics::object_id::create(cloud_topics::cluster_epoch{0})};
+        cloud_topics::l0::aggregator<ss::manual_clock> aggregator;
         aggregator.add(request);
     }
     ASSERT_TRUE(fut.available());
@@ -95,10 +97,9 @@ TEST(AggregatorTest, SingleRequestDtorWithPreparedRequest) {
     auto fut = request.response.get_future();
 
     {
-        cloud_topics::l0::aggregator<ss::manual_clock> aggregator{
-          cloud_topics::object_id::create(cloud_topics::cluster_epoch{0})};
+        cloud_topics::l0::aggregator<ss::manual_clock> aggregator;
         aggregator.add(request);
-        std::ignore = aggregator.prepare();
+        std::ignore = aggregator.prepare(make_oid(0));
     }
     ASSERT_TRUE(fut.available());
     auto err = fut.get();
@@ -118,8 +119,7 @@ TEST(AggregatorTest, SingleRequestDtorWithLostRequestStaged) {
     auto fut = request.response.get_future();
 
     {
-        cloud_topics::l0::aggregator<ss::manual_clock> aggregator{
-          cloud_topics::object_id::create(cloud_topics::cluster_epoch{0})};
+        cloud_topics::l0::aggregator<ss::manual_clock> aggregator;
         aggregator.add(request);
         {
             // tmp_request is destroyed at the end of this block and aggregator
@@ -157,11 +157,10 @@ TEST(AggregatorTest, SingleRequestDtorWithLostRequestPrepared) {
           min_epoch,
           get_random_serialized_chunk(10, 10),
           timeout);
-        cloud_topics::l0::aggregator<ss::manual_clock> aggregator{
-          cloud_topics::object_id::create(cloud_topics::cluster_epoch{0})};
+        cloud_topics::l0::aggregator<ss::manual_clock> aggregator;
         aggregator.add(request);
         aggregator.add(tmp_request);
-        std::ignore = aggregator.prepare();
+        std::ignore = aggregator.prepare(make_oid(0));
     }
     ASSERT_TRUE(fut.available());
     auto err = fut.get();
@@ -176,8 +175,7 @@ TEST(AggregatorTest, SingleRequestWithLostRequestPrepared) {
       model::controller_ntp, min_epoch, std::move(chunk), timeout);
     auto fut = request.response.get_future();
 
-    cloud_topics::l0::aggregator<ss::manual_clock> aggregator{
-      cloud_topics::object_id::create(cloud_topics::cluster_epoch{0})};
+    cloud_topics::l0::aggregator<ss::manual_clock> aggregator;
     aggregator.add(request);
     {
         cloud_topics::l0::write_request<ss::manual_clock> tmp_request(
@@ -188,11 +186,11 @@ TEST(AggregatorTest, SingleRequestWithLostRequestPrepared) {
         aggregator.add(tmp_request);
     }
 
-    auto dest = aggregator.prepare();
+    auto dest = aggregator.prepare(make_oid(0));
 
     aggregator.ack();
     ASSERT_TRUE(fut.available());
-    ASSERT_LT(dest.size_bytes(), aggregator.size_bytes());
+    ASSERT_LT(dest.payload.size_bytes(), aggregator.size_bytes());
 }
 
 TEST(AggregatorTest, MinEpoch) {
