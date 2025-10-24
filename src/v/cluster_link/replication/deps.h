@@ -9,13 +9,12 @@
  */
 #pragma once
 
+#include "cluster_link/replication/types.h"
 #include "container/chunked_vector.h"
 #include "kafka/protocol/errors.h"
 #include "model/fundamental.h"
-#include "model/record.h"
 #include "model/timeout_clock.h"
 #include "raft/replicate.h"
-#include "ssx/semaphore.h"
 
 namespace cluster_link::replication {
 
@@ -89,15 +88,10 @@ public:
      */
     virtual ss::future<> reset(kafka::offset) = 0;
 
-    struct data {
-        chunked_vector<::model::record_batch> batches;
-        ssx::semaphore_units units;
-    };
-
     /**
      * Fetches some data, if any.
      */
-    virtual ss::future<data> fetch_next(ss::abort_source&) = 0;
+    virtual ss::future<fetch_data> fetch_next(ss::abort_source&) = 0;
 
     /// \brief Returns the source partitions offsets (HWM and LSO)
     virtual std::optional<source_partition_offsets_report> get_offsets() = 0;

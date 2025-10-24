@@ -85,8 +85,7 @@ ss::future<> random_data_source::reset(kafka::offset offset) {
     _next = offset;
     return ss::now();
 }
-ss::future<data_source::data>
-random_data_source::fetch_next(ss::abort_source& as) {
+ss::future<fetch_data> random_data_source::fetch_next(ss::abort_source& as) {
     auto holder = _gate.hold();
     auto batch = ::model::test::make_random_batch(
       kafka::offset_cast(_next), 5, true, model::record_batch_type::raft_data);
@@ -94,7 +93,7 @@ random_data_source::fetch_next(ss::abort_source& as) {
     batches.push_back(std::move(batch));
     co_await ss::sleep_abortable(
       std::chrono::milliseconds{random_generators::get_int(1, 3)}, as);
-    co_return data_source::data{std::move(batches), ssx::semaphore_units{}};
+    co_return fetch_data{std::move(batches), ssx::semaphore_units{}};
 }
 
 std::optional<data_source::source_partition_offsets_report>

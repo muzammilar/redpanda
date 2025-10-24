@@ -18,9 +18,9 @@ package redpanda.core.admin.internal.cloud_topics.v1;
 
 import "proto/redpanda/core/pbgen/options.proto";
 import "proto/redpanda/core/pbgen/rpc.proto";
-import "proto/redpanda/core/common/ntp.proto";
+import "proto/redpanda/core/common/v1/ntp.proto";
 
-option (redpanda.core.pbgen.cpp_namespace) = "proto::admin::metastore";
+option (pbgen.cpp_namespace) = "proto::admin::metastore";
 
 // Admin endpoints to interact with the L1 metastore for Cloud Topics.
 //
@@ -49,7 +49,7 @@ service MetastoreService {
     // namespace. If the metastore contains no data for this NTP then a not
     // found error will be thrown.
     rpc GetOffsets(GetOffsetsRequest) returns (GetOffsetsResponse) {
-        option (redpanda.core.pbgen.rpc) = {
+        option (pbgen.rpc) = {
             authz: SUPERUSER
         };
     }
@@ -59,7 +59,7 @@ service MetastoreService {
 // for a topic partition.
 message GetOffsetsRequest {
     // The topic partition to lookup the offstes for.
-    redpanda.core.common.TopicPartition partition = 1;
+    common.v1.TopicPartition partition = 1;
 }
 
 // GetOffsetsResponse is the response for looking up the offsets in the

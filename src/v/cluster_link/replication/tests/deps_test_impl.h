@@ -11,7 +11,7 @@
 #pragma once
 
 #include "cluster_link/replication/deps.h"
-#include "cluster_link/replication/link_replication_mgr.h"
+#include "cluster_link/replication/types.h"
 
 #include <seastar/core/gate.hh>
 
@@ -51,7 +51,7 @@ public:
     ss::future<> start(kafka::offset) noexcept override;
     ss::future<> stop() noexcept override;
     ss::future<> reset(kafka::offset) override;
-    ss::future<data_source::data> fetch_next(ss::abort_source&) override;
+    ss::future<fetch_data> fetch_next(ss::abort_source&) override;
     std::optional<source_partition_offsets_report> get_offsets() final;
 
 private:

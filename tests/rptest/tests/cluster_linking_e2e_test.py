@@ -17,13 +17,14 @@ import threading
 import time
 import json
 
+from ducktape.cluster.cluster import ClusterNode
 from ducktape.cluster.cluster_spec import ClusterSpec
 from connectrpc.errors import ConnectError, ConnectErrorCode
 from contextlib import nullcontext
 from ducktape.mark import matrix
 from ducktape.mark import ignore
 
-from rptest.clients.admin.proto.redpanda.core.common import acl_pb2
+from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2, tls_pb2
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
 )
@@ -47,6 +48,8 @@ from rptest.services.multi_cluster_services import (
     ServiceType,
 )
 from rptest.services.redpanda import (
+    MetricSamples,
+    MetricsEndpoint,
     RedpandaService,
     SchemaRegistryConfig,
     SecurityConfig,
@@ -69,7 +72,7 @@ from rptest.util import (
     wait_until,
     wait_until_result,
 )
-from typing import Any
+from typing import Any, Callable, Optional
 from time import sleep
 import google.protobuf.duration_pb2
 
@@ -1156,9 +1159,9 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         # Test invalid TLS settings, source cluster has no TLS
         bad_link_request = self.create_default_link_request("bad-link-tls")
         bad_link_request.shadow_link.configurations.client_options.tls_settings.CopyFrom(
-            shadow_link_pb2.TLSSettings(
+            tls_pb2.TLSSettings(
                 enabled=True,
-                tls_file_settings=shadow_link_pb2.TLSFileSettings(
+                tls_file_settings=tls_pb2.TLSFileSettings(
                     ca_path=self.redpanda.TLS_CA_CRT_FILE,
                     key_path=self.redpanda.TLS_SERVER_KEY_FILE,
                     cert_path=self.redpanda.TLS_SERVER_CRT_FILE,
@@ -2098,9 +2101,9 @@ class ShadowLinkUpdateBrokersTests(ShadowLinkPreAllocTestBase):
 
         # Update tls settings
         shadow_link.configurations.client_options.tls_settings.CopyFrom(
-            shadow_link_pb2.TLSSettings(
+            tls_pb2.TLSSettings(
                 enabled=True,
-                tls_file_settings=shadow_link_pb2.TLSFileSettings(
+                tls_file_settings=tls_pb2.TLSFileSettings(
                     ca_path=self.redpanda.TLS_CA_CRT_FILE,
                     key_path=self.redpanda.TLS_SERVER_KEY_FILE,
                     cert_path=self.redpanda.TLS_SERVER_CRT_FILE,
@@ -2145,6 +2148,251 @@ class ShadowLinkUpdateBrokersTests(ShadowLinkPreAllocTestBase):
         assert not topic_exists_in_target(old_source_topic), (
             f"Topic {old_source_topic} should not be visible to the target cluster"
         )
+
+
+class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
+    def _get_metrics_for_node(
+        self,
+        node: ClusterNode,
+        patterns: list[str],
+    ) -> Optional[dict[str, MetricSamples]]:
+        def get_metrics_from_node_sync(patterns: list[str]):
+            samples = self.redpanda.metrics_samples(
+                patterns, [node], MetricsEndpoint.PUBLIC_METRICS
+            )
+            success = set(samples.keys()) == set(patterns)
+            return success, samples
+
+        try:
+            samples = wait_until_result(
+                lambda: get_metrics_from_node_sync(patterns),
+                timeout_sec=2,
+                backoff_sec=0.1,
+            )
+            return samples
+        except ducktape.errors.TimeoutError:
+            return None
+
+    def _get_metrics_for_nodes(
+        self,
+        nodes: list[ClusterNode],
+        patterns: list[str],
+    ) -> Optional[list[dict[str, MetricSamples]]]:
+        metrics: list[dict[str, MetricSamples]] = []
+        for n in nodes:
+            node_metrics = self._get_metrics_for_node(n, patterns)
+
+            if node_metrics is None:
+                continue
+            metrics.append(node_metrics)
+        return metrics
+
+    def _validate_metrics(
+        self,
+        nodes: list[ClusterNode],
+        patterns: list[str],
+        validator: Callable[[list[dict[str, MetricSamples]]], bool],
+    ):
+        metrics = self._get_metrics_for_nodes(nodes, patterns)
+        if metrics is None:
+            return False
+        return validator(metrics)
+
+    @cluster(num_nodes=10)
+    def test_link_metrics(self):
+        topic_1 = TopicSpec(
+            name="test-topic-1", partition_count=3, replication_factor=1
+        )
+        self.source_default_client().create_topic(topic_1)
+        self.create_link("test-link")
+
+        self.start_producer_consumer(topic=topic_1.name, msg_size=128, msg_cnt=1000)
+        self.verify()
+
+        def check_shadow_topic_states(
+            node_samples: list[dict[str, MetricSamples]], n_active: int
+        ) -> bool:
+            sts = "shadow_topic_state"
+            other_statuses = [
+                "failed",
+                "paused",
+                "failing_over",
+                "failed_over",
+                "promoting",
+                "promoted",
+            ]
+
+            if not node_samples:
+                return False
+
+            by_status: dict[str, int] = {}
+            for samples in node_samples:
+                if sts not in samples:
+                    continue
+                for s in samples[sts].samples:
+                    status = s.labels["status"]
+                    if status not in by_status:
+                        by_status[status] = 0
+                    by_status[status] += int(s.value)
+            return by_status["active"] == n_active and all(
+                [by_status[s] == 0 for s in other_statuses]
+            )
+
+        def check_total_value(
+            node_samples: list[dict[str, MetricSamples]],
+            metric_name: str,
+            expected_total: int,
+        ) -> bool:
+            total_records = 0
+            for samples in node_samples:
+                if metric_name not in samples:
+                    return False
+                for s in samples[metric_name].samples:
+                    total_records += s.value
+            return total_records == expected_total
+
+        # This function only checks that the result is greater than zero. i.e. something has been returned by this metric
+        def check_value_positive(
+            node_samples: list[dict[str, MetricSamples]], metric_name: str
+        ) -> bool:
+            total_value = 0
+            for samples in node_samples:
+                if metric_name not in samples:
+                    return False
+                for s in samples[metric_name].samples:
+                    total_value += s.value
+            return total_value > 0
+
+        def check_metric_exists(
+            node_samples: list[dict[str, MetricSamples]], metric_name: str
+        ) -> bool:
+            for samples in node_samples:
+                if metric_name not in samples:
+                    return False
+            return True
+
+        def active_shadow_topics_1(samples: list[dict[str, MetricSamples]]):
+            return check_shadow_topic_states(samples, 1)
+
+        def active_shadow_topics_2(samples: list[dict[str, MetricSamples]]):
+            return check_shadow_topic_states(samples, 2)
+
+        def check_records_fetched_1000(samples: list[dict[str, MetricSamples]]):
+            return check_total_value(samples, "total_records_fetched", 1000)
+
+        def check_records_fetched_2500(samples: list[dict[str, MetricSamples]]):
+            return check_total_value(samples, "total_records_fetched", 2500)
+
+        def check_records_written_1000(samples: list[dict[str, MetricSamples]]):
+            return check_total_value(samples, "total_records_written", 1000)
+
+        def check_records_written_2500(samples: list[dict[str, MetricSamples]]):
+            return check_total_value(samples, "total_records_written", 2500)
+
+        def check_bytes_fetched(samples: list[dict[str, MetricSamples]]):
+            return check_value_positive(samples, "total_bytes_fetched")
+
+        def check_bytes_written(samples: list[dict[str, MetricSamples]]):
+            return check_value_positive(samples, "total_bytes_written")
+
+        def check_shadow_lag_zero(node_samples: list[dict[str, MetricSamples]]) -> bool:
+            return check_total_value(node_samples, "shadow_lag", 0)
+
+        def check_shadow_lag_positive(
+            node_samples: list[dict[str, MetricSamples]],
+        ) -> bool:
+            return check_value_positive(node_samples, "shadow_lag")
+
+        def check_client_errors(node_samples: list[dict[str, MetricSamples]]) -> bool:
+            return check_metric_exists(node_samples, "client_errors")
+
+        target_nodes = self.target_cluster.service.nodes
+
+        metric_validators = [
+            ("shadow_topic_state", active_shadow_topics_1),
+            ("total_records_fetched", check_records_fetched_1000),
+            ("total_records_written", check_records_written_1000),
+            ("total_bytes_fetched", check_bytes_fetched),
+            ("total_bytes_written", check_bytes_written),
+            ("shadow_lag", check_shadow_lag_zero),
+            ("client_errors", check_client_errors),
+        ]
+        for metric_name, validator in metric_validators:
+            self.logger.debug(f"Validating values of metric: {metric_name}")
+            wait_until(
+                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
+                timeout_sec=10,
+                backoff_sec=1,
+                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
+            )
+
+        topic_2 = TopicSpec(
+            name="test-topic-2", partition_count=3, replication_factor=1
+        )
+        self.source_default_client().create_topic(topic_2)
+        self.start_producer_consumer(topic=topic_2.name, msg_size=128, msg_cnt=1500)
+        self.verify()
+
+        metric_validators = [
+            ("shadow_topic_state", active_shadow_topics_2),
+            ("total_records_fetched", check_records_fetched_2500),
+            ("total_records_written", check_records_written_2500),
+            ("total_bytes_fetched", check_bytes_fetched),
+            ("total_bytes_written", check_bytes_written),
+            ("shadow_lag", check_shadow_lag_zero),
+            ("client_errors", check_client_errors),
+        ]
+        for metric_name, validator in metric_validators:
+            self.logger.debug(f"Validating values of metric: {metric_name}")
+            wait_until(
+                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
+                timeout_sec=10,
+                backoff_sec=1,
+                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
+            )
+
+        topic_3 = TopicSpec(
+            name="test-topic-3", partition_count=1, replication_factor=3
+        )
+        self.source_default_client().create_topic(topic_3)
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic_3.name),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {topic_3.name} not found in target cluster",
+        )
+
+        self.start_producer_consumer(
+            topic=topic_3.name,
+            msg_size=128,
+            msg_cnt=100000,
+            use_transactions=True,
+            msgs_per_transaction=10000,
+        )
+        metric_validators = [
+            ("shadow_lag", check_shadow_lag_positive),
+        ]
+        for metric_name, validator in metric_validators:
+            self.logger.debug(f"Validating values of metric: {metric_name}")
+            wait_until(
+                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
+                timeout_sec=30,
+                backoff_sec=1,
+                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
+            )
+        self.verify()
+
+        metric_validators = [
+            ("shadow_lag", check_shadow_lag_zero),
+        ]
+        for metric_name, validator in metric_validators:
+            self.logger.debug(f"Validating values of metric: {metric_name}")
+            wait_until(
+                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
+                timeout_sec=30,
+                backoff_sec=1,
+                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
+            )
 
 
 class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):

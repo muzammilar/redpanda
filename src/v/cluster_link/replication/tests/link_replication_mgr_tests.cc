@@ -9,6 +9,7 @@
  */
 
 #include "cluster_link/replication/link_replication_mgr.h"
+#include "cluster_link/replication/types.h"
 #include "model/tests/random_batch.h"
 #include "random/generators.h"
 #include "test_utils/randoms.h"
@@ -45,14 +46,14 @@ public:
         return ss::make_ready_future<>();
     }
     ss::future<> stop() noexcept override { return _gate.close(); }
-    ss::future<data_source::data> fetch_next(ss::abort_source& as) override {
+    ss::future<fetch_data> fetch_next(ss::abort_source& as) override {
         auto holder = _gate.hold();
         co_await ss::sleep_abortable(sleep_for(), as);
         auto batch = model::test::make_random_batch(
           model::offset{0}, 5, true, model::record_batch_type::raft_data);
         chunked_vector<model::record_batch> batches;
         batches.push_back(std::move(batch));
-        co_return data_source::data{std::move(batches), ssx::semaphore_units{}};
+        co_return fetch_data{std::move(batches), ssx::semaphore_units{}};
     }
     std::optional<data_source::source_partition_offsets_report>
     get_offsets() final {

@@ -11,7 +11,9 @@ redpanda_cc_library(
     visibility = ["//src/v/cluster_link:__subpackages__"],
     deps = [
         "//src/v/base",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
+        "//src/v/ssx:semaphore",
     ],
 )
 
@@ -25,6 +27,7 @@ redpanda_cc_library(
     ],
     visibility = ["//src/v/cluster_link:__subpackages__"],
     deps = [
+        ":types",
         "//src/v/container:chunked_hash_map",
         "//src/v/container:chunked_vector",
         "//src/v/kafka/protocol",
@@ -38,9 +41,11 @@ redpanda_cc_library(
     name = "partition_replicator",
     srcs = [
         "partition_replicator.cc",
+        "replication_probe.cc",
     ],
     hdrs = [
         "partition_replicator.h",
+        "replication_probe.h",
     ],
     visibility = [
         "__subpackages__",
@@ -50,7 +55,9 @@ redpanda_cc_library(
         ":deps",
         ":types",
         "//src/v/cluster_link:logger",
+        "//src/v/config",
         "//src/v/container:chunked_vector",
+        "//src/v/metrics",
         "//src/v/model",
         "//src/v/ssx:future_util",
         "//src/v/ssx:semaphore",
@@ -78,6 +85,7 @@ redpanda_cc_library(
     deps = [
         ":deps",
         ":partition_replicator",
+        ":types",
         "//src/v/base",
         "//src/v/cluster_link:logger",
         "//src/v/container:chunked_hash_map",
@@ -98,9 +106,9 @@ redpanda_cc_library(
     ],
     visibility = ["__subpackages__"],
     deps = [
+        ":types",
         "//src/v/container:chunked_vector",
         "//src/v/model",
-        "//src/v/ssx:semaphore",
         "@seastar",
     ],
 )

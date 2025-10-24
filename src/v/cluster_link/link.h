@@ -23,6 +23,9 @@
 #include "utils/notification_list.h"
 
 namespace cluster_link {
+
+class link_probe;
+
 /**
  * @brief The link class represents a link between two clusters
  */
@@ -42,7 +45,7 @@ public:
     link(link&&) = delete;
     link& operator=(const link&) = delete;
     link& operator=(link&&) = delete;
-    virtual ~link() = default;
+    virtual ~link() noexcept;
 
     virtual ss::future<> start();
     virtual ss::future<> stop() noexcept;
@@ -146,6 +149,7 @@ private:
     ss::lowres_clock::duration _task_reconciler_interval;
     mutex _task_reconciler_mutex{"cluster_link::link::task_reconciler"};
     ss::timer<ss::lowres_clock> _task_reconciler;
+    std::unique_ptr<link_probe> _probe;
     ss::gate _gate;
     ss::abort_source _as;
 };

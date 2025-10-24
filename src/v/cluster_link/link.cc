@@ -12,9 +12,11 @@
 #include "cluster_link/link.h"
 
 #include "cluster_link/deps.h"
+#include "cluster_link/link_probe.h"
 #include "cluster_link/logger.h"
 #include "cluster_link/manager.h"
 #include "cluster_link/model/types.h"
+#include "cluster_link/replication/replication_probe.h"
 #include "cluster_link/utils.h"
 #include "model/fundamental.h"
 #include "model/namespace.h"
@@ -89,15 +91,24 @@ link::link(
       _manager->scheduling_group(),
       std::move(config_provider),
       std::move(data_source_factory),
-      std::move(data_sink_factory))
-  , _task_reconciler_interval(task_reconciler_interval) {}
+      std::move(data_sink_factory),
+      replication::replication_probe::configuration{
+        .group_name = _config.name,
+        .labels = {link_probe::shadow_link_name(_config.name)}})
+  , _task_reconciler_interval(task_reconciler_interval)
+  , _probe{} {}
+
+link::~link() noexcept = default;
 
 ss::future<> link::start() {
     vlog(
       cllog.info, "Starting cluster link {} ({})", _config.name, _config.uuid);
+
     // Allow exception to propagate to the caller
+    _probe = std::make_unique<link_probe>(*this);
+
     co_await _cluster_connection->start();
-    co_await _replication_mgr.start();
+    co_await _replication_mgr.start(_probe->get_link_data());
     co_await run_task_reconciler();
     _task_reconciler.set_callback([this] {
         ssx::spawn_with_gate(_gate, [this] {
@@ -149,6 +160,8 @@ ss::future<> link::stop() noexcept {
     } catch (const std::exception& e) {
         vlog(cllog.warn, "Error shutting down cluster connection: {}", e);
     }
+
+    _probe.reset(nullptr);
 
     vlog(cllog.info, "Stopped link {} ({})", _config.name, _config.uuid);
 }
@@ -285,6 +298,9 @@ ss::future<> link::handle_on_leadership_change(
             _replication_mgr.stop_replicator(ntp, term);
         }
     }
+
+    _probe->handle_on_leadership_change(ntp, is_ntp_leader);
+
     // todo: add debouncing here so that we do not trigger multiple
     // reconciliation loops at once.
     co_await run_task_reconciler();

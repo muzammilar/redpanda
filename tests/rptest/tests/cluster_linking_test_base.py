@@ -24,7 +24,7 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
     shadow_link_pb2_connect,
 )
-from rptest.clients.admin.proto.redpanda.core.common import acl_pb2
+from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2
 from rptest.clients.admin.v2 import Admin as AdminV2
 from rptest.clients.default import DefaultClient
 from rptest.clients.rpk import RpkTool
@@ -790,6 +790,7 @@ class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
         msg_size: int = 128,
         msg_cnt: int = 10000,
         use_transactions: bool = False,
+        msgs_per_transaction: int | None = None,
         transaction_abort_rate: float = 0.3,
     ):
         self.verifier = ClusterLinkingProgressVerifier(
@@ -802,7 +803,10 @@ class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
             msg_count=msg_cnt,
             msg_size=msg_size,
             use_transactions=use_transactions,
-            producer_properties={"transaction_abort_rate": transaction_abort_rate},
+            producer_properties={
+                "transaction_abort_rate": transaction_abort_rate,
+                "msgs_per_transaction": msgs_per_transaction,
+            },
             timeout_sec=180,
         )
         self.verifier.start()
