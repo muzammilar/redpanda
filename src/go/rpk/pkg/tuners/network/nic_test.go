@@ -63,7 +63,7 @@ func Test_nic_IsBondIface(t *testing.T) {
 	procFile := &procFileMock{}
 	deviceInfo := &deviceInfoMock{}
 	nic := NewNic(fs, procFile, deviceInfo, &ethtoolMock{}, "test0")
-	afero.WriteFile(fs, "/sys/class/net/bond_masters", []byte(fmt.Sprintln("test0")), 0o644)
+	afero.WriteFile(fs, "/sys/class/net/test0/lower_ens5", []byte{}, 0o644)
 	// when
 	bond := nic.IsBondIface()
 	// then
@@ -76,8 +76,9 @@ func Test_nic_Slaves_ReturnAllSlavesOfAnInterface(t *testing.T) {
 	procFile := &procFileMock{}
 	deviceInfo := &deviceInfoMock{}
 	nic := NewNic(fs, procFile, deviceInfo, &ethtoolMock{}, "test0")
-	afero.WriteFile(fs, "/sys/class/net/bond_masters", []byte(fmt.Sprintln("test0")), 0o644)
-	afero.WriteFile(fs, "/sys/class/net/test0/bond/slaves", []byte("sl0\nsl1\nsl2"), 0o644)
+	afero.WriteFile(fs, "/sys/class/net/test0/lower_sl0", []byte{}, 0o644)
+	afero.WriteFile(fs, "/sys/class/net/test0/lower_sl1", []byte{}, 0o644)
+	afero.WriteFile(fs, "/sys/class/net/test0/lower_sl2", []byte{}, 0o644)
 	// when
 	slaves, err := nic.Slaves()
 	// then
@@ -94,6 +95,7 @@ func Test_nic_Slaves_ReturnEmptyForNotBondInterface(t *testing.T) {
 	procFile := &procFileMock{}
 	deviceInfo := &deviceInfoMock{}
 	nic := NewNic(fs, procFile, deviceInfo, &ethtoolMock{}, "test0")
+	fs.MkdirAll("/sys/class/net/test0/device", 0o755)
 	// when
 	slaves, err := nic.Slaves()
 	// then
