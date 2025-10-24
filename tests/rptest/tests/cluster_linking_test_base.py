@@ -399,7 +399,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
             test_context=test_context,
             # For running kgo producer/consumer
             node_prealloc_count=num_prealloc_nodes,
-            num_brokers=3,
+            num_brokers=num_brokers,
             *args,
             **kwargs,
         )
