@@ -27,6 +27,7 @@ redpanda_cc_library(
     deps = [
         "//src/v/container:chunked_hash_map",
         "//src/v/container:chunked_vector",
+        "//src/v/kafka/protocol",
         "//src/v/model",
         "//src/v/raft",
         "//src/v/ssx:semaphore",
@@ -70,6 +71,7 @@ redpanda_cc_library(
         "link_replication_mgr.h",
     ],
     implementation_deps = [
+        "//src/v/ssx:async_algorithm",
         "//src/v/ssx:future_util",
     ],
     visibility = ["//src/v/cluster_link:__subpackages__"],

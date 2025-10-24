@@ -46,7 +46,11 @@ from rptest.services.multi_cluster_services import (
     SecondaryClusterSpec,
     ServiceType,
 )
-from rptest.services.redpanda import SchemaRegistryConfig, SecurityConfig
+from rptest.services.redpanda import (
+    RedpandaService,
+    SchemaRegistryConfig,
+    SecurityConfig,
+)
 from rptest.services.tls import TLSCertManager
 from rptest.tests.cluster_linking_test_base import (
     DEFAULT_SYNCED_TOPIC_PROPERTIES,
@@ -56,6 +60,7 @@ from rptest.tests.cluster_linking_test_base import (
     ShadowLinkPreAllocTestBase,
     ShadowLinkTestBase,
 )
+from rptest.clients.admin.proto.redpanda.core.admin.v2 import shadow_link_pb2
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import (
     bg_thread_cm,
@@ -1116,6 +1121,83 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             ):
                 self.update_link(shadow_link, update_mask)
 
+    @cluster(num_nodes=6)
+    @matrix(
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_link_creation_checks(self, source_cluster_spec):
+        """
+        Checks that preflight checks during link creation work as expected. Particularly
+        creating links where the remote cluster is not reachable due to connectivity issues
+        or incorrect configurations.
+        """
+        # Test incorrect bootstrap servers
+        bad_bootstrap_servers = [
+            "non.existent.server:9092",
+            "one.more.bad:9092",
+            "localhost:1234",
+        ]
+        bad_link_request = self.create_default_link_request("bad-link")
+        bad_link_request.shadow_link.configurations.client_options.bootstrap_servers[
+            :
+        ] = bad_bootstrap_servers
+
+        with expect_exception(
+            ConnectError,
+            lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
+        ):
+            self.create_link_with_request(req=bad_link_request)
+
+        # Test invalid TLS settings, source cluster has no TLS
+        bad_link_request = self.create_default_link_request("bad-link-tls")
+        bad_link_request.shadow_link.configurations.client_options.tls_settings.CopyFrom(
+            shadow_link_pb2.TLSSettings(
+                enabled=True,
+                tls_file_settings=shadow_link_pb2.TLSFileSettings(
+                    ca_path=self.redpanda.TLS_CA_CRT_FILE,
+                    key_path=self.redpanda.TLS_SERVER_KEY_FILE,
+                    cert_path=self.redpanda.TLS_SERVER_CRT_FILE,
+                ),
+            )
+        )
+        with expect_exception(
+            ConnectError,
+            lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
+        ):
+            self.create_link_with_request(req=bad_link_request)
+
+        # Kill one broker on the source cluster to simulate partial connectivity
+        # during preflight checks
+        node_to_stop = self.source_cluster._service.get_node(idx=1)
+        self.source_cluster._service.stop_node(node_to_stop)
+        self.create_link("link-with-partial-connectivity")
+
+    @cluster(num_nodes=6)
+    def test_link_creation_incompatible_api(self):
+        """
+        Tests that link creation fails when the source cluster has an incompatible
+        kafka API support.
+        """
+        # Downgrade the source cluster to a version that does not support
+        # v10 of metadata request used for cluster linking
+        assert isinstance(self.source_cluster.service, RedpandaService), (
+            "Invalid source cluster service type"
+        )
+        rp = self.source_cluster.service
+        rp._installer.install(rp.nodes, (25, 1))
+        rp.for_nodes(rp.nodes, lambda node: rp.stop_node(node))
+        rp.start(rp.nodes, clean_nodes=True)
+        with expect_exception(
+            ConnectError,
+            lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
+        ):
+            self.create_link("link-to-incompatible-cluster")
+
 
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
     def leadership_shuffler(self, redpanda, topic: str, enabled: bool):
@@ -1388,6 +1470,127 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         )
         consumer.start()
         consumer.wait_total_reads(count=9000, timeout_sec=60, backoff_sec=5)
+
+    def _maybe_failure_injector(self, with_failures: bool):
+        if with_failures:
+            return self.create_source_failure_injector()
+        else:
+            return self._nop_context_manager()
+
+    def _perform_auto_prefix_trimming(self, topic_name: str, partition_count: int):
+        self.start_producer_consumer(topic=topic_name, msg_size=128, msg_cnt=100000)
+        offsets = [1000, 1001, 1200, 1500, 2000, 2500]
+
+        def wait_for_records(rpk: RpkTool, offset: int, expected_partition_count: int):
+            num_parts = 0
+            for part in rpk.describe_topic("source-topic"):
+                num_parts += 1
+                if (part.high_watermark or 0) < offset:
+                    return False
+            return num_parts == expected_partition_count
+
+        partitions = list(range(partition_count))
+
+        for o in offsets:
+            self.source_cluster.service.wait_until(
+                lambda: wait_for_records(
+                    self.source_cluster_rpk,
+                    offset=o,
+                    expected_partition_count=partition_count,
+                ),
+                timeout_sec=30,
+                backoff_sec=1,
+                err_msg=f"Timed out waiting for {o} records in each partition",
+            )
+
+            self.logger.info(f"Trimming source topic prefixes to {o}")
+            self.source_cluster_rpk.trim_prefix(
+                topic="source-topic", partitions=partitions, offset=o
+            )
+
+            def wait_for_start_offset(
+                rpk: RpkTool, offset: int, expected_partition_count: int
+            ):
+                num_parts = 0
+                for part in rpk.describe_topic("source-topic"):
+                    num_parts += 1
+                    self.logger.info(
+                        f"Offset for source-topic/{part.id} is {part.start_offset}"
+                    )
+                    if (part.start_offset or 0) != offset:
+                        return False
+                return num_parts == expected_partition_count
+
+            self.source_cluster.service.wait_until(
+                lambda: wait_for_start_offset(
+                    self.source_cluster_rpk,
+                    offset=o,
+                    expected_partition_count=partition_count,
+                ),
+                timeout_sec=30,
+                backoff_sec=1,
+                err_msg=f"Timed out waiting for start offset to be {o} in each partition",
+            )
+
+            # Produce a single message to ensure cluster linking picks up the trim
+            for part in range(0, partition_count):
+                self.logger.info(f"Producing trim-trigger message to partition {part}")
+                self.source_cluster_rpk.produce(
+                    topic="source-topic",
+                    key="trim-trigger",
+                    msg="trim-trigger",
+                    partition=part,
+                )
+
+            self.logger.info(
+                f"Now waiting for target cluster to get to {o} starting offset"
+            )
+
+            self.target_cluster.service.wait_until(
+                lambda: wait_for_start_offset(
+                    self.target_cluster_rpk,
+                    offset=o,
+                    expected_partition_count=partition_count,
+                ),
+                timeout_sec=60,
+                backoff_sec=1,
+                err_msg=f"Timed out waiting for target to get start offset to be {o} in each partition",
+            )
+
+    @cluster(num_nodes=8)
+    @ignore(
+        with_failures=True,
+        source_cluster_spec=SecondaryClusterSpec(
+            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+        ),
+    )
+    @matrix(
+        with_failures=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_auto_prefix_trimming(self, with_failures, source_cluster_spec):
+        partition_count = 5
+        topic = TopicSpec(
+            name="source-topic", partition_count=partition_count, replication_factor=3
+        )
+
+        self.source_default_client().create_topic(topic)
+        self.create_link("test-link")
+
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic.name),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in target cluster",
+        )
+
+        with self._maybe_failure_injector(with_failures):
+            self._perform_auto_prefix_trimming(topic.name, partition_count)
 
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
