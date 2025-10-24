@@ -461,6 +461,7 @@ reconciler::build_object(
         auto read_result = co_await add_source_to_object(
           ctx, src, start_offset);
 
+        // Enforce the size limit, but always allow one partition in.
         auto current_size = ctx.builder->file_size();
         if (!metas.empty() && current_size >= max_object_size) {
             vlog(
