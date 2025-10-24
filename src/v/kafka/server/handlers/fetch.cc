@@ -220,22 +220,20 @@ static ss::future<read_result> do_read_from_ntp(
   const bool obligatory_batch_read,
   fetch_memory_units_manager& units_mgr) {
     // control available memory
-    fetch_memory_units memory_units = [&] {
-        if (!ntp_config.cfg.skip_read) {
-            auto memory_units = units_mgr.allocate_memory_units(
-              ntp_config.cfg.max_bytes,
-              ntp_config.cfg.max_batch_size,
-              obligatory_batch_read);
-            if (!memory_units.has_units()) {
-                ntp_config.cfg.skip_read = true;
-            } else if (ntp_config.cfg.max_bytes > memory_units.num_units()) {
-                ntp_config.cfg.max_bytes = memory_units.num_units();
-            }
-            return memory_units;
-        } else {
-            return units_mgr.allocate_memory_units(0, 0, false);
+    auto memory_units = units_mgr.zero_units();
+    if (!ntp_config.cfg.skip_read) {
+        memory_units = units_mgr.allocate_memory_units(
+          ntp_config.ktp(),
+          ntp_config.cfg.max_bytes,
+          ntp_config.cfg.max_batch_size,
+          ntp_config.cfg.avg_batch_size,
+          obligatory_batch_read);
+        if (!memory_units.has_units()) {
+            ntp_config.cfg.skip_read = true;
+        } else if (ntp_config.cfg.max_bytes > memory_units.num_units()) {
+            ntp_config.cfg.max_bytes = memory_units.num_units();
         }
-    }();
+    }
 
     /*
      * lookup the ntp's partition
