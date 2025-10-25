@@ -263,6 +263,10 @@ void compaction_coordinator::on_local_mcco_update(model::offset new_mcco) {
         }
     }
     if (new_mcco < _local_mcco) {
+        // This may happen when a cleanly compacted segment is merged with the
+        // following one which is not cleanly compacted. Log only tracks clean
+        // compaction per segment, but compaction coordinator will retain
+        // earlier info about it gathered when segment were more granular.
         vlog(
           _logger.debug,
           "attempted to move local max cleanly compacted offset backwards from "
@@ -388,8 +392,20 @@ void compaction_coordinator::update_mtro(model::offset new_mtro) {
         return;
     }
     if (new_mtro < _mtro) [[unlikely]] {
+        // A follower with an empty log has MCCO of 0. Similarly, a follower
+        // with a log much shorter than the leader may have MCCO less than the
+        // group's MTRO. Low MCCO reported by such followers earlier may
+        // contribute to lowering the group's MTRO below existing value.
+        //
+        // It is intentionally ignored, as semantically MTRO remains the same:
+        // when such a follower catches up, its log will be filled with already
+        // cleanly compacted data, as, by definition of MTRO, all replicas have
+        // their logs cleanly compacted up to it.
+        //
+        // Later, when the follower receives MTRO from the leader, the follower
+        // will update its MCCO to at least match the group's MTRO.
         vlog(
-          _logger.error,
+          _logger.debug,
           "attempted to move max tombstone remove offset backwards from {} to "
           "{}",
           _mtro,
