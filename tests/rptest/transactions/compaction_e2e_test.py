@@ -79,6 +79,7 @@ class CompactionE2EIdempotencyTest(RedpandaTest):
                 replication_factor=3,
                 segment_bytes=self.segment_size,
                 cleanup_policy=initial_cleanup_policy,
+                delete_retention_ms=3000,
             )
         ]
         client.create_topic(self.topics[0])
@@ -200,7 +201,8 @@ class CompactionWithRecoveryTest(RedpandaTest, PartitionMovementMixin):
 
     @skip_debug_mode
     @cluster(num_nodes=4, log_allow_list=[re.compile("tx - .*partition_not_found")])
-    def test_tx_compaction_with_recovery(self):
+    @matrix(delete_retention_ms=[3, 300, 3000])
+    def test_tx_compaction_with_recovery(self, delete_retention_ms):
         """Ensures correctness of tx + compaction with partition moves"""
 
         client = DefaultClient(self.redpanda)
@@ -209,6 +211,7 @@ class CompactionWithRecoveryTest(RedpandaTest, PartitionMovementMixin):
             replication_factor=1,
             segment_bytes=self.segment_size,
             cleanup_policy=TopicSpec.CLEANUP_COMPACT,
+            delete_retention_ms=delete_retention_ms,
         )
 
         self.topics = [topic]
@@ -283,6 +286,7 @@ class CompactionE2ERebootTest(RedpandaTest):
                 replication_factor=3,
                 segment_bytes=self.segment_size,
                 cleanup_policy=initial_cleanup_policy,
+                delete_retention_ms=3000,
             )
         ]
         client.create_topic(self.topics[0])
