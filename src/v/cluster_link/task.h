@@ -86,6 +86,9 @@ public:
     /// Returns the status report for this task
     model::task_status_report get_status_report() const;
 
+    /// Returns whether or not the task is enabled
+    virtual model::enabled_t is_enabled() const = 0;
+
 protected:
     struct state_transition {
         model::task_state desired_state;

@@ -64,6 +64,8 @@ public:
           .desired_state = model::task_state::active,
           .reason = "Test task finished successfully"};
     }
+
+    model::enabled_t is_enabled() const final { return model::enabled_t::yes; }
 };
 
 class controller_locked_test_task : public controller_locked_task {
@@ -80,6 +82,8 @@ public:
           .desired_state = model::task_state::active,
           .reason = "Test task finished successfully"};
     }
+
+    model::enabled_t is_enabled() const final { return model::enabled_t::yes; }
 };
 
 class test_task_factory : public task_factory {
@@ -418,6 +422,8 @@ public:
             co_return co_await task::start();
         }
     }
+
+    model::enabled_t is_enabled() const final { return model::enabled_t::yes; }
 };
 
 class evil_task_factory : public task_factory {

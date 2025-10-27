@@ -270,6 +270,10 @@ void security_migrator::update_config(const model::metadata& config) {
       config.configuration.security_settings_sync_cfg.get_task_interval());
 }
 
+model::enabled_t security_migrator::is_enabled() const {
+    return _config.is_enabled;
+}
+
 ss::future<task::state_transition> security_migrator::run_impl() {
     vlog(logger().trace, "Running security migrator task");
     constexpr auto acl_creation_timeout = 5s;

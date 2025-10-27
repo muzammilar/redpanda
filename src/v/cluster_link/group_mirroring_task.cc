@@ -25,6 +25,10 @@ void group_mirroring_task::update_config(const model::metadata& link_metadata) {
     set_run_interval(_config.get_task_interval());
 }
 
+model::enabled_t group_mirroring_task::is_enabled() const {
+    return _config.is_enabled;
+}
+
 namespace {
 
 chunked_hash_set<::model::partition_id>

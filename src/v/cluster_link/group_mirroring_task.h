@@ -81,6 +81,8 @@ public:
 
     void update_config(const model::metadata& link_metadata) override;
 
+    model::enabled_t is_enabled() const final;
+
 protected:
     ss::future<state_transition> run_impl() override;
 

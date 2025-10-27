@@ -225,6 +225,10 @@ void source_topic_syncer::update_config(const model::metadata& config) {
       config.configuration.topic_metadata_mirroring_cfg.get_task_interval());
 }
 
+model::enabled_t source_topic_syncer::is_enabled() const {
+    return _config.is_enabled;
+}
+
 ss::future<task::state_transition> source_topic_syncer::run_impl() {
     vlog(logger().trace, "Running auto topic sensor task");
 

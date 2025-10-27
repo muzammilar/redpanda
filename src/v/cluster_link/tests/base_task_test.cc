@@ -54,6 +54,8 @@ public:
         set_run_interval(cfg->run_interval);
     }
 
+    model::enabled_t is_enabled() const final { return model::enabled_t::yes; }
+
     ss::future<state_transition> run_impl() override {
         _last_run = ss::lowres_clock::now();
         _count++;
@@ -252,10 +254,12 @@ public:
 
     void update_config(const model::metadata&) override {}
 
+    model::enabled_t is_enabled() const final { return model::enabled_t::yes; }
+
     ss::future<state_transition> run_impl() override {
         throw std::runtime_error("evil task failed");
     }
-};
+}; // namespace cluster_link
 
 class evil_task_fixture : public seastar_test {};
 
@@ -286,6 +290,8 @@ public:
     }
 
     void update_config(const model::metadata&) override {}
+
+    model::enabled_t is_enabled() const final { return model::enabled_t::yes; }
 
     ss::future<state_transition> run_impl() override {
         if (get_state() == model::task_state::active) {

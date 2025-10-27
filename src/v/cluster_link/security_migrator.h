@@ -39,6 +39,8 @@ public:
 
     void update_config(const model::metadata& config) override;
 
+    model::enabled_t is_enabled() const final;
+
 protected:
     ss::future<state_transition> run_impl() override;
 
