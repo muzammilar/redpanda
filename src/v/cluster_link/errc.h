@@ -48,6 +48,7 @@ enum class errc : int {
     link_broker_verification_failed,
     link_verification_unknown_error,
     failed_to_stop_task,
+    failed_to_pause_task,
 };
 
 std::error_code make_error_code(errc) noexcept;

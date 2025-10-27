@@ -80,6 +80,8 @@ struct error_category final : public std::error_category {
             return "link verification unknown error";
         case errc::failed_to_stop_task:
             return "failed to stop task";
+        case errc::failed_to_pause_task:
+            return "failed to pause task";
         }
 
         return "(unknown error code)";
