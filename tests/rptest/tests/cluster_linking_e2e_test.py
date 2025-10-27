@@ -20,7 +20,6 @@ import json
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.cluster.cluster_spec import ClusterSpec
 from connectrpc.errors import ConnectError, ConnectErrorCode
-from contextlib import nullcontext
 from ducktape.mark import matrix
 from ducktape.mark import ignore
 
@@ -65,7 +64,6 @@ from rptest.tests.cluster_linking_test_base import (
 from rptest.tests.full_disk_test import FDT_LOG_ALLOW_LIST
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import (
-    bg_thread_cm,
     expect_exception,
     wait_until,
     wait_until_result,
@@ -1320,26 +1318,6 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
 
 
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
-    def leadership_shuffler(self, redpanda, topic: str, enabled: bool):
-        if not enabled:
-            return nullcontext()
-
-        @bg_thread_cm
-        def leadership_transfer_thread(redpanda, topic: str):
-            admin = Admin(redpanda, retry_codes=[503, 504])
-            while (yield):
-                try:
-                    partitions = admin.get_partitions(namespace="kafka", topic=topic)
-                    partition = random.choice(partitions)
-                    p_id = partition["partition_id"]
-                    admin.partition_transfer_leadership(
-                        namespace="kafka", topic=topic, partition=p_id
-                    )
-                except Exception as e:
-                    redpanda.logger.info(f"error transferring leadership: {e}")
-
-        return leadership_transfer_thread(redpanda, topic)
-
     def _get_shadow_topic(
         self,
         shadow_link_name: str,
