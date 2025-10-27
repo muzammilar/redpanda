@@ -808,7 +808,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
                     {"enable_shadow_linking": state}
                 )
 
-        toggle_thread = threading.Thread(target=toggle_shadow_linking, args=(200,))
+        toggle_thread = threading.Thread(target=toggle_shadow_linking, args=(100,))
 
         toggle_thread.start()
         topics: list[TopicSpec] = []
@@ -819,14 +819,14 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             self.source_default_client().create_topic(topic)
             topics.append(topic)
 
+        toggle_thread.join()
+
         self.target_cluster.service.wait_until(
             lambda: self._topics_are_present_in_target_cluster(topics),
             timeout_sec=60,
             backoff_sec=1,
-            err_msg="Failed to find first-topic in target cluster",
+            err_msg="Failed to find all topics in target cluster",
         )
-
-        toggle_thread.join()
 
     @cluster(num_nodes=6)
     def test_shadow_link_sanctioning(self):
