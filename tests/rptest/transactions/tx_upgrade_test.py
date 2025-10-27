@@ -292,7 +292,7 @@ class TxUpgradeRevertTest(RedpandaTest):
                                 id, state, partitions, sequence=sequence
                             )
                         sequence += 1
-            except Exception as e:
+            except Exception:
                 self.failed = True
                 self.dump_debug_transaction_state()
                 self.redpanda.logger.error(
