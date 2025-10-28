@@ -188,6 +188,9 @@ class MultiClusterKafkaTest(MultiClusterTestBase):
 
 
 class ShadowLinkBasicTests(ShadowLinkTestBase):
+    def _expect_connect_error(self, expected_code: ConnectErrorCode):
+        return expect_exception(ConnectError, lambda e: e.code == expected_code)
+
     def _topics_are_present_in_target_cluster(self, topics):
         target_rpk = RpkTool(self.target_cluster.service)
         topics_in_target = {t for t in target_rpk.list_topics()}
@@ -314,13 +317,9 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             f"Expected shadow link name to be 'test-link', got {got_link.name}"
         )
 
-        try:
+        # Retrieving a non-existent link should fail
+        with self._expect_connect_error(ConnectErrorCode.NOT_FOUND):
             self.get_link(name="non-existent-link")
-            assert False, "Should not have gotten a non-existent link"
-        except ConnectError as e:
-            assert e.code == ConnectErrorCode.NOT_FOUND, (
-                f"Expected NOT_FOUND error code, got {e.code}"
-            )
 
         task_statuses = got_link.status.task_statuses
         self.logger.info(f"Shadow link task_statuses: {task_statuses}")
@@ -411,25 +410,14 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             f"Expected shadow link name to be 'test-link', got {shadow_link.name}"
         )
 
-        # Now attempt to create a second one with the same name
-        try:
+        # Attempting to create a second one with the same name should fail
+        with self._expect_connect_error(ConnectErrorCode.ALREADY_EXISTS):
             self.create_link("test-link")
-            assert False, (
-                "Should not have been able to create a second link with the same name"
-            )
-        except ConnectError as e:
-            assert e.code == ConnectErrorCode.ALREADY_EXISTS, (
-                f"Expected {ConnectErrorCode.ALREADY_EXISTS}, got {e.code}"
-            )
 
-        # Now create a second one with a different name
-        try:
+        # Attempting to create a second link should fail.
+        # Only one link is supported per cluster
+        with self._expect_connect_error(ConnectErrorCode.RESOURCE_EXHAUSTED):
             self.create_link("test-link-2")
-            assert False, "Should not have been able to create a second link"
-        except ConnectError as e:
-            assert e.code == ConnectErrorCode.RESOURCE_EXHAUSTED, (
-                f"Expected {ConnectErrorCode.RESOURCE_EXHAUSTED}, got {e.code}"
-            )
 
     @cluster(num_nodes=6)
     def test_topic_creation_in_target_cluster(self):
@@ -479,9 +467,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
                 shadow_link_name="test-link", shadow_topic_name=t.name
             )
 
-        with expect_exception(
-            ConnectError, lambda e: e.code == ConnectErrorCode.NOT_FOUND
-        ):
+        with self._expect_connect_error(ConnectErrorCode.NOT_FOUND):
             self.get_shadow_topic(
                 shadow_link_name="test-link", shadow_topic_name="non-existent-topic"
             )
@@ -792,9 +778,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         # Now verify that we can delete the link when force=True
         self.delete_link(test_link, force=True)
 
-        with expect_exception(
-            ConnectError, lambda e: e.code == ConnectErrorCode.NOT_FOUND
-        ):
+        with self._expect_connect_error(ConnectErrorCode.NOT_FOUND):
             self.get_link(test_link)
 
     @cluster(num_nodes=6)
@@ -1250,10 +1234,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             :
         ] = bad_bootstrap_servers
 
-        with expect_exception(
-            ConnectError,
-            lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
-        ):
+        with self._expect_connect_error(ConnectErrorCode.FAILED_PRECONDITION):
             self.create_link_with_request(req=bad_link_request)
 
         # Test invalid TLS settings, source cluster has no TLS
@@ -1268,10 +1249,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
                 ),
             )
         )
-        with expect_exception(
-            ConnectError,
-            lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
-        ):
+        with self._expect_connect_error(ConnectErrorCode.FAILED_PRECONDITION):
             self.create_link_with_request(req=bad_link_request)
 
         # Kill one broker on the source cluster to simulate partial connectivity
@@ -1295,10 +1273,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         rp._installer.install(rp.nodes, (25, 1))
         rp.for_nodes(rp.nodes, lambda node: rp.stop_node(node))
         rp.start(rp.nodes, clean_nodes=True)
-        with expect_exception(
-            ConnectError,
-            lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
-        ):
+        with self._expect_connect_error(ConnectErrorCode.FAILED_PRECONDITION):
             self.create_link("link-to-incompatible-cluster")
 
     @cluster(
