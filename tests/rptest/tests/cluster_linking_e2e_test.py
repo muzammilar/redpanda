@@ -2131,6 +2131,31 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             err_msg="Compaction state is not consistent between clusters",
         )
 
+    @cluster(num_nodes=9)
+    def test_with_restart(self):
+        self.create_link("test-link")
+
+        def restart_nodes(service):
+            for n in service.nodes:
+                service.restart_nodes([n])
+                time.sleep(5)
+
+        topic_1 = TopicSpec(
+            name="source-topic-1", partition_count=3, replication_factor=1
+        )
+        self.source_default_client().create_topic(topic_1)
+        self.start_producer_consumer(topic=topic_1.name, msg_size=128, msg_cnt=100000)
+        restart_nodes(self.target_cluster_service)
+        self.verify()
+
+        topic_2 = TopicSpec(
+            name="source-topic-2", partition_count=3, replication_factor=1
+        )
+        self.source_default_client().create_topic(topic_2)
+        self.start_producer_consumer(topic=topic_2.name, msg_size=128, msg_cnt=100000)
+        restart_nodes(self.source_cluster_service)
+        self.verify()
+
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
     def create_source_consumer(
