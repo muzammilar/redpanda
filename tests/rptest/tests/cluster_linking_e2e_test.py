@@ -308,13 +308,28 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
 
         links = self.list_links()
         assert len(links) == 1, f"Expected exactly one shadow link, got {len(links)}"
-        assert links[0].name == "test-link", (
-            f"Expected shadow link name to be 'test-link', got {links[0].name}"
+
+        test_link = links[0]
+        assert test_link.name == "test-link", (
+            f"Expected shadow link name to be 'test-link', got {test_link.name}"
         )
+
+        active = shadow_link_pb2.ShadowLinkState.SHADOW_LINK_STATE_ACTIVE
+        link_state = test_link.status.state
+        assert link_state == active, (
+            f"Expected shadow link state to be '{active}', got {link_state}"
+        )
+
+        link_uid = test_link.uid
+        assert link_uid, f"Expected some uid for shadow link"
 
         got_link = self.get_link(name="test-link")
         assert got_link.name == "test-link", (
             f"Expected shadow link name to be 'test-link', got {got_link.name}"
+        )
+
+        assert got_link.uid == link_uid, (
+            f"Expected shadow link uid to be '{link_uid}', got {got_link.uid}"
         )
 
         # Retrieving a non-existent link should fail
