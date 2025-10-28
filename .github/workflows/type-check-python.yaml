@@ -38,4 +38,4 @@ jobs:
           push: false
           load: true
       - name: Run type checking
-        run: tools/type-checking/type-check.sh ci --color=always
+        run: TC_SKIP_DOCKER_BUILD=1 tools/type-checking/type-check.sh ci --color=always

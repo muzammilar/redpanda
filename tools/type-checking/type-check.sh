@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-image_name=python-type-checking
+image_name=python-type-check
 tag=redpanda-data/$image_name
 
 # Get the directory containing this script
@@ -14,11 +14,14 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TESTS_DIR="$ROOT_DIR/tests"
 TC_DIR="$ROOT_DIR/tools/type-checking"
 
-# Build the Docker image
-echo "Building Docker image $tag..."
-
-docker build -t $tag -f "tools/type-checking/Dockerfile" \
-  ${TARGET:+--target=$TARGET} ${TC_DOCKER_ARGS-} tests
+# Build the Docker image unless skipped
+if [[ ${TC_SKIP_DOCKER_BUILD:-0} != "0" ]]; then
+  echo "Skipping Docker build because TC_SKIP_DOCKER_BUILD=${TC_SKIP_DOCKER_BUILD}" >&2
+else
+  echo "Building Docker image $tag..."
+  docker build -t $tag -f "tools/type-checking/Dockerfile" \
+    ${TARGET:+--target=$TARGET} ${TC_DOCKER_ARGS-} tests
+fi
 
 # Run the container with the tests directory mounted
 # echo "Running type checker in Docker container..."
