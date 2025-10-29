@@ -55,18 +55,8 @@ class TxVerifierTest(RedpandaTest):
             ),
         )
 
-    def verify(self, tests: list[str]):
+    def verify(self, tests: list[str], topic1: str, topic2: str, groupId: str):
         verifier_jar = "/opt/verifiers/verifiers.jar"
-
-        self.redpanda.logger.info("creating topics")
-
-        topic1 = "topic1-standard"
-        topic2 = "topic2-standard"
-        groupId = "groupId-standard"
-
-        rpk = RpkTool(self.redpanda)
-        rpk.create_topic(topic1)
-        rpk.create_topic(topic2)
 
         errors = ""
 
@@ -98,25 +88,31 @@ class TxVerifierTest(RedpandaTest):
     @cluster(num_nodes=3, log_allow_list=TX_ERROR_LOGS)
     @matrix(cloud_storage_type=get_cloud_storage_type())
     def test_all_tx_tests(self, cloud_storage_type: CloudStorageType):
-        self.verify(
-            [
-                "init",
-                "tx",
-                "txes",
-                "abort",
-                "commuting-txes",
-                "conflicting-tx",
-                "read-committed-seek",
-                "read-uncommitted-seek",
-                "read-committed-tx-seek",
-                "read-uncommitted-tx-seek",
-                "fetch-reads-committed-txs",
-                "fetch-skips-aborted-txs",
-                "read-committed-seek-waits-ongoing-tx",
-                "read-committed-seek-waits-long-hanging-tx",
-                "read-committed-seek-reads-short-hanging-tx",
-                "read-uncommitted-seek-reads-ongoing-tx",
-                "set-group-start-offset",
-                "read-process-write",
-            ]
-        )
+        rpk = RpkTool(self.redpanda)
+
+        spec = ("topic1-standard", "topic2-standard", "groupId-standard")
+        rpk.create_topic(spec[0])
+        rpk.create_topic(spec[1])
+
+        tests = [
+            "init",
+            "tx",
+            "txes",
+            "abort",
+            "commuting-txes",
+            "conflicting-tx",
+            "read-committed-seek",
+            "read-uncommitted-seek",
+            "read-committed-tx-seek",
+            "read-uncommitted-tx-seek",
+            "fetch-reads-committed-txs",
+            "fetch-skips-aborted-txs",
+            "read-committed-seek-waits-ongoing-tx",
+            "read-committed-seek-waits-long-hanging-tx",
+            "read-committed-seek-reads-short-hanging-tx",
+            "read-uncommitted-seek-reads-ongoing-tx",
+            "set-group-start-offset",
+            "read-process-write",
+        ]
+
+        self.verify(tests, *spec)
