@@ -1751,7 +1751,13 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
 
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
-    def create_source_consumer(self, topic, group_name="test_group", consumer_count=1):
+    def create_source_consumer(
+        self,
+        topic: str,
+        group_name: str = "test_group",
+        consumer_count: int = 1,
+        continuous: bool = False,
+    ):
         return KgoVerifierConsumerGroupConsumer(
             self.test_context,
             self.source_cluster.service,
@@ -1759,6 +1765,24 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             group_name=group_name,
             msg_size=128,
             readers=consumer_count,
+            continuous=continuous,
+        )
+
+    def create_target_consumer(
+        self,
+        topic: str,
+        group_name: str = "test_group",
+        consumer_count: int = 1,
+        continuous: bool = False,
+    ):
+        return KgoVerifierConsumerGroupConsumer(
+            self.test_context,
+            self.target_cluster.service,
+            topic=topic,
+            group_name=group_name,
+            msg_size=128,
+            readers=consumer_count,
+            continuous=continuous,
         )
 
     @cluster(num_nodes=7)
@@ -1989,6 +2013,106 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                     assert consumed == expected, (
                         f"{group_name=}: {topic}/{p} {consumed=} but {expected=}"
                     )
+
+    @cluster(num_nodes=8)
+    @matrix(
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_consumer_group_rebalance(self, source_cluster_spec):
+        partition_count = 120
+
+        topic = TopicSpec(
+            name=f"source-topic",
+            partition_count=int(partition_count),
+            replication_factor=3,
+        )
+
+        group = "test_group"
+        self.create_link("test-link")
+        source_rpk = RpkTool(self.source_cluster.service)
+        target_rpk = RpkTool(self.target_cluster.service)
+
+        n_messages = 1024 * 1024
+
+        self.source_default_client().create_topic(topic)
+
+        producer = KgoVerifierProducer(
+            self.test_context,
+            self.source_cluster.service,
+            topic.name,
+            128,
+            n_messages,
+            rate_limit_bps=1024,
+        )
+        producer.start()
+
+        n_consumers = 10
+
+        def group_is_ready(rpk: RpkTool):
+            gr = rpk.group_describe(group=group, summary=True)
+            return gr.members == n_consumers and gr.state == "Stable"
+
+        consumer = self.create_source_consumer(
+            topic.name,
+            group_name=group,
+            consumer_count=n_consumers,
+            continuous=True,
+        )
+        try:
+            consumer.start()
+            wait_until(
+                lambda: group_is_ready(source_rpk),
+                timeout_sec=60,
+                backoff_sec=1,
+                err_msg="Group never stabilized on source cluster",
+            )
+        finally:
+            consumer.stop()
+            consumer.free()
+
+        metadata = self.failover_link_topic(link_name="test-link", topic=topic.name)
+        self.logger.debug(f"Failover response: {metadata}")
+        t_status = [
+            s.status.state
+            for s in metadata.status.shadow_topics
+            if s.name == topic.name
+        ]
+        assert next(iter(t_status), None) in [
+            shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILING_OVER,
+            shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILED_OVER,
+        ], "Topic state should be FAILING_OVER or FAILED_OVER after failover request"
+        self.wait_for_topic_status(
+            link="test-link",
+            topic=topic.name,
+            target_status=shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILED_OVER,
+        )
+
+        consumer = self.create_target_consumer(
+            topic.name,
+            group_name=group,
+            consumer_count=n_consumers,
+            continuous=True,
+        )
+        try:
+            consumer.start()
+            wait_until(
+                lambda: group_is_ready(target_rpk),
+                timeout_sec=60,
+                backoff_sec=1,
+                err_msg="Group never stabilized on target cluster",
+            )
+            consumer.wait()
+        finally:
+            consumer.stop()
+            consumer.free()
+
+        producer.stop()
+        producer.free()
 
 
 class ShadowLinkSecurityTests(ShadowLinkTestBase):
