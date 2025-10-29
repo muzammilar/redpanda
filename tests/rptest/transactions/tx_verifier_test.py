@@ -10,6 +10,7 @@
 import subprocess
 
 from ducktape.errors import DucktapeError
+from ducktape.tests.test import TestContext
 
 from rptest.clients.rpk import RpkTool
 from rptest.services.cluster import cluster
@@ -28,7 +29,7 @@ class TxVerifierTest(RedpandaTest):
     Verify that segment indices are recovered on startup.
     """
 
-    def __init__(self, test_context):
+    def __init__(self, test_context: TestContext):
         extra_rp_conf = {
             "default_topic_replications": 3,
             "default_topic_partitions": 1,
@@ -40,7 +41,7 @@ class TxVerifierTest(RedpandaTest):
             test_context=test_context, extra_rp_conf=extra_rp_conf
         )
 
-    def verify(self, tests):
+    def verify(self, tests: list[str]):
         verifier_jar = "/opt/verifiers/verifiers.jar"
 
         self.redpanda.logger.info("creating topics")
