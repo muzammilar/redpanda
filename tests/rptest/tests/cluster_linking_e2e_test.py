@@ -1921,6 +1921,35 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             f"Timestamps don't match {expected_timestamps=} vs {consumed=}"
         )
 
+    @cluster(num_nodes=8)
+    def test_replication_with_large_msgs(self):
+        msg_size = 2 * 1024 * 1024
+        max_bytes = 10 * msg_size
+        topic = TopicSpec(
+            name="source-topic",
+            partition_count=1,
+            replication_factor=3,
+            max_message_bytes=max_bytes,
+        )
+
+        self.source_default_client().create_topic(topic)
+        self.create_link("test-link")
+
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic.name),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in target cluster",
+        )
+
+        self.start_producer_consumer(
+            topic=topic.name,
+            msg_size=msg_size,
+            msg_cnt=20,
+            producer_properties={"batch_max_bytes": max_bytes},
+        )
+        self.verify()
+
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
     def create_source_consumer(
