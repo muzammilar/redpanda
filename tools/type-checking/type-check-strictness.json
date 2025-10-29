@@ -231,7 +231,6 @@
         "rptest/transactions/tx_reads_writes_test.py",
         "rptest/transactions/tx_streams_test.py",
         "rptest/transactions/tx_upgrade_test.py",
-        "rptest/transactions/tx_verifier_test.py",
         "rptest/transactions/verifiers/consumer_offsets_verifier.py",
         "rptest/trim_results.py",
         "rptest/utils/bookend_collection.py",
