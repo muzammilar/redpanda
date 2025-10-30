@@ -2120,8 +2120,22 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 producer.do_free()
 
     @cluster(num_nodes=7)
-    @matrix(with_failures=[True, False])
-    def test_link_topic_failover(self, with_failures):
+    @ignore(
+        with_failures=True,
+        source_cluster_spec=SecondaryClusterSpec(
+            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+        ),
+    )
+    @matrix(
+        with_failures=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_link_topic_failover(self, with_failures, source_cluster_spec):
         num_failover_topics = random.choice([1, 3, 5, 10])
         num_non_failover_topics = random.choice([0, 3, 5, 10])
 
@@ -2232,8 +2246,22 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
             )
 
     @cluster(num_nodes=7)
-    @matrix(with_failures=[True, False])
-    def test_link_failover(self, with_failures):
+    @ignore(
+        with_failures=True,
+        source_cluster_spec=SecondaryClusterSpec(
+            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+        ),
+    )
+    @matrix(
+        with_failures=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_link_failover(self, with_failures, source_cluster_spec):
         self.create_link("test-link")
         num_topics = random.choice([0, 1, 3, 5, 10])
         if num_topics == 0:
