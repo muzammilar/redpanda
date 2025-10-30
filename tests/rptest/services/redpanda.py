@@ -316,7 +316,10 @@ class MetricsEndpoint(Enum):
     PUBLIC_METRICS = "public_metrics"
 
 
-CloudStorageTypeAndUrlStyle = Tuple[CloudStorageType, Literal["virtual_host", "path"]]
+# for this type value[0] is CloudStorageType and value[1] is url style
+# but it needs to be a list rather than a tuple because injected parameters
+# must be "json compatible" which means no tuples
+CloudStorageTypeAndUrlStyle = list[CloudStorageType | Literal["virtual_host", "path"]]
 
 
 def prepare_allow_list(allow_list: LogAllowList) -> CompiledLogAllowList:
@@ -408,7 +411,7 @@ def get_cloud_storage_type_and_url_style() -> List[CloudStorageTypeAndUrlStyle]:
     """
 
     def get_style(t: CloudStorageType) -> List[CloudStorageTypeAndUrlStyle]:
-        return [(t, us) for us in get_cloud_storage_url_style(t)]
+        return [[t, us] for us in get_cloud_storage_url_style(t)]
 
     return [
         tus
