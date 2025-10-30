@@ -272,7 +272,7 @@ class KcatConsumer(BackgroundThreadService):
                     partition = int(m.group("partition"))
                     if m.group("topic") != self._topic:
                         self._redpanda.logger.warning(
-                            "{}Topic reported by kcat ({}}) is different from the requested ({}). Line: {}".format(
+                            "{}Topic reported by kcat ({}) is different from the requested ({}). Line: {}".format(
                                 self._caption,
                                 m.group("topic"),
                                 self._topic,
