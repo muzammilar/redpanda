@@ -2783,25 +2783,34 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
         def check_client_errors(node_samples: list[dict[str, MetricSamples]]) -> bool:
             return check_metric_exists(node_samples, "client_errors")
 
+        def validate_metrics(
+            timeout_sec: int, metric_validators: list[tuple[str, Callable]]
+        ):
+            for metric_name, validator in metric_validators:
+                self.logger.debug(f"Validating values of metric: {metric_name}")
+                wait_until(
+                    lambda: self._validate_metrics(
+                        target_nodes, [metric_name], validator
+                    ),
+                    timeout_sec=timeout_sec,
+                    backoff_sec=1,
+                    err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
+                )
+
         target_nodes = self.target_cluster.service.nodes
 
-        metric_validators = [
-            ("shadow_topic_state", active_shadow_topics_1),
-            ("total_records_fetched", check_records_fetched_1000),
-            ("total_records_written", check_records_written_1000),
-            ("total_bytes_fetched", check_bytes_fetched_128000),
-            ("total_bytes_written", check_bytes_written_128000),
-            ("shadow_lag", check_shadow_lag_zero),
-            ("client_errors", check_client_errors),
-        ]
-        for metric_name, validator in metric_validators:
-            self.logger.debug(f"Validating values of metric: {metric_name}")
-            wait_until(
-                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
-                timeout_sec=10,
-                backoff_sec=1,
-                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
-            )
+        validate_metrics(
+            timeout_sec=10,
+            metric_validators=[
+                ("shadow_topic_state", active_shadow_topics_1),
+                ("total_records_fetched", check_records_fetched_1000),
+                ("total_records_written", check_records_written_1000),
+                ("total_bytes_fetched", check_bytes_fetched_128000),
+                ("total_bytes_written", check_bytes_written_128000),
+                ("shadow_lag", check_shadow_lag_zero),
+                ("client_errors", check_client_errors),
+            ],
+        )
 
         topic_2 = TopicSpec(
             name="test-topic-2", partition_count=3, replication_factor=1
@@ -2810,23 +2819,18 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
         self.start_producer_consumer(topic=topic_2.name, msg_size=128, msg_cnt=1500)
         self.verify()
 
-        metric_validators = [
-            ("shadow_topic_state", active_shadow_topics_2),
-            ("total_records_fetched", check_records_fetched_2500),
-            ("total_records_written", check_records_written_2500),
-            ("total_bytes_fetched", check_bytes_fetched),
-            ("total_bytes_written", check_bytes_written),
-            ("shadow_lag", check_shadow_lag_zero),
-            ("client_errors", check_client_errors),
-        ]
-        for metric_name, validator in metric_validators:
-            self.logger.debug(f"Validating values of metric: {metric_name}")
-            wait_until(
-                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
-                timeout_sec=10,
-                backoff_sec=1,
-                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
-            )
+        validate_metrics(
+            timeout_sec=10,
+            metric_validators=[
+                ("shadow_topic_state", active_shadow_topics_2),
+                ("total_records_fetched", check_records_fetched_2500),
+                ("total_records_written", check_records_written_2500),
+                ("total_bytes_fetched", check_bytes_fetched),
+                ("total_bytes_written", check_bytes_written),
+                ("shadow_lag", check_shadow_lag_zero),
+                ("client_errors", check_client_errors),
+            ],
+        )
 
         topic_3 = TopicSpec(
             name="test-topic-3", partition_count=1, replication_factor=3
@@ -2846,30 +2850,20 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
             use_transactions=True,
             msgs_per_transaction=10000,
         )
-        metric_validators = [
-            ("shadow_lag", check_shadow_lag_positive),
-        ]
-        for metric_name, validator in metric_validators:
-            self.logger.debug(f"Validating values of metric: {metric_name}")
-            wait_until(
-                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
-                timeout_sec=30,
-                backoff_sec=1,
-                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
-            )
+        validate_metrics(
+            timeout_sec=30,
+            metric_validators=[
+                ("shadow_lag", check_shadow_lag_positive),
+            ],
+        )
         self.verify()
 
-        metric_validators = [
-            ("shadow_lag", check_shadow_lag_zero),
-        ]
-        for metric_name, validator in metric_validators:
-            self.logger.debug(f"Validating values of metric: {metric_name}")
-            wait_until(
-                lambda: self._validate_metrics(target_nodes, [metric_name], validator),
-                timeout_sec=30,
-                backoff_sec=1,
-                err_msg=f"Failed to get the expected metrics value for metric {metric_name}",
-            )
+        validate_metrics(
+            timeout_sec=30,
+            metric_validators=[
+                ("shadow_lag", check_shadow_lag_zero),
+            ],
+        )
 
 
 class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
