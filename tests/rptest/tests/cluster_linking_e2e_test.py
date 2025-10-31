@@ -2670,21 +2670,10 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
         self.start_producer_consumer(topic=topic_1.name, msg_size=128, msg_cnt=1000)
         self.verify()
 
-        def check_shadow_topic_states(
-            node_samples: list[dict[str, MetricSamples]], n_active: int
-        ) -> bool:
+        def collect_shadow_topic_states(
+            node_samples: list[dict[str, MetricSamples]],
+        ) -> dict[str, int]:
             sts = "shadow_topic_state"
-            other_statuses = [
-                "failed",
-                "paused",
-                "failing_over",
-                "failed_over",
-                "promoting",
-                "promoted",
-            ]
-
-            if not node_samples:
-                return False
 
             by_status: dict[str, int] = {}
             for samples in node_samples:
@@ -2695,9 +2684,28 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
                     if status not in by_status:
                         by_status[status] = 0
                     by_status[status] += int(s.value)
-            return by_status["active"] == n_active and all(
-                [by_status[s] == 0 for s in other_statuses]
-            )
+            return by_status
+
+        def check_shadow_topic_states(
+            node_samples: list[dict[str, MetricSamples]],
+            expected_states: dict[str, int],
+        ) -> bool:
+            all_states = [
+                "active",
+                "failed",
+                "paused",
+                "failing_over",
+                "failed_over",
+                "promoting",
+                "promoted",
+            ]
+            expected = {
+                **expected_states,
+                **{s: 0 for s in all_states if s not in expected_states},
+            }
+
+            by_status = collect_shadow_topic_states(node_samples)
+            return all(by_status[s] == expected[s] for s in all_states)
 
         def _get_total_value(
             node_samples: list[dict[str, MetricSamples]], metric_name: str
@@ -2743,10 +2751,10 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
             return True
 
         def active_shadow_topics_1(samples: list[dict[str, MetricSamples]]):
-            return check_shadow_topic_states(samples, 1)
+            return check_shadow_topic_states(samples, {"active": 1})
 
         def active_shadow_topics_2(samples: list[dict[str, MetricSamples]]):
-            return check_shadow_topic_states(samples, 2)
+            return check_shadow_topic_states(samples, {"active": 2})
 
         def check_records_fetched_1000(samples: list[dict[str, MetricSamples]]):
             return check_total_value(samples, "total_records_fetched", 1000)
