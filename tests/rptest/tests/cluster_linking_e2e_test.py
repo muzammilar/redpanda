@@ -2756,6 +2756,9 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
         def active_shadow_topics_2(samples: list[dict[str, MetricSamples]]):
             return check_shadow_topic_states(samples, {"active": 2})
 
+        def failed_over_topics_3(samples: list[dict[str, MetricSamples]]):
+            return check_shadow_topic_states(samples, {"failed_over": 3})
+
         def check_records_fetched_1000(samples: list[dict[str, MetricSamples]]):
             return check_total_value(samples, "total_records_fetched", 1000)
 
@@ -2870,6 +2873,16 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
             timeout_sec=30,
             metric_validators=[
                 ("shadow_lag", check_shadow_lag_zero),
+            ],
+        )
+
+        self.failover_link(name="test-link")
+        self.wait_for_link_failover(link="test-link")
+
+        validate_metrics(
+            timeout_sec=10,
+            metric_validators=[
+                ("shadow_topic_state", failed_over_topics_3),
             ],
         )
 
