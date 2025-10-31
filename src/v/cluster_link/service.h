@@ -129,6 +129,17 @@ public:
     delete_cluster_link(model::name_t name, bool force_delete_link);
 
     /**
+     * @brief Removes a shadow topic from a shadow link, removing all state but
+     * leaving the topic
+     *
+     * @param link_name Name of the link
+     * @param shadow_topic The name of the shadow topic
+     * @return Updated metadata information
+     */
+    ss::future<cl_result<model::metadata>> delete_shadow_topic_from_shadow_link(
+      model::name_t link_name, ::model::topic shadow_topic);
+
+    /**
      * @brief Reports the status of a shard-local topic in the given link
      */
     rpc::shadow_topic_report_response

@@ -1084,6 +1084,18 @@ service::delete_cluster_link(model::name_t name, bool force_delete_link) {
       });
 }
 
+ss::future<cl_result<model::metadata>>
+service::delete_shadow_topic_from_shadow_link(
+  model::name_t link_name, ::model::topic shadow_topic) {
+    auto h = _gate.hold();
+    return with_manager(
+      [link_name = std::move(link_name),
+       shadow_topic = std::move(shadow_topic)](manager* mgr) mutable {
+          return mgr->remove_shadow_topic_from_link(
+            std::move(link_name), std::move(shadow_topic));
+      });
+}
+
 void service::register_notifications() {
     auto pl_notif_id = _plf->local().register_for_updates(
       [this](model::id_t id, ::model::revision_id revision) {
