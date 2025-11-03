@@ -672,6 +672,15 @@ class ShadowLinkTestBase(PreallocNodesTest):
         topics = RpkTool(self.source_cluster_service).list_topics()
         return topic in topics
 
+    def topic_partitions_exists_in_target(
+        self,
+        topic: TopicSpec,
+        rpk: Optional[RpkTool] = None,
+    ) -> bool:
+        return self.topic_exists_in_target(
+            topic=topic.name, partition_count=topic.partition_count, rpk=rpk
+        )
+
     def topic_exists_in_target(
         self,
         topic: str,
