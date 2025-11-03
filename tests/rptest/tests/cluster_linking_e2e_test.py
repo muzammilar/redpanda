@@ -1950,6 +1950,131 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         )
         self.verify()
 
+    @cluster(num_nodes=8)
+    def test_replication_with_compaction(self):
+        self.logger.info(
+            "Create a topic with compaction settings set but without compaction and tombstone removal enabled"
+        )
+        topic = TopicSpec(
+            name="compacted-topic",
+            partition_count=1,
+            replication_factor=3,
+            segment_bytes=1024 * 1024,
+            max_compaction_lag_ms=1000,
+            min_cleanable_dirty_ratio=0.0,
+        )
+        self.source_default_client().create_topic(topic)
+
+        req = self.create_default_link_request("test-link")
+        req.shadow_link.configurations.topic_metadata_sync_options.synced_shadow_topic_properties.extend(
+            ["segment.bytes", "min.cleanable.dirty.ratio"]
+        )
+        self.create_link_with_request(req=req)
+
+        self.logger.info("Replicate some data with compactable keys and tombstones")
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic.name),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in target cluster",
+        )
+
+        self.start_producer_consumer(
+            topic=topic.name,
+            msg_size=128,
+            msg_cnt=10000,
+            producer_properties={
+                "key_set_cardinality": 600,
+                "tombstone_probability": 0.4,
+            },
+        )
+        self.verify()
+
+        def get_compaction_progress(
+            rpk: RpkTool = self.target_cluster_rpk,
+        ) -> tuple[int, int]:
+            keys: list[str] = []
+            tombstones = 0
+            for line in rpk.consume(
+                topic=topic.name,
+                offset=":end",
+                format="%k,%v\n",
+            ).splitlines():
+                key, value = line.split(",", maxsplit=1)
+                keys += [key]
+                if value == "":
+                    tombstones += 1
+
+            self.logger.info(
+                f"Data read from target topic: {len(keys)=}, {keys[:5]=}, {tombstones=}"
+            )
+            return len(keys), tombstones
+
+        self.logger.info("Verifying that replicated records can be compacted")
+        pre_compaction_keys, _ = get_compaction_progress()
+        self.source_default_client().alter_topic_configs(
+            topic.name,
+            {"cleanup.policy": "compact"},
+        )
+
+        def compaction_made_progress():
+            post_compaction_keys, _ = get_compaction_progress()
+            self.logger.info(
+                f"Compaction progress check: {pre_compaction_keys=}, {post_compaction_keys=}"
+            )
+            return post_compaction_keys < pre_compaction_keys
+
+        wait_until(
+            compaction_made_progress,
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg="Target topic compaction did not make progress",
+        )
+
+        self.logger.info("Verifying that replicated tombstones can be removed")
+        _, pre_tombstone_removal_tombstones = get_compaction_progress()
+        self.source_default_client().alter_topic_configs(
+            topic.name,
+            {"delete.retention.ms": "1000"},
+        )
+
+        def tombstone_removal_made_progress():
+            _, post_tombstone_removal_tombstones = get_compaction_progress()
+            self.logger.info(
+                f"Tombstone removal progress check: {pre_tombstone_removal_tombstones=}, {post_tombstone_removal_tombstones=}"
+            )
+            return post_tombstone_removal_tombstones < pre_tombstone_removal_tombstones
+
+        wait_until(
+            tombstone_removal_made_progress,
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg="Target topic tombstone removal did not make progress",
+        )
+
+        self.logger.info(
+            "Verifying that compaction state is consistent on both clusters"
+        )
+
+        def compaction_states_consistent():
+            source_keys, source_tombstones = get_compaction_progress(
+                self.source_cluster_rpk
+            )
+            target_keys, target_tombstones = get_compaction_progress(
+                self.target_cluster_rpk
+            )
+            self.logger.info(
+                f"Compaction state check: {source_keys=}, {target_keys=}, {source_tombstones=}, {target_tombstones=}"
+            )
+            return source_keys == target_keys and source_tombstones == target_tombstones
+
+        wait_until(
+            compaction_states_consistent,
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg="Compaction state is not consistent between clusters",
+        )
+
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
     def create_source_consumer(
