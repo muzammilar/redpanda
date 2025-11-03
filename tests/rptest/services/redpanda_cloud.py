@@ -900,7 +900,7 @@ class CloudCluster:
             self._logger.error(f"Missing critical topics: {missing_topics}")
             self._logger.error(f"Expected critical topics: {_critical}")
             self._logger.error(f"Actual topics found: {_topics}")
-            return warn_and_return("Cluster missing critical topics")
+            return warn_and_return(f"Cluster missing critical topics: {missing_topics}")
         else:
             _t = ", ".join(_intersect)
             self._logger.info(f"Critical topics present: '{_t}'")
