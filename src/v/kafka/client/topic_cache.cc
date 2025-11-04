@@ -16,13 +16,19 @@
 
 #include <seastar/core/future.hh>
 
+#include <ranges>
+
 namespace kafka::client {
 
 void topic_cache::apply(
   const chunked_vector<metadata_response::topic>& topics) {
     topics_t new_cache;
     new_cache.reserve(topics.size());
-    for (const auto& t : topics) {
+
+    const auto get_successful = std::views::filter([](const auto& resp) {
+        return resp.error_code == kafka::error_code::none;
+    });
+    for (const auto& t : topics | get_successful) {
         static_assert(
           api_version_for(metadata_request::api_type::key) < api_version(12),
           "topic::name is nullable in v12+");
