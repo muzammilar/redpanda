@@ -54,7 +54,8 @@ coordinators_on_current_shard(link& link, ss::shard_id, ::model::node_id) {
 }
 } // namespace
 
-ss::future<task::state_transition> group_mirroring_task::run_impl() {
+ss::future<task::state_transition>
+group_mirroring_task::run_impl(ss::abort_source&) {
     auto result = co_await list_consumer_groups();
 
     if (!result.has_value()) {

@@ -229,7 +229,8 @@ model::enabled_t source_topic_syncer::is_enabled() const {
     return _config.is_enabled;
 }
 
-ss::future<task::state_transition> source_topic_syncer::run_impl() {
+ss::future<task::state_transition>
+source_topic_syncer::run_impl(ss::abort_source&) {
     vlog(logger().trace, "Running auto topic sensor task");
 
     auto& cluster = get_link()->get_cluster_connection();

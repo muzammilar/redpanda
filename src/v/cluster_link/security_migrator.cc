@@ -274,7 +274,8 @@ model::enabled_t security_migrator::is_enabled() const {
     return _config.is_enabled;
 }
 
-ss::future<task::state_transition> security_migrator::run_impl() {
+ss::future<task::state_transition>
+security_migrator::run_impl(ss::abort_source&) {
     vlog(logger().trace, "Running security migrator task");
     constexpr auto acl_creation_timeout = 5s;
 
