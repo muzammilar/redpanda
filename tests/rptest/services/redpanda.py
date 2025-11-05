@@ -1260,8 +1260,8 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
     def wait_until(
         self,
         fn: Callable[[], Any],
-        timeout_sec: int,
-        backoff_sec: int,
+        timeout_sec: float,
+        backoff_sec: float,
         err_msg: str | Callable[[], str] = "",
         retry_on_exc: bool = False,
     ) -> None:
@@ -1301,9 +1301,9 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         self,
         check: Callable[[], Any],
         condition: Callable[[], Any],
-        timeout_sec: int,
-        progress_sec: int,
-        backoff_sec: int,
+        timeout_sec: float,
+        progress_sec: float,
+        backoff_sec: float,
         err_msg: str | None = None,
         logger: Logger | None = None,
     ) -> None:
