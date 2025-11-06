@@ -121,39 +121,6 @@ audit_log_manager::audit_log_manager(
         return 1.0
                - (static_cast<double>(_queue_bytes_sem.available_units()) / static_cast<double>(_max_queue_size_bytes));
     });
-    // NOTE: construct a sink on every shard, unconditionally. the kafka
-    // sinks on the non-client shards will be inactive.
-    if (config::shard_local_cfg().audit_use_rpc()) {
-        vlog(adtlog.info, "Audit log in RPC mode");
-        _sink = audit_sink::make_rpc_sink(
-          this, _controller, &_rpc_client->local());
-    } else {
-        vlog(adtlog.info, "Audit log in Kafka Client mode");
-        _sink = audit_sink::make_kafka_sink(
-          this, _controller, *_config, [this](bool v) {
-              return container().invoke_on_all(
-                [v](audit_log_manager& mgr) { mgr.set_auth_misconfigured(v); });
-          });
-    }
-
-    _drain_timer.set_callback([this] {
-        ssx::spawn_with_gate(_gate, [this]() {
-            return ss::get_units(_active_drain, 1)
-              .then([this](auto units) mutable {
-                  return drain()
-                    .handle_exception([&probe = probe()](std::exception_ptr e) {
-                        vlog(
-                          adtlog.warn,
-                          "Exception in audit_log_manager fiber: {}",
-                          e);
-                        probe.audit_error();
-                    })
-                    .finally([this, units = std::move(units)] {
-                        _drain_timer.arm(_queue_drain_interval_ms());
-                    });
-              });
-        });
-    });
     set_enabled_events();
     _audit_event_types.watch([this] { set_enabled_events(); });
     _audit_excluded_topics_binding.watch([this] {
@@ -201,6 +168,41 @@ ss::future<> audit_log_manager::start() {
           "Redpanda is operating in recovery mode.  Auditing is disabled!");
         co_return;
     }
+
+    // NOTE: construct a sink on every shard, unconditionally. the kafka
+    // sinks on the non-client shards will be inactive.
+    if (config::shard_local_cfg().audit_use_rpc()) {
+        vlog(adtlog.info, "Audit log in RPC mode");
+        _sink = audit_sink::make_rpc_sink(
+          this, _controller, &_rpc_client->local());
+    } else {
+        vlog(adtlog.info, "Audit log in Kafka Client mode");
+        _sink = audit_sink::make_kafka_sink(
+          this, _controller, *_config, [this](bool v) {
+              return container().invoke_on_all(
+                [v](audit_log_manager& mgr) { mgr.set_auth_misconfigured(v); });
+          });
+    }
+
+    _drain_timer.set_callback([this] {
+        ssx::spawn_with_gate(_gate, [this]() {
+            return ss::get_units(_active_drain, 1)
+              .then([this](auto units) mutable {
+                  return drain()
+                    .handle_exception([&probe = probe()](std::exception_ptr e) {
+                        vlog(
+                          adtlog.warn,
+                          "Exception in audit_log_manager fiber: {}",
+                          e);
+                        probe.audit_error();
+                    })
+                    .finally([this, units = std::move(units)] {
+                        _drain_timer.arm(_queue_drain_interval_ms());
+                    });
+              });
+        });
+    });
+
     _audit_enabled.watch([this] {
         try {
             sink().toggle(_audit_enabled());
@@ -224,7 +226,9 @@ ss::future<> audit_log_manager::stop() {
     _drain_timer.cancel();
     _as.request_abort();
     vlog(adtlog.info, "Shutting down audit log manager");
-    co_await sink().stop();
+    if (_sink) {
+        co_await sink().stop();
+    }
     if (!_gate.is_closed()) {
         /// Gate may already be closed if ::pause() had been called
         co_await _gate.close();
