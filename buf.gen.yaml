@@ -2,9 +2,9 @@ version: v2
 managed:
   enabled: false
 plugins:
-  # Custom comment extraction plugin - ONLY generate comments, not .pb.go files
-  # All .pb.go files come from buf.build/gen/go/redpandadata/core/protocolbuffers/go
-  - local: tools/go-pbgen/run-plugin.sh
+  # Custom comment extraction plugin - we ONLY generate comments related files,
+  # The rest comes from buf.build/gen/go/redpandadata/core/protocolbuffers/go
+  - local: tools/go-comment-pbgen/run-plugin.sh
     out: .
     opt:
       - paths=import

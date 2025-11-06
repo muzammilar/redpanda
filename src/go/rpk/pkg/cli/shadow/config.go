@@ -26,7 +26,6 @@ import (
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"gopkg.in/yaml.v2"
 )
@@ -197,19 +196,12 @@ func generateConfigTemplate() string {
 	sb.WriteString("# Shadow Link Configuration Template\n")
 
 	// Get the message descriptor from the global registry
-	var msgDesc protoreflect.MessageDescriptor
-	msgType, err := protoregistry.GlobalTypes.FindMessageByName("redpanda.core.admin.v2.ShadowLinkConfigurations")
-	if err != nil {
-		// Fallback: try using ProtoReflect
-		cfg := &v2.ShadowLinkConfigurations{}
-		msg := cfg.ProtoReflect()
-		if msg == nil {
-			return fmt.Sprintf("# Error: Could not find message descriptor: %v\n", err)
-		}
-		msgDesc = msg.Descriptor()
-	} else {
-		msgDesc = msgType.Descriptor()
+	cfg := &v2.ShadowLinkConfigurations{}
+	msg := cfg.ProtoReflect()
+	if msg == nil {
+		return "# Error: Could not find message descriptor"
 	}
+	msgDesc := msg.Descriptor()
 
 	if msgDesc == nil {
 		return "# Error: Message descriptor is nil\n"

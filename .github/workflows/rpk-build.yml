@@ -16,7 +16,7 @@ on:
       - 'proto/redpanda/core/admin/**'
       - 'proto/redpanda/core/common/**'
       - 'buf.gen.yaml'
-      - 'tools/go-pbgen/**'
+      - 'tools/go-comment-pbgen/**'
       - 'src/v/pandaproxy/schema_registry/protobuf/**'
       - '.github/workflows/rpk-build.yml'
   pull_request:
@@ -25,7 +25,7 @@ on:
       - 'proto/redpanda/core/admin/**'
       - 'proto/redpanda/core/common/**'
       - 'buf.gen.yaml'
-      - 'tools/go-pbgen/**'
+      - 'tools/go-comment-pbgen/**'
       - 'src/v/pandaproxy/schema_registry/protobuf/**'
       - '.github/workflows/rpk-build.yml'
   merge_group:
