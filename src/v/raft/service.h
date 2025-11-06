@@ -195,20 +195,6 @@ public:
         });
     }
 
-    [[gnu::always_inline]] ss::future<remake_learner_state_reply>
-    remake_learner_state(
-      remake_learner_state_request r, rpc::streaming_context&) final {
-        return _probe.remake_learner_state().then(
-          [this, r = std::move(r)]() mutable {
-              return dispatch_request(
-                std::move(r),
-                &service::make_failed_remake_learner_state_reply,
-                [](remake_learner_state_request&& r, consensus_ptr c) {
-                    return c->do_remake_learner_state(std::move(r));
-                });
-          });
-    }
-
     [[gnu::always_inline]] ss::future<get_compaction_mcco_reply>
     get_compaction_mcco(
       get_compaction_mcco_request r, rpc::streaming_context&) final {
@@ -290,12 +276,6 @@ private:
 
     static ss::future<timeout_now_reply> make_failed_timeout_now_reply() {
         return ss::make_ready_future<timeout_now_reply>(timeout_now_reply{});
-    }
-
-    static ss::future<remake_learner_state_reply>
-    make_failed_remake_learner_state_reply() {
-        return ss::make_ready_future<remake_learner_state_reply>(
-          remake_learner_state_reply{});
     }
 
     static ss::future<get_compaction_mcco_reply>

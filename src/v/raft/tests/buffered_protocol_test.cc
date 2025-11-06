@@ -53,11 +53,6 @@ public:
     ss::future<> reset_backoff(model::node_id) final {
         return ss::make_ready_future<>();
     }
-    ss::future<result<remake_learner_state_reply>> remake_learner_state(
-      model::node_id, remake_learner_state_request, rpc::client_opts) final {
-        return ss::make_ready_future<result<raft::remake_learner_state_reply>>(
-          raft::remake_learner_state_reply{});
-    }
     ss::future<result<get_compaction_mcco_reply>> get_compaction_mcco(
       model::node_id, get_compaction_mcco_request, rpc::client_opts) final {
         return ss::make_ready_future<result<raft::get_compaction_mcco_reply>>(

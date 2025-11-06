@@ -160,20 +160,6 @@ ss::future<result<timeout_now_reply>> buffered_protocol::timeout_now(
       &consensus_client_protocol::timeout_now);
 }
 
-ss::future<result<remake_learner_state_reply>>
-buffered_protocol::remake_learner_state(
-  model::node_id target_node,
-  remake_learner_state_request req,
-  rpc::client_opts opts) {
-    return apply_with_gate(
-      _gate,
-      _base_protocol,
-      target_node,
-      std::move(req),
-      std::move(opts),
-      &consensus_client_protocol::remake_learner_state);
-}
-
 ss::future<result<get_compaction_mcco_reply>>
 buffered_protocol::get_compaction_mcco(
   model::node_id target_node,

@@ -45,11 +45,6 @@ public:
 
     ss::future<> reset_backoff(model::node_id n);
 
-    ss::future<result<remake_learner_state_reply>> remake_learner_state(
-      model::node_id,
-      remake_learner_state_request r,
-      rpc::client_opts opts) final;
-
     ss::future<result<get_compaction_mcco_reply>> get_compaction_mcco(
       model::node_id,
       get_compaction_mcco_request r,

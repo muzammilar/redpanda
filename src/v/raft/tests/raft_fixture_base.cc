@@ -172,16 +172,6 @@ ss::future<> channel::do_dispatch_message(msg msg) {
             msg.resp_data.set_value(std::move(resp_buf));
             break;
         }
-        case msg_type::remake_learner_state: {
-            auto req = co_await serde::read_async<remake_learner_state_request>(
-              req_parser);
-            auto resp = co_await get_service().remake_learner_state(
-              std::move(req), ctx);
-            iobuf resp_buf;
-            co_await serde::write_async(resp_buf, std::move(resp));
-            msg.resp_data.set_value(std::move(resp_buf));
-            break;
-        }
         case msg_type::get_compaction_mcco: {
             auto req = co_await serde::read_async<get_compaction_mcco_request>(
               req_parser);
@@ -261,8 +251,6 @@ static constexpr msg_type map_msg_type() {
         return msg_type::install_snapshot;
     } else if constexpr (std::is_same_v<ReqT, timeout_now_request>) {
         return msg_type::timeout_now;
-    } else if constexpr (std::is_same_v<ReqT, remake_learner_state_request>) {
-        return msg_type::remake_learner_state;
     } else if constexpr (std::is_same_v<ReqT, get_compaction_mcco_request>) {
         return msg_type::get_compaction_mcco;
     } else if constexpr (std::is_same_v<
@@ -355,13 +343,6 @@ in_memory_test_protocol::install_snapshot(
 ss::future<result<timeout_now_reply>> in_memory_test_protocol::timeout_now(
   model::node_id id, timeout_now_request req, rpc::client_opts opts) {
     return dispatch<timeout_now_request, timeout_now_reply>(
-      id, std::move(req), std::move(opts));
-}
-
-ss::future<result<remake_learner_state_reply>>
-in_memory_test_protocol::remake_learner_state(
-  model::node_id id, remake_learner_state_request req, rpc::client_opts opts) {
-    return dispatch<remake_learner_state_request, remake_learner_state_reply>(
       id, std::move(req), std::move(opts));
 }
 
@@ -496,7 +477,6 @@ raft_node_instance::initialise(std::vector<raft::vnode> initial_nodes) {
       config::mock_binding<std::chrono::milliseconds>(1s),
       config::mock_binding<bool>(_enable_longest_log_detection),
       consensus_client_protocol(_buffered_protocol),
-      [this](group_id g) { return remake_learner_callback(g); },
       [this](leadership_status ls) { leadership_notification_callback(ls); },
       _storage.local(),
       _recovery_throttle.local(),
@@ -552,18 +532,6 @@ ss::future<> raft_node_instance::stop() {
 ss::future<> raft_node_instance::remove_data() {
     return ss::recursive_remove_directory(
       std::filesystem::path(_base_directory));
-}
-
-ss::future<std::error_code>
-raft_node_instance::remake_learner_callback(group_id g) {
-    _logger.info("remake learner notification for group: {}", g);
-    try {
-        co_await _raft->truncate_state(model::offset{0});
-        co_await _raft->remove_persistent_state();
-    } catch (...) {
-        co_return errc::timeout;
-    }
-    co_return errc::success;
 }
 
 void raft_node_instance::leadership_notification_callback(
@@ -851,9 +819,6 @@ std::ostream& operator<<(std::ostream& o, msg_type type) {
         return o;
     case msg_type::timeout_now:
         o << "timeout_now";
-        return o;
-    case msg_type::remake_learner_state:
-        o << "remake_learner_state";
         return o;
     case msg_type::get_compaction_mcco:
         o << "get_compaction_mcco";

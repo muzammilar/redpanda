@@ -52,7 +52,6 @@ enum class msg_type {
     heartbeat_v2,
     install_snapshot,
     timeout_now,
-    remake_learner_state,
     get_compaction_mcco,
     distribute_compaction_mtro
 };
@@ -111,7 +110,6 @@ using reply_variant = std::variant<
   heartbeat_reply_v2,
   install_snapshot_reply,
   timeout_now_reply,
-  remake_learner_state_reply,
   get_compaction_mcco_reply,
   distribute_compaction_mtro_reply>;
 
@@ -142,9 +140,6 @@ public:
 
     // TODO: move those methods out of Raft protocol.
     ss::future<> reset_backoff(model::node_id) final { co_return; }
-
-    ss::future<result<remake_learner_state_reply>> remake_learner_state(
-      model::node_id, remake_learner_state_request, rpc::client_opts) final;
 
     ss::future<result<get_compaction_mcco_reply>> get_compaction_mcco(
       model::node_id, get_compaction_mcco_request, rpc::client_opts) final;
@@ -258,7 +253,6 @@ public:
 
     ss::future<> remove_data();
 
-    ss::future<std::error_code> remake_learner_callback(group_id g);
     void leadership_notification_callback(leadership_status);
 
     model::ntp ntp() const {
