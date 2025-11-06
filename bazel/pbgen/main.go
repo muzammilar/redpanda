@@ -1001,7 +1001,7 @@ func (g *implGenerator) generateMessageFieldMaskApplyHelper(msg protoreflect.Mes
 					w.Printf("self->set_%s(std::move(update->get_%s()));\n", field.Name(), field.Name())
 				}
 			}
-			if field.ContainingOneof() != nil {
+			if oneof := field.ContainingOneof(); oneof != nil {
 				w.Printf("{%q, []([[maybe_unused]] auto path, auto* self, auto* update) {\n", field.Name())
 				w.Indent()
 				w.Printf("if (update->has_%s()) {\n", field.Name())
@@ -1010,7 +1010,11 @@ func (g *implGenerator) generateMessageFieldMaskApplyHelper(msg protoreflect.Mes
 				w.Dedent()
 				w.Println("} else {")
 				w.Indent()
-				w.Printf("self->set_%s({});\n", field.Name())
+				if oneof.IsSynthetic() {
+					w.Printf("self->clear_%s();\n", field.Name())
+				} else {
+					w.Printf("self->clear_%s();\n", oneof.Name())
+				}
 				w.Dedent()
 				w.Println("}")
 				w.Dedent()

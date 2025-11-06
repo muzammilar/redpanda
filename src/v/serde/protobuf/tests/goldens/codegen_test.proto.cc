@@ -1596,7 +1596,7 @@ void say_greeting_request::apply_field_path_from(std::span<const ss::sstring> pa
       if (update->has_greeting()) {
         self->set_greeting(std::move(update->get_greeting()));
       } else {
-        self->set_greeting({});
+        self->clear_greeting();
       }
     }},
   });
