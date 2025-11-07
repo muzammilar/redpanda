@@ -841,7 +841,7 @@ ss::future<upload_result> remote::delete_object_batch(
     while (!_gate.is_closed() && permit.is_allowed && !result) {
         req_cb(fib.retry_count());
         auto res = co_await lease.client->delete_objects(
-          bucket, keys.copy(), fib.get_timeout());
+          bucket, keys, fib.get_timeout());
 
         if (res) {
             if (!res.value().undeleted_keys.empty()) {

@@ -177,7 +177,7 @@ public:
     virtual ss::future<result<delete_objects_result, error_outcome>>
     delete_objects(
       const bucket_name& bucket,
-      chunked_vector<object_key> keys,
+      const chunked_vector<object_key>& keys,
       ss::lowres_clock::duration timeout)
       = 0;
 };
