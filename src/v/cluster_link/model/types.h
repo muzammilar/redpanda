@@ -276,7 +276,7 @@ struct connection_config
     // fetch response.
     std::optional<int32_t> fetch_partition_max_bytes;
     // Default maximum number of bytes to fetch per partition
-    static constexpr auto default_fetch_partition_max_bytes = 1_MiB;
+    static constexpr auto default_fetch_partition_max_bytes = 5_MiB;
     // Default maximum number of bytes to fetch (20MiB)
     static constexpr auto fetch_max_bytes_default = 20 * 1024 * 1024;
 
