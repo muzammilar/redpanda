@@ -48,6 +48,16 @@ constexpr auto small_wait = 3s;
 constexpr auto medium_wait = 15s;
 constexpr auto large_wait = 120s;
 
+namespace { // smoke tests
+static const auto default_topic = topic_config{
+  .name = model::topic{"test-topic"},
+  .partition_count = 3,
+  .replication_factor = 3};
+
+constexpr raft::vnode to_vnode(int node_id) {
+    return raft::vnode{model::node_id{node_id}, model::revision_id{0}};
+}
+
 template<typename T>
 auto typed_range(int begin, T end) {
     return std::views::iota(static_cast<T>(begin), end);
@@ -513,19 +523,34 @@ class SizedCFRFixture : public CFRFixture {
 public:
     SizedCFRFixture() noexcept
       : CFRFixture(Size) {}
+
+    void do_smoke_test() {
+        // set up
+        setup_topic(default_topic);
+        move_partition_onto_dying_nodes(default_topic);
+
+        // disaster
+        induce_controller_loss();
+        toggle_recovery_mode(true);
+        check_no_controller_leader();
+
+        // recovery
+        force_recover_cluster();
+        check_controller_leader();
+        restore_node_number();
+        check_controller_leader();
+        toggle_recovery_mode(false);
+        check_controller_leader();
+        execute_nodewise_recovery();
+        decommission_dead_nodes();
+
+        // check recovery succeeded
+        wait_for_leader_restoration(default_topic);
+        check_final_replica_locations();
+    }
 };
 
 } // namespace
-
-namespace { // smoke tests
-static const auto default_topic = topic_config{
-  .name = model::topic{"test-topic"},
-  .partition_count = 3,
-  .replication_factor = 3};
-
-constexpr raft::vnode to_vnode(int node_id) {
-    return raft::vnode{model::node_id{node_id}, model::revision_id{0}};
-}
 
 TEST(CalculateRaftGroup, TwoSuvivors) {
     std::vector<raft::vnode> voter_config = {
@@ -542,6 +567,33 @@ TEST(CalculateRaftGroup, TwoSuvivors) {
     auto result_config = std::move(maybe_result_config).value();
 
     std::vector<raft::vnode> expected = {to_vnode(3), to_vnode(4), to_vnode(0)};
+
+    ASSERT_EQ(result_config.size(), expected.size());
+    for (const auto& result_node : result_config) {
+        ASSERT_TRUE(std::ranges::find(expected, result_node) != expected.end());
+    }
+}
+
+TEST(CalculateRaftGroup, EvenClusterSize) {
+    std::vector<raft::vnode> voter_config = {
+      to_vnode(0),
+      to_vnode(1),
+      to_vnode(2),
+      to_vnode(3),
+      to_vnode(4),
+      to_vnode(5)};
+
+    std::vector<model::node_id> dead_nodes = {
+      model::node_id{0}, model::node_id{1}, model::node_id{2}};
+
+    auto maybe_result_config
+      = cluster::controller_forced_reconfiguration_manager::
+        calculation_reconfiguration_group(dead_nodes, voter_config, 2);
+    ASSERT_TRUE(maybe_result_config.has_value());
+
+    auto result_config = std::move(maybe_result_config).value();
+
+    std::vector<raft::vnode> expected = {to_vnode(3), to_vnode(4), to_vnode(5)};
 
     ASSERT_EQ(result_config.size(), expected.size());
     for (const auto& result_node : result_config) {
@@ -586,55 +638,12 @@ TEST(CalculateRaftGroup, NotEnoughNodes) {
 }
 
 using CFRFixture5 = SizedCFRFixture<5>;
-TEST_F(CFRFixture5, Smoke5) {
-    // set up
-    setup_topic(default_topic);
-    move_partition_onto_dying_nodes(default_topic);
-
-    // disaster
-    induce_controller_loss();
-    toggle_recovery_mode(true);
-    check_no_controller_leader();
-
-    // recovery
-    force_recover_cluster();
-    check_controller_leader();
-    restore_node_number();
-    check_controller_leader();
-    toggle_recovery_mode(false);
-    check_controller_leader();
-    execute_nodewise_recovery();
-    decommission_dead_nodes();
-
-    // check recovery succeeded
-    wait_for_leader_restoration(default_topic);
-    check_final_replica_locations();
-}
+TEST_F(CFRFixture5, Smoke5) { do_smoke_test(); }
 
 using CFRFixture3 = SizedCFRFixture<3>;
-TEST_F(CFRFixture3, Smoke3) {
-    // set up
-    setup_topic(default_topic);
-    move_partition_onto_dying_nodes(default_topic);
+TEST_F(CFRFixture3, Smoke3) { do_smoke_test(); }
 
-    // disaster
-    induce_controller_loss();
-    toggle_recovery_mode(true);
-    check_no_controller_leader();
-
-    // recovery
-    force_recover_cluster();
-    check_controller_leader();
-    restore_node_number();
-    check_controller_leader();
-    toggle_recovery_mode(false);
-    check_controller_leader();
-    execute_nodewise_recovery();
-    decommission_dead_nodes();
-
-    // check recovery succeeded
-    wait_for_leader_restoration(default_topic);
-    check_final_replica_locations();
-}
+using CFRFixture4 = SizedCFRFixture<4>;
+TEST_F(CFRFixture4, Smoke4) { do_smoke_test(); }
 
 } // namespace
