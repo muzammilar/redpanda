@@ -115,11 +115,14 @@ class Partition(NamedTuple):
 
 
 class MetricSample(NamedTuple):
-    family: str
     sample: str
+    """The metric name, i.e., the part before the `{` in Prometheus exposition format."""
     node: Any
+    """The node the metric was queried from."""
     value: float
+    """The value of the metric sample."""
     labels: dict[str, str]
+    """The labels attached to the metric sample."""
 
 
 @dataclass
@@ -1373,9 +1376,7 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
                         f"More than one metric matched '{sample_pattern}'. Found {found_sample} and {(family.name, sample.name)}"
                     )
                 sample_values.append(
-                    MetricSample(
-                        family.name, sample.name, node, sample.value, sample.labels
-                    )
+                    MetricSample(sample.name, node, sample.value, sample.labels)
                 )
 
         return sample_values
@@ -1394,25 +1395,47 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         nodes: Any = None,
         metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
     ) -> MetricSamples | None:
-        """Implement this method to iterate over nodes to query metrics.
+        """Query the given metrics endpoint for a single metric name. Returns
+        all series for this metric (i.e., all label combinations, on every node).
 
-        Query metrics for a single sample using fuzzy name matching. This
-        interface matches the sample pattern against sample names, and requires
-        that exactly one (family, sample) match the query. All values for the
-        sample across the requested set of nodes are returned in a flat array.
+        :param sample_pattern: Substring to match against metric names. Fuzzy
+            matching is used; any metric whose name contains this string will
+            be considered a match.
+            Exactly one of ``name`` or ``sample_pattern`` must be provided.
+        :param nodes: List of nodes to query. If ``None``, all nodes in the
+            cluster are queried.
+        :param metrics_endpoint: The metrics endpoint to query.
+        :param name: If provided, performs exact matching for the metric name.
+            If not provided, fuzzy matching is used via ``sample_pattern``.
+            Exactly one of ``name`` or ``sample_pattern`` must be provided.
 
-        None will be returned if less than one (family, sample) matches.
-        An exception will be raised if more than one (family, sample) matches.
+        :returns: MetricSamples for the matched metric, or ``None`` if no
+            metric matches the pattern. If ``name`` is provided and no metric
+            is found, an exception is raised.
+        :rtype: MetricSamples | None
+
+        This either uses fuzzy matching (if sample_pattern is used) or
+        exact matching (if name is used) to find the metric.
+
+        Fuzzy matching matches any metric whose name contains the given
+        sample_pattern (which is a plain string, not a regex or glob).
+
+        This interface matches the sample pattern against metric names, and
+        requires that exactly one metric name match the query (though this name
+        may be associated with multiple metric values with varying labels). All
+        series for this name are returned, no aggregation is performed.
+
+        None will be returned if no metric matches the pattern. An
+        exception will be raised if two or more metric names match the pattern.
 
         For example, the query:
 
             redpanda.metrics_sample("under_replicated")
 
         will return an array containing MetricSample instances for each node and
-        core/shard in the cluster. Each entry will correspond to a value from:
-
-            family = vectorized_cluster_partition_under_replicated_replicas
-            sample = vectorized_cluster_partition_under_replicated_replicas
+        core/shard in the cluster. Each entry will correspond to the sum of
+        the "vectorized_cluster_partition_under_replicated_replicas" summed across
+        all shards.
         """
         pass
 
