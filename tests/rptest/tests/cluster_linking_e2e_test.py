@@ -3347,7 +3347,7 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
         self.start_producer_consumer(
             topic=topic_3.name,
             msg_size=128,
-            msg_cnt=100000,
+            msg_cnt=5000000,
             use_transactions=True,
             producer_properties={
                 "msgs_per_transaction": "10000",
