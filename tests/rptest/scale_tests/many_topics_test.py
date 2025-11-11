@@ -98,6 +98,7 @@ class ManyTopicsTest(RedpandaTest):
             # Increase partition allocation percent to ensure that we can fit 40k
             # topics on a `m6id.xlarge` cluster.
             "topic_partitions_memory_allocation_percent": self.PARTITIONS_MEMORY_ALLOCATION_PERCENT,
+            "log_segment_size": 16777216,
         }
 
         # Reduce per-partition log spam
