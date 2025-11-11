@@ -34,6 +34,7 @@ from logging import Logger
 from typing import (
     Any,
     Callable,
+    Collection,
     Iterable,
     List,
     Literal,
@@ -42,8 +43,12 @@ from typing import (
     Protocol,
     Set,
     Tuple,
+    TypedDict,
+    TypeVar,
     cast,
 )
+
+from signal import SIGKILL, SIGTERM, Signals
 
 import requests
 import yaml
@@ -108,12 +113,23 @@ from rptest.util import (
 from rptest.utils.mode_checks import in_fips_environment
 from rptest.utils.rpenv import sample_license
 
+T = TypeVar("T")
+
 
 class Partition(NamedTuple):
     topic: str
     index: int  # type: ignore existing name clash, fix later
     leader: ClusterNode | None
-    replicas: list[ClusterNode | None] | None
+    replicas: list[ClusterNode]
+
+
+# TODO use the same tuple approach for replicas in Partition above and
+# remove CloudStoragePartition
+class CloudStoragePartition(NamedTuple):
+    topic: str
+    index: int  # pyright: ignore[reportIncompatibleMethodOverride] - fix this later
+    leader: ClusterNode | None
+    replicas: tuple[ClusterNode, ...]
 
 
 class MetricSample(NamedTuple):
@@ -153,6 +169,10 @@ class CloudStorageCleanupStrategy(enum.Enum):
 
     # Ignore large buckets (based on number of objects). For small buckets, ALWAYS clean.
     ALWAYS_SMALL_BUCKETS_ONLY = "ALWAYS_SMALL_BUCKETS_ONLY"
+
+
+class NodeNotFoundError(Exception):
+    pass
 
 
 SaslCredentials = redpanda_types.SaslCredentials
@@ -351,7 +371,7 @@ def one_or_many(value: Any) -> Any:
     we only care about getting one value out
     """
     if isinstance(value, list):
-        return value[0]
+        return cast(Any, value[0])
     else:
         return value
 
@@ -1055,6 +1075,11 @@ class TLSProvider:
         raise NotImplementedError("p12_password")
 
 
+class SaslMechanismOverride(TypedDict):
+    listener: str
+    sasl_mechanisms: list[str]
+
+
 class SecurityConfig:
     # the system currently has a single principal mapping rule. this is
     # sufficient to get our first mTLS tests put together, but isn't general
@@ -1071,7 +1096,7 @@ class SecurityConfig:
         self.enable_sasl = False
         self.kafka_enable_authorization: bool | None = None
         self.sasl_mechanisms: list[str] | None = None
-        self.sasl_mechanisms_overrides: list | None = None
+        self.sasl_mechanisms_overrides: list[SaslMechanismOverride] | None = None
         self.http_authentication: list[str] | None = None
         self.endpoint_authn_method: str | None = None
         self.tls_provider: TLSProvider | None = None
@@ -1236,7 +1261,7 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
 
     context: TestContext
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._usage_stats = UsageStats()
 
@@ -1732,7 +1757,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         # later to dataclass
         self._cc_config = context.globals[self.GLOBAL_CLOUD_CLUSTER_CONFIG]
 
-        self._provider_config = {}
+        self._provider_config: dict[str, str | None] = {}
         match context.globals.get("cloud_provider"):
             case "aws" | "gcp":
                 self._provider_config.update({
@@ -1868,9 +1893,9 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
         all_pods = self.get_redpanda_pods()
         # Sort pods into bins
-        active_rp_pods = []
-        inactive_rp_pods = []
-        unknown_rp_pods = []
+        active_rp_pods: list[dict[str, Any]] = []
+        inactive_rp_pods: list[dict[str, Any]] = []
+        unknown_rp_pods: list[dict[str, Any]] = []
         for pod in all_pods:
             _status = pod["status"]["phase"].lower()
             if _status in active_phases:
@@ -2015,7 +2040,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         pod_names = [p.name for p in self.pods]
         self.logger.info(f"Starting concurrent restart on pods: {pod_names}")
 
-        threads = []
+        threads: list[threading.Thread] = []
         for pod_name in pod_names:
             thread = threading.Thread(target=self.restart_pod, args=(pod_name,))
             threads.append(thread)
@@ -2178,12 +2203,9 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
     @staticmethod
     def get_cloud_globals(globals: dict[str, Any]) -> dict[str, Any]:
-        _config = {}
-        if RedpandaServiceCloud.GLOBAL_CLOUD_CLUSTER_CONFIG in globals:
-            # Load needed config values from cloud section
-            # of globals prior to actual cluster creation
-            _config = globals[RedpandaServiceCloud.GLOBAL_CLOUD_CLUSTER_CONFIG]
-        return _config
+        # Load needed config values from cloud section
+        # of globals prior to actual cluster creation
+        return globals.get(RedpandaServiceCloud.GLOBAL_CLOUD_CLUSTER_CONFIG, {})
 
     def get_tier(self):
         """Get product information.
@@ -2204,18 +2226,20 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         # Load install pack and check profile
         return install_pack_client.getInstallPack(install_pack_version)
 
-    def cloud_agent_ssh(self, remote_cmd):
+    def cloud_agent_ssh(self, remote_cmd: list[str]):
         """Run the given command on the redpanda agent node of the cluster.
 
         :param remote_cmd: The command to run on the agent node.
         """
         return self.kubectl._ssh_cmd(remote_cmd)
 
-    def scale_cluster(self, nodes_count):
+    def scale_cluster(self, nodes_count: int) -> Any:
         """Scale out/in cluster to specified number of nodes."""
         return self._cloud_cluster.scale_cluster(nodes_count)
 
-    def set_cluster_config_overrides(self, cluster_id, config_values):
+    def set_cluster_config_overrides(
+        self, cluster_id: str, config_values: list[dict[str, str]]
+    ) -> Any:
         """
         Set configuration overrides for a specific
         Redpanda cloud cluster using Admin API
@@ -2277,18 +2301,18 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
         # Can't remove log_allow_list as it is present in the metadataaddeer call
         # Checking logs in case of crash is useless for pods as they are auto-restarted anyway
-        def _get_stored_pod(uuid):
+        def _get_stored_pod(uuid: str):
             """Shortcut to getting proper stored Broker class"""
             for pod in self.pods:
                 if uuid == pod.uuid:
                     return pod
             return None
 
-        def _get_container_id(p):
+        def _get_container_id(p: dict[str, Any]):
             # Shortcut to getting containerID
             return p["containerStatuses"][0]["containerID"]
 
-        def _get_restart_count(p):
+        def _get_restart_count(p: dict[str, Any]):
             # Shortcut to getting restart counter
             return p["containerStatuses"][0]["restartCount"]
 
@@ -2385,10 +2409,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         )
         lsearcher.search_logs([(None, pod) for pod in self.pods])
 
-    def copy_cloud_logs(self, test_start_time):
+    def copy_cloud_logs(self, test_start_time: float) -> dict[str, Any]:
         """Method makes sure that agent and cloud logs is copied after the test"""
 
-        def create_dest_path(service_name):
+        def create_dest_path(service_name: str):
             # Create directory into which service logs will be copied
             dest = os.path.join(
                 TestContext.results_dir(self._context, self._context.test_index),
@@ -2399,7 +2423,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
             return dest
 
-        def copy_from_agent(since):
+        def copy_from_agent(since: str):
             service_name = f"{self._cloud_cluster.cluster_id}-agent"
             # Example path:
             # '/home/ubuntu/redpanda/tests/results/2024-04-11--019/SelfRedpandaCloudTest/test_healthy/2/coc12bfs0etj2dg9a5ig-agent'
@@ -2414,7 +2438,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
                     lfile.writelines([line])
             return
 
-        def copy_from_pod(params):
+        def copy_from_pod(params: dict[str, Any]):
             """Function copies logs from agent and all RP pods"""
             pod = params["pod"]
             test_start_time = params["s_time"]
@@ -2436,9 +2460,6 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             # if serverless cluster test treats it as a black box, no checking of pods
             return {}
 
-        # Safeguard if CloudService not created
-        if self.pods is None or self._cloud_cluster is None:
-            return {}
         # Prepare time for different occasions
         t_start_time = time.gmtime(test_start_time)
 
@@ -2457,7 +2478,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         # Collect pod logs
         # Use CloudBrokers as a source of metadata and the rest
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-        params = []
+        params: list[dict[str, Any]] = []
         for pod in self.pods:
             params.append({"pod": pod, "s_time": f_start_time})
         sw.start()
@@ -2640,7 +2661,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         self._trim_logs = self._context.globals.get(self.TRIM_LOGS_KEY, True)
 
-        self._node_id_by_idx = {}
+        self._node_id_by_idx: dict[int, int] = {}
         self._security_config: dict[str, str | int] = {}
 
         self._skip_if_no_redpanda_log = skip_if_no_redpanda_log
@@ -2682,7 +2703,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             )
         self.cloud_storage_scrub_timeout_s = cloud_storage_scrub_timeout_s
 
-        self._extra_node_conf = {}
+        self._extra_node_conf: dict[ClusterNode, dict[str, Any]] = {}
         for node in self.nodes:
             self._extra_node_conf[node] = extra_node_conf or dict()
 
@@ -2745,7 +2766,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         # Each time we start a node and write out its node_config (redpanda.yaml),
         # stash a copy here so that we can quickly look up e.g. addresses later.
-        self._node_configs = {}
+        self._node_configs: dict[ClusterNode, dict[str, Any]] = {}
 
         self._seed_servers = self.nodes
 
@@ -2765,20 +2786,21 @@ class RedpandaService(Service, RedpandaServiceABC):
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(nodes)) as executor:
             # The list() wrapper is to cause futures to be evaluated here+now
             # (including throwing any exceptions) and not just spawned in background.
-            list(executor.map(lambda n: self.stop_node(n, timeout=stop_timeout), nodes))
-            list(
-                executor.map(
-                    lambda n: self.start_node(
-                        n,
-                        override_cfg_params=override_cfg_params,
-                        timeout=start_timeout,
-                        auto_assign_node_id=auto_assign_node_id,
-                        omit_seeds_on_idx_one=omit_seeds_on_idx_one,
-                        extra_cli=extra_cli,
-                    ),
-                    nodes,
+            def stop_with_timeout(n: ClusterNode) -> None:
+                self.stop_node(n, timeout=stop_timeout)
+
+            def start_with_params(n: ClusterNode) -> None:
+                self.start_node(
+                    n,
+                    override_cfg_params=override_cfg_params,
+                    timeout=start_timeout,
+                    auto_assign_node_id=auto_assign_node_id,
+                    omit_seeds_on_idx_one=omit_seeds_on_idx_one,
+                    extra_cli=extra_cli,
                 )
-            )
+
+            list(executor.map(stop_with_timeout, nodes))
+            list(executor.map(start_with_params, nodes))
 
     def set_extra_rp_conf(self, conf: dict[str, Any]):
         self._extra_rp_conf = conf
@@ -2800,7 +2822,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         elif use_stress_fiber == "OFF":
             return False
 
-        self.logger.warn(f"{self.GLOBAL_USE_STRESS_FIBER} should be 'ON', or 'OFF'")
+        self.logger.warning(f"{self.GLOBAL_USE_STRESS_FIBER} should be 'ON', or 'OFF'")
         return False
 
     def get_stress_fiber_params(self) -> Tuple[int, int, int]:
@@ -2852,13 +2874,13 @@ class RedpandaService(Service, RedpandaServiceABC):
 
     def rolling_restart_nodes(
         self,
-        nodes,
-        override_cfg_params=None,
-        start_timeout=None,
-        stop_timeout=None,
-        use_maintenance_mode=True,
-        omit_seeds_on_idx_one=True,
-        auto_assign_node_id=False,
+        nodes: ClusterNode | list[ClusterNode],
+        override_cfg_params: dict[str, Any] | None = None,
+        start_timeout: int | None = None,
+        stop_timeout: int | None = None,
+        use_maintenance_mode: bool = True,
+        omit_seeds_on_idx_one: bool = True,
+        auto_assign_node_id: bool = False,
     ):
         nodes = [nodes] if isinstance(nodes, ClusterNode) else nodes
         restarter = RollingRestarter(self)
@@ -2885,7 +2907,9 @@ class RedpandaService(Service, RedpandaServiceABC):
         )
         return self._si_settings
 
-    def for_nodes(self, nodes, cb: Callable) -> list:
+    def for_nodes(
+        self, nodes: Collection[ClusterNode], cb: Callable[[ClusterNode], T]
+    ) -> list[T]:
         n_workers = len(nodes)
         if n_workers > 0:
             with concurrent.futures.ThreadPoolExecutor(
@@ -2904,14 +2928,16 @@ class RedpandaService(Service, RedpandaServiceABC):
         # Excessive logging may cause disks to fill up quickly.
         # Call this method to removes TRACE and DEBUG log lines from redpanda logs
         # Ensure this is only done on tests that have passed
-        def prune(node):
+        def prune(node: ClusterNode):
             node.account.ssh(
                 f"sed -i -E -e '/TRACE|DEBUG/d' {RedpandaService.STDOUT_STDERR_CAPTURE} || true"
             )
 
         self.for_nodes(self.nodes, prune)
 
-    def node_id(self, node: ClusterNode, force_refresh=False, timeout_sec=30) -> int:
+    def node_id(
+        self, node: ClusterNode, force_refresh: bool = False, timeout_sec: int = 30
+    ) -> int:
         """
         Returns the node ID of a given node. Uses a cached value unless
         'force_refresh' is set to True.
@@ -3014,22 +3040,22 @@ class RedpandaService(Service, RedpandaServiceABC):
     def set_environment(self, environment: dict[str, str]):
         self._environment.update(environment)
 
-    def unset_environment(self, keys: list):
+    def unset_environment(self, keys: list[str]):
         for k in keys:
             try:
                 del self._environment[k]
             except KeyError:
                 pass
 
-    def set_extra_node_conf(self, node, conf):
+    def set_extra_node_conf(self, node: ClusterNode, conf: dict[str, Any]):
         assert node in self.nodes, f"Node {node.account.hostname} is not started"
         self._extra_node_conf[node] = conf
 
-    def add_extra_node_conf(self, node, conf):
+    def add_extra_node_conf(self, node: ClusterNode, conf: dict[str, Any]):
         assert node in self.nodes, f"Node {node.account.hostname} is not started"
         self._extra_node_conf[node] = {**self._extra_node_conf[node], **conf}
 
-    def set_security_settings(self, settings):
+    def set_security_settings(self, settings: SecurityConfig):
         self._security = settings
         self._init_tls()
 
@@ -3123,7 +3149,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         return avail_kb * 1024
 
-    def get_node_disk_usage(self, node):
+    def get_node_disk_usage(self, node: ClusterNode):
         """
         get disk usage for the redpanda volume on a particular node
         """
@@ -3136,7 +3162,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 return int(line.split()[2])
         assert False, "couldn't parse df output"
 
-    def _startup_poll_interval(self, first_start):
+    def _startup_poll_interval(self, first_start: bool):
         """
         During startup, our eagerness depends on whether it's the first
         start, where we expect a redpanda node to start up very quickly,
@@ -3145,7 +3171,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         """
         return 0.2 if first_start else 1.0
 
-    def wait_for_membership(self, first_start, timeout_sec=30):
+    def wait_for_membership(self, first_start: bool, timeout_sec: int = 30):
         self.logger.info("Waiting for all brokers to join cluster")
 
         wait_until(
@@ -3166,7 +3192,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             f"{self.si_settings.cloud_storage_azure_storage_account}.blob.localhost"
         )
 
-        def update_hosts_file(node_name, path):
+        def update_hosts_file(node_name: str, path: str):
             ducktape_hosts = open(path, "r").read()
             if azurite_dns not in ducktape_hosts:
                 ducktape_hosts += f"\n{azurite_ip}   {azurite_dns}\n"
@@ -3185,7 +3211,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         # Edit /etc/hosts on the node where ducktape is running
         update_hosts_file("ducktape", "/etc/hosts")
 
-        def setup_node_dns(node):
+        def setup_node_dns(node: ClusterNode):
             tmpfile = f"/tmp/{node.name}_hosts"
             node.account.copy_from("/etc/hosts", tmpfile)
             update_hosts_file(node.name, tmpfile)
@@ -3241,7 +3267,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             + ": killing processes and attempting to clean up before starting"
         )
 
-        def clean_one(node):
+        def clean_one(node: ClusterNode):
             try:
                 self.stop_node(node)
             except Exception:
@@ -3274,7 +3300,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         if start_si and self._si_settings is not None:
             self.start_si()
 
-        def start_one(node):
+        def start_one(node: ClusterNode):
             node_overrides = (
                 node_config_overrides[node] if node in node_config_overrides else {}
             )
@@ -3313,8 +3339,10 @@ class RedpandaService(Service, RedpandaServiceABC):
         self.logger.info("Verifying storage is in expected state")
         storage = self.storage()
         for node in storage.nodes:
-            if node not in to_start:
+            # https://redpandadata.slack.com/archives/C07HD9U0EHL/p1762830593745199
+            if node not in to_start:  # pyright: ignore[reportUnnecessaryContains]
                 continue
+            raise RuntimeError("unreachable")
             unexpected_ns = set(node.ns) - {"redpanda"}
             if unexpected_ns:
                 for ns in unexpected_ns:
@@ -3349,7 +3377,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         # Start stress fiber if requested
         if self.use_stress_fiber():
 
-            def start_stress_fiber(node):
+            def start_stress_fiber(node: ClusterNode):
                 count, min_ms, max_ms = self.get_stress_fiber_params()
                 self.start_stress_fiber(node, count, min_ms, max_ms)
 
@@ -3360,7 +3388,8 @@ class RedpandaService(Service, RedpandaServiceABC):
                 self.logger.info(f"Starting stress fiber for {len(self.nodes)} nodes")
                 self.for_nodes(self.nodes, start_stress_fiber)
 
-    def write_crl_file(self, node: ClusterNode, ca: tls.CertificateAuthority):
+    def write_crl_file(self, node: ClusterNode, ca: tls.CertificateAuthority) -> None:
+        assert ca.crl is not None, "CRL file is required"
         self.logger.info(
             f"Writing Redpanda node tls ca CRL file: {RedpandaService.TLS_CA_CRL_FILE}"
         )
@@ -3457,7 +3486,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 self._audit_log_config.truststore_file = RedpandaService.TLS_CA_CRT_FILE
                 self._audit_log_config.crl_file = RedpandaService.TLS_CA_CRL_FILE
 
-    def start_redpanda(self, node, extra_cli: list[str] = []):
+    def start_redpanda(self, node: ClusterNode, extra_cli: list[str] = []):
         preamble, res_args = self._resource_settings.to_cli(
             dedicated_node=self._dedicated_nodes
         )
@@ -3490,20 +3519,22 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         node.account.ssh(cmd)
 
-    def check_node(self, node):
+    def check_node(self, node: ClusterNode):
         pid = self.redpanda_pid(node)
         if not pid:
-            self.logger.warn(f"No redpanda PIDs found on {node.name}")
+            self.logger.warning(f"No redpanda PIDs found on {node.name}")
             return False
 
         if not node.account.exists(f"/proc/{pid}"):
-            self.logger.warn(f"PID {pid} (node {node.name}) dead")
+            self.logger.warning(f"PID {pid} (node {node.name}) dead")
             return False
 
         # fall through
         return True
 
-    def start_stress_fiber(self, node, count, min_ms, max_ms):
+    def start_stress_fiber(
+        self, node: ClusterNode, count: int, min_ms: int, max_ms: int
+    ):
         """Start stress fiber"""
         admin = Admin(self)
         admin.stress_fiber_start(
@@ -3514,24 +3545,28 @@ class RedpandaService(Service, RedpandaServiceABC):
         )
 
     def all_up(self):
-        def check_node(node):
+        def check_node(node: ClusterNode):
             pid = self.redpanda_pid(node)
             if not pid:
-                self.logger.warn(f"No redpanda PIDs found on {node.name}")
+                self.logger.warning(f"No redpanda PIDs found on {node.name}")
                 return False
 
             if not node.account.exists(f"/proc/{pid}"):
-                self.logger.warn(f"PID {pid} (node {node.name}) dead")
+                self.logger.warning(f"PID {pid} (node {node.name}) dead")
                 return False
 
             # fall through
             return True
 
-        return all(self.for_nodes(self._started, check_node))
+        return all(self.for_nodes(list(self._started), check_node))
 
     def signal_redpanda(
-        self, node: ClusterNode, signal=signal.SIGKILL, idempotent=False, thread=None
-    ):
+        self,
+        node: ClusterNode,
+        signal: Signals = signal.SIGKILL,
+        idempotent: bool = False,
+        thread: str | None = None,
+    ) -> None:
         """
         :param idempotent: if true, then kill-like signals are ignored if
                            the process is already gone.
@@ -3540,7 +3575,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         if thread is None:
             pid = self.redpanda_pid(node)
             if pid is None:
-                if idempotent and signal in {signal.SIGKILL, signal.SIGTERM}:
+                if idempotent and signal in {SIGKILL, SIGTERM}:
                     return
                 else:
                     raise RuntimeError(
@@ -3623,7 +3658,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             else:
                 yield filename
 
-    def is_node_ready(self, node):
+    def is_node_ready(self, node: ClusterNode):
         """
         Calls Admin API's v1/status/ready endpoint to verify if the node
         is ready
@@ -3723,7 +3758,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             self._started.add(node)
 
     def start_node_with_rpk(
-        self, node: ClusterNode, additional_args="", clean_node=True
+        self, node: ClusterNode, additional_args: str = "", clean_node: bool = True
     ):
         """
         Start a single instance of redpanda using rpk. similar to start_node,
@@ -3778,7 +3813,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 actual_config = yaml.full_load(f.read())
                 self._node_configs[node] = actual_config
 
-    def _log_node_shutdown_analysis(self, node):
+    def _log_node_shutdown_analysis(self, node: ClusterNode):
         """
         Analyze a node's failure to shutdown within the allocated time to try
         to diagnose the reason for shutdown hang.
@@ -3787,7 +3822,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         expr = '"application.*Stopping"'
         cmd = f"grep {expr} {RedpandaService.STDOUT_STDERR_CAPTURE} || true"
 
-        other_stopping = []
+        other_stopping: list[str] = []
         last_next_to_shutdown = None
         for line in node.account.ssh_capture(cmd):
             if "next to shutdown" in line:
@@ -3811,7 +3846,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         self.logger.debug(f"Did not find stopping message for service {next_service}")
 
-    def _log_node_process_state(self, node):
+    def _log_node_process_state(self, node: ClusterNode):
         """
         For debugging issues around starting and stopping processes: log
         which processes are running and which ports are in use.
@@ -3822,7 +3857,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         )
 
         # Capture general process information
-        process_lines = []
+        process_lines: list[str] = []
         for line in node.account.ssh_capture("ps aux --sort=-%mem", timeout_sec=30):
             process_lines.append(line.strip())
 
@@ -3830,9 +3865,10 @@ class RedpandaService(Service, RedpandaServiceABC):
         self.logger.debug(f"{node.name}: ps aux output:\n{output_str}")
 
         # Capture network information
-        netstat_lines = []
-        for line in node.account.ssh_capture("netstat -panelot", timeout_sec=30):
-            netstat_lines.append(line.strip())
+        netstat_lines = [
+            line.strip()
+            for line in node.account.ssh_capture("netstat -panelot", timeout_sec=30)
+        ]
 
         output_str = "\n".join(netstat_lines)
         self.logger.debug(f"{node.name}: netstat -panelot output:\n{output_str}")
@@ -3843,10 +3879,10 @@ class RedpandaService(Service, RedpandaServiceABC):
         """
         self.logger.debug(f"{node.name}: Gathering /proc/{pid}/status for node...")
         cmd = f"cat /proc/{pid}/status"
-        lines = []
+        lines: list[str] = []
         for line in node.account.ssh_capture(cmd, allow_fail=True, timeout_sec=10):
             if re.search(r"CoreDumping:\s*1", line):
-                self.logger.warn(
+                self.logger.warning(
                     f"{node.name}: Detected core dumping in process {pid} status."
                 )
             lines.append(line.strip())
@@ -3854,7 +3890,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         output_str = "\n".join(lines)
         self.logger.debug(f"{node.name}: /proc/{pid}/status:\n{output_str}")
 
-    def start_service(self, node, start):
+    def start_service(self, node: ClusterNode, start: Callable[[], None]) -> None:
         # Maybe the service collides with something that wasn't cleaned up
         # properly: let's peek at what's going on on the node before starting it.
         self._log_node_process_state(node)
@@ -3864,7 +3900,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         except:
             # In case our failure to start is something like an "address in use", we
             # would like to know what else is going on on this node.
-            self.logger.warn(
+            self.logger.warning(
                 f"Failed to start on {node.name}, gathering node ps and netstat..."
             )
             self._log_node_process_state(node)
@@ -3951,7 +3987,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
                 # See if the bucket is small enough
                 t = time.time()
-                for i, m in enumerate(
+                for i, _ in enumerate(
                     self.cloud_storage_client.list_objects(
                         self.si_settings.cloud_storage_bucket
                     )
@@ -4016,20 +4052,20 @@ class RedpandaService(Service, RedpandaServiceABC):
             self._si_settings.cloud_storage_bucket
         )
 
-    def partitions(self, topic_name=None):
+    def partitions(self, topic_name: str | None = None) -> list[Partition]:
         """
         Return partition metadata for the topic.
         """
         kc = KafkaCat(self)
         md = kc.metadata()
 
-        result = []
+        result: list[Partition] = []
 
-        def make_partition(topic_name, p):
+        def make_partition(topic_name: str, p: dict[str, Any]):
             index = p["partition"]
             leader_id = p["leader"]
             leader = None if leader_id == -1 else self.get_node_by_id(leader_id)
-            replicas = [self.get_node_by_id(r["id"]) for r in p["replicas"]]
+            replicas = [self.node_by_id(r["id"]) for r in p["replicas"]]
             return Partition(topic_name, index, leader, replicas)
 
         for topic in md["topics"]:
@@ -4049,7 +4085,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         expect_restart: bool = False,
         admin_client: Admin | None = None,
         timeout: int = 10,
-        tolerate_stopped_nodes=False,
+        tolerate_stopped_nodes: bool = False,
     ):
         """
         Update cluster configuration and wait for all nodes to report that they
@@ -4089,11 +4125,11 @@ class RedpandaService(Service, RedpandaServiceABC):
 
     def _wait_for_config_version(
         self,
-        config_version,
+        config_version: int,
         expect_restart: bool,
         timeout: int,
         admin_client: Admin | None = None,
-        tolerate_stopped_nodes=False,
+        tolerate_stopped_nodes: bool = False,
     ):
         admin_client = admin_client or self._admin
         if tolerate_stopped_nodes:
@@ -4187,7 +4223,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         wait_until(is_awaited_state, timeout_sec=timeout_sec, backoff_sec=1)
 
-    def monitor_log(self, node):
+    def monitor_log(self, node: ClusterNode):
         assert node in self.nodes, f"Node {node.account.hostname} is not started"
         return node.account.monitor_log(RedpandaService.STDOUT_STDERR_CAPTURE)
 
@@ -4209,7 +4245,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                     return True
             return False
 
-        crashes = []
+        crashes: list[tuple[ClusterNode, str]] = []
         # We log long encoded AWS/GCP headers that occasionally have 'SEGV' in
         # them by chance
         cloud_header_strings = ["x-amz-id", "x-amz-request", "x-guploader-uploadid"]
@@ -4331,7 +4367,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             f"Gathering cloud storage diagnostics in bucket {self.si_settings.cloud_storage_bucket}"
         )
 
-        manifests_to_dump = []
+        manifests_to_dump: list[str] = []
         for o in self.cloud_storage_client.list_objects(
             self.si_settings.cloud_storage_bucket
         ):
@@ -4382,7 +4418,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                             body
                         )
                     except Exception as e:
-                        self.logger.warn(f"Failed to decode {m}: {e}")
+                        self.logger.warning(f"Failed to decode {m}: {e}")
                     else:
                         json_filename = f"{filename}_decoded.json"
                         json_bytes = json.dumps(decoded, indent=2)
@@ -4393,7 +4429,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                             outstr.write(json_bytes.encode())
 
     def raise_on_storage_usage_inconsistency(self):
-        def tracked(fstat):
+        def tracked(fstat: tuple[pathlib.Path, int]):
             """
             filter out files at the root of redpanda's data directory. these
             are not included right now in the local storage costs returned by
@@ -4409,7 +4445,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                    26 startup_log
                 10685 config_cache.yaml
             """
-            file, size = fstat
+            file, _ = fstat
             if len(file.parents) == 1:
                 return False
             if file.parents[-2].name == "cloud_storage_cache":
@@ -4424,7 +4460,21 @@ class RedpandaService(Service, RedpandaServiceABC):
                 return False
             return True
 
-        def inspect_node(node):
+        @dataclass
+        class StorageInspectionResult:
+            """Result of inspecting storage usage on a node."""
+
+            diff_ratio: float  # Absolute difference ratio between observed and reported
+            reclaimable_ratio: float  # Ratio of storage reclaimable by retention
+            reported: dict[str, int]  # Reported storage usage by category
+            reported_total: int  # Total reported storage usage
+            observed: list[tuple[pathlib.Path, int]]  # List of (path, size) tuples
+            observed_total: int  # Total observed storage usage
+
+            def should_retry(self) -> bool:
+                return self.diff_ratio > 0.05 + self.reclaimable_ratio
+
+        def inspect_node(node: ClusterNode) -> StorageInspectionResult:
             """
             Fetch reported size from admin interface, query the local file
             system, and compute a percentage difference between reported and
@@ -4440,66 +4490,67 @@ class RedpandaService(Service, RedpandaServiceABC):
                 )
 
                 diff = observed_total - reported_total
-                return (
-                    abs(diff / reported_total),
-                    reported["reclaimable_by_retention"] / reported_total,
-                    reported,
-                    reported_total,
-                    observed,
-                    observed_total,
+                return StorageInspectionResult(
+                    diff_ratio=abs(diff / reported_total),
+                    reclaimable_ratio=reported["reclaimable_by_retention"]
+                    / reported_total,
+                    reported=reported,
+                    reported_total=reported_total,
+                    observed=observed,
+                    observed_total=observed_total,
                 )
             except Exception:
-                return 0.0, 0.0, None, None, None, None
+                return StorageInspectionResult(
+                    diff_ratio=0.0,
+                    reclaimable_ratio=0.0,
+                    reported={},
+                    reported_total=0,
+                    observed=[],
+                    observed_total=0,
+                )
 
         # inspect the node and check that we fall below a 5% + reclaimabled_by_retention%
         # threshold difference. at this point the test is over, but we allow for a couple
         # retries in case things need to settle.
-        nodes = [(n, None) for n in self.nodes]
-        retries = []
+
+        def inspect_nodes(nodes_: list[ClusterNode]):
+            return self.for_nodes(nodes_, lambda n: (n, inspect_node(n)))
+
+        retries = [r for r in inspect_nodes(self.nodes) if r[1].should_retry()]
+
         for _ in range(3):
-            retries = []
-            results = self.for_nodes(nodes, lambda n: (n, inspect_node(n)))
-            for node, (pct_diff, reclaimable_diff, *deets) in results:
-                if pct_diff > 0.05 + reclaimable_diff:
-                    retries.append((node, (pct_diff, reclaimable_diff, *deets)))
+            results = inspect_nodes([node for node, _ in retries])
+            retries = [r for r in results if r[1].should_retry()]
 
             if not retries:
                 # all good
                 return
-            nodes = retries
+
             time.sleep(5)
 
         # if one or more nodes failed the check, then report information about
         # the situation and fail the test by raising an exception.
-        nodes = []
-        max_node, max_diff = retries[0][0], retries[0][1][0]
-        for node, deets in retries:
+        node_names: list[str] = []
+        max_node, max_diff = retries[0][0], retries[0][1].diff_ratio
+        for node, result in retries:
             node_name = f"{self.idx(node)}:{node.account.hostname}"
-            nodes.append(node_name)
-            (
-                pct_diff,
-                reclaimable_diff,
-                reported,
-                reported_total,
-                observed,
-                observed_total,
-            ) = deets
-            if pct_diff > max_diff:
-                max_diff = pct_diff
+            node_names.append(node_name)
+            if result.diff_ratio > max_diff:
+                max_diff = result.diff_ratio
                 max_node = node
-            diff = observed_total - reported_total
-            for file, size in observed:
+            diff = result.observed_total - result.reported_total
+            for file, size in result.observed:
                 self.logger.debug(f"Observed file [{node_name}]: {size:7} {file}")
-            self.logger.warn(
-                f"Storage usage [{node_name}]: obs {observed_total:7} rep {reported_total:7} diff {diff:7} pct {pct_diff} reclaimable_pct {reclaimable_diff}"
+            self.logger.warning(
+                f"Storage usage [{node_name}]: obs {result.observed_total:7} rep {result.reported_total:7} diff {diff:7} pct {result.diff_ratio} reclaimable_pct {result.reclaimable_ratio}"
             )
 
-        max_node = f"{self.idx(max_node)}:{max_node.account.hostname}"
+        max_node_name = f"{self.idx(max_node)}:{max_node.account.hostname}"
         raise RuntimeError(
-            f"Storage usage inconsistency on nodes {nodes}: max difference {max_diff} on node {max_node}"
+            f"Storage usage inconsistency on nodes {node_names}: max difference {max_diff} on node {max_node_name}"
         )
 
-    def decode_backtraces(self, raise_on_failure=False):
+    def decode_backtraces(self, raise_on_failure: bool = False):
         """
         Decodes redpanda backtraces if any of them are present
         :return: None
@@ -4536,11 +4587,11 @@ class RedpandaService(Service, RedpandaServiceABC):
             return "/opt/redpanda"
         return self._context.globals["rp_install_path_root"]
 
-    def find_binary(self, name):
+    def find_binary(self, name: str):
         rp_install_path_root = self.rp_install_path()
         return f"{rp_install_path_root}/bin/{name}"
 
-    def find_raw_binary(self, name):
+    def find_raw_binary(self, name: str):
         """
         Like `find_binary`, but find the underlying executable rather tha
         a shell wrapper.
@@ -4567,7 +4618,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         assert len(version_lines) == 1, version_lines
         return VERSION_LINE_RE.findall(version_lines[0])[0]
 
-    def get_version_int_tuple(self, node):
+    def get_version_int_tuple(self, node: ClusterNode):
         version_str = self.get_version(node)
         return ri_int_tuple(RI_VERSION_RE.findall(version_str)[0])
 
@@ -4621,7 +4672,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         self._stop_duration_seconds = time.time() - self._stop_time
 
-    def _set_trace_loggers_and_sleep(self, node, time_sec=10):
+    def _set_trace_loggers_and_sleep(self, node: ClusterNode, time_sec: int = 10):
         """
         For debugging issues around stopping processes: set the log level to
         trace on all loggers.
@@ -4636,7 +4687,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 self._admin.set_log_level(logger, "trace", time_sec)
             time.sleep(time_sec)
         except Exception as e:
-            self.logger.warn(f"Error setting trace loggers: {e}")
+            self.logger.warning(f"Error setting trace loggers: {e}")
 
     def _update_usage_stats(self, node: ClusterNode):
         if node not in self._started:
@@ -4725,11 +4776,11 @@ class RedpandaService(Service, RedpandaServiceABC):
             self.logger.info(f"{node.name}: Redpanda process has exited.")
         except TimeoutError:
             sleep_sec = 10
-            self.logger.warn(
+            self.logger.warning(
                 f"Timed out waiting for stop on {node.name}, setting log_level to 'trace' and sleeping for {sleep_sec}s"
             )
             self._set_trace_loggers_and_sleep(node, time_sec=sleep_sec)
-            self.logger.warn(f"Node {node.name} status:")
+            self.logger.warning(f"Node {node.name} status:")
             self._log_node_process_state(node)
             self._log_process_status(node, pid)
             self._log_node_shutdown_analysis(node)
@@ -4744,10 +4795,10 @@ class RedpandaService(Service, RedpandaServiceABC):
         if node in self._started:
             self._started.remove(node)
 
-    def add_to_started_nodes(self, node):
+    def add_to_started_nodes(self, node: ClusterNode):
         self._started.add(node)
 
-    def clean(self, **kwargs):
+    def clean(self, **kwargs: Any):
         super().clean(**kwargs)
         # If we bypassed bucket creation, there is no need to try to delete it.
         if self._si_settings and self._si_settings.bypass_bucket_creation:
@@ -4770,8 +4821,8 @@ class RedpandaService(Service, RedpandaServiceABC):
     def clean_node(
         self,
         node: ClusterNode,
-        preserve_logs=False,
-        preserve_current_install=False,
+        preserve_logs: bool = False,
+        preserve_current_install: bool = False,
         **kwargs: Any,
     ):
         assert not kwargs, f"Unknown args {kwargs}"
@@ -4815,10 +4866,10 @@ class RedpandaService(Service, RedpandaServiceABC):
             # installation to preserve!
             self._installer.reset_current_install([node])
 
-    def remove_local_data(self, node):
+    def remove_local_data(self, node: ClusterNode):
         node.account.remove(f"{RedpandaService.PERSISTENT_ROOT}/data/*")
 
-    def redpanda_pid(self, node):
+    def redpanda_pid(self, node: ClusterNode):
         try:
             cmd = "pgrep --list-full --exact redpanda"
             for line in node.account.ssh_capture(cmd, timeout_sec=10):
@@ -4842,7 +4893,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
             raise e
 
-    def redpanda_tid(self, node, thread):
+    def redpanda_tid(self, node: ClusterNode, thread: str):
         """Return the thread group ID and thread ID of the given thread"""
         cmd = "ps -C redpanda -T"
         for line in node.account.ssh_capture(cmd, timeout_sec=10):
@@ -4859,12 +4910,12 @@ class RedpandaService(Service, RedpandaServiceABC):
     def started_nodes(self) -> List[ClusterNode]:
         return list(self._started)
 
-    def render(self, path, **kwargs):
+    def render(self, path: str, **kwargs: Any):
         with self.config_file_lock:
             return super(RedpandaService, self).render(path, **kwargs)
 
     @staticmethod
-    def get_node_fqdn(node):
+    def get_node_fqdn(node: ClusterNode):
         ip = socket.gethostbyname(node.account.hostname)
         hostname = (
             node.account.ssh_output(cmd=f"dig -x {ip} +short", timeout_sec=10)
@@ -4879,7 +4930,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         )
         return fqdn
 
-    def write_openssl_config_file(self, node):
+    def write_openssl_config_file(self, node: ClusterNode):
         conf = self.render(
             "openssl.cnf",
             fips_conf_file=os.path.join(
@@ -4915,10 +4966,10 @@ class RedpandaService(Service, RedpandaServiceABC):
 
     def write_node_conf_file(
         self,
-        node,
-        override_cfg_params=None,
-        auto_assign_node_id=False,
-        omit_seeds_on_idx_one=True,
+        node: ClusterNode,
+        override_cfg_params: dict[str, Any] | None = None,
+        auto_assign_node_id: bool = False,
+        omit_seeds_on_idx_one: bool = True,
         node_id_override: int | None = None,
     ):
         """
@@ -4930,7 +4981,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         include_seed_servers = True
         if node_id_override:
-            assert auto_assign_node_id == False, (
+            assert not auto_assign_node_id, (
                 "Can not use node id override when auto assigning node ids"
             )
             node_id = node_id_override
@@ -4977,7 +5028,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             rpk_node_config=self._rpk_node_config,
         )
 
-        def is_fips_capable(node) -> bool:
+        def is_fips_capable(node: ClusterNode) -> bool:
             cur_ver = self._installer.installed_version(node)
             return cur_ver == RedpandaInstaller.HEAD or cur_ver >= (24, 2, 1)
 
@@ -5148,13 +5199,26 @@ class RedpandaService(Service, RedpandaServiceABC):
 
     def get_node_by_id(self, node_id: int) -> ClusterNode | None:
         """
-        Returns a node that has requested id or None if node is not found
+        Returns the node that has the requested id or None if node is not found.
+
+        If you expect the node to exist, you may prefer `self.node_by_id(node_id)`,
+        which raises an exception if the node is not found.
         """
         for n in self.nodes:
             if self.node_id(n) == node_id:
                 return n
 
         return None
+
+    def node_by_id(self, node_id: int) -> ClusterNode:
+        """
+        Returns the node that has requested id or throws NodeNotFoundError
+        if not found.
+        """
+        nid = self.get_node_by_id(node_id)
+        if nid is None:
+            raise NodeNotFoundError(f"Node with id {node_id} not found")
+        return nid
 
     def registered(self, node: ClusterNode):
         """
@@ -5259,7 +5323,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
     def node_storage(
         self,
-        node,
+        node: ClusterNode,
         sizes: bool = False,
         scan_cache: bool = True,
         compaction_footers: bool = False,
@@ -5349,9 +5413,9 @@ class RedpandaService(Service, RedpandaServiceABC):
         self.logger.debug(
             f"Starting storage checks all_nodes={all_nodes} sizes={sizes}"
         )
-        nodes = self.nodes if all_nodes else self._started
+        nodes = self.nodes if all_nodes else list(self._started)
 
-        def compute_node_storage(node):
+        def compute_node_storage(node: ClusterNode):
             s = self.node_storage(node, sizes=sizes, scan_cache=scan_cache)
             store.add_node(s)
 
@@ -5361,7 +5425,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         )
         return store
 
-    def copy_data(self, dest, node):
+    def copy_data(self, dest: str, node: ClusterNode):
         # after copying, move all files up a directory level so the caller does
         # not need to know what the name of the storage directory is.
         with tempfile.TemporaryDirectory() as d:
@@ -5383,7 +5447,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         # there is a race between `find` iterating over file names and passing
         # those to an invocation of `md5sum` in which the file may be deleted.
         # here we log these instances for debugging, but otherwise ignore them.
-        found = []
+        found: list[str] = []
         for line in lines:
             if "No such file or directory" in line:
                 self.logger.debug(f"Skipping file that disappeared: {line}")
@@ -5479,7 +5543,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         random.shuffle(brokers)
         return brokers
 
-    def schema_reg(self, limit=None) -> str:
+    def schema_reg(self, limit: int | None = None) -> str:
         schema_reg = [
             f"http://{n.account.hostname}:8081" for n in list(self._started)[:limit]
         ]
@@ -5489,7 +5553,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         """
         Fetch the max shard id for each node.
         """
-        shards_per_node = {}
+        shards_per_node: dict[int, int] = {}
         for node in self._started:
             num_shards = 0
             metrics = self.metrics(node)
@@ -5508,7 +5572,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         elif cov_option == "OFF":
             return False
 
-        self.logger.warn(f"{self.COV_KEY} should be one of 'ON', or 'OFF'")
+        self.logger.warning(f"{self.COV_KEY} should be one of 'ON', or 'OFF'")
         return False
 
     def count_log_node(self, node: ClusterNode, pattern: str):
@@ -5580,7 +5644,11 @@ class RedpandaService(Service, RedpandaServiceABC):
         return True
 
     def wait_for_controller_snapshot(
-        self, node, prev_mtime=0, prev_start_offset=0, timeout_sec=30
+        self,
+        node: ClusterNode,
+        prev_mtime: float = 0,
+        prev_start_offset: int = 0,
+        timeout_sec: int = 30,
     ):
         def check():
             snap_path = os.path.join(self.DATA_DIR, "redpanda/controller/0_0/snapshot")
@@ -5605,7 +5673,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         return wait_until_result(check, timeout_sec=timeout_sec, backoff_sec=1)
 
     def _get_object_storage_report(
-        self, tolerate_empty_object_storage=False, timeout=300
+        self, tolerate_empty_object_storage: bool = False, timeout: int = 300
     ) -> tuple[dict[str, Any], CloudStorageUsage]:
         """
         Uses rp-storage-tool to get the object storage report.
@@ -5696,7 +5764,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         if re.search(rb"\[\S+ WARN", stderr) is not None:
             self.logger.debug(f"rp-storage-tool stderr output: {stderr}")
 
-        report = {}
+        report: dict[str, Any] = {}
         try:
             report = json.loads(output)
         except Exception as exc:
@@ -5711,7 +5779,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         return report, usage
 
     def raise_on_cloud_storage_inconsistencies(
-        self, inconsistencies: list[str], run_timeout=300
+        self, inconsistencies: list[str], run_timeout: int = 300
     ):
         """
         like stop_and_scrub_object_storage, use rp-storage-tool to explicitly check for inconsistencies,
@@ -5731,7 +5799,9 @@ class RedpandaService(Service, RedpandaServiceABC):
                 f"Object storage reports fatal anomalies of type {fatal_anomalies}"
             )
 
-    def stop_and_scrub_object_storage(self, run_timeout=300) -> CloudStorageUsage:
+    def stop_and_scrub_object_storage(
+        self, run_timeout: int = 300
+    ) -> CloudStorageUsage:
         # Before stopping, ensure that all tiered storage partitions
         # have uploaded at least a manifest: we do not require that they
         # have uploaded until the head of their log, just that they have
@@ -5813,11 +5883,11 @@ class RedpandaService(Service, RedpandaServiceABC):
         else:
             self.logger.info("No anomalies in internal object storage scrub")
 
-    def wait_for_manifest_uploads(self) -> set[Partition]:
-        cloud_storage_partitions: set[Partition] = set()
+    def wait_for_manifest_uploads(self) -> set[CloudStoragePartition]:
+        cloud_storage_partitions: set[CloudStoragePartition] = set()
 
         def all_partitions_uploaded_manifest():
-            manifest_not_uploaded = []
+            manifest_not_uploaded: list[Partition] = []
             for p in self.partitions():
                 try:
                     status = self._admin.get_partition_cloud_storage_status(
@@ -5839,11 +5909,12 @@ class RedpandaService(Service, RedpandaServiceABC):
                 remote_write = status["cloud_storage_mode"] in {"full", "write_only"}
 
                 if remote_write:
-                    # TODO(vlad): do this differently?
-                    # Create new partition tuples since the replicas list is not hashable
                     cloud_storage_partitions.add(
-                        Partition(
-                            topic=p.topic, index=p.index, leader=p.leader, replicas=None
+                        CloudStoragePartition(
+                            topic=p.topic,
+                            index=p.index,
+                            leader=p.leader,
+                            replicas=tuple(p.replicas),
                         )
                     )
 
@@ -5877,7 +5948,9 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         return cloud_storage_partitions
 
-    def wait_for_internal_scrub(self, cloud_storage_partitions):
+    def wait_for_internal_scrub(
+        self, cloud_storage_partitions: set[CloudStoragePartition]
+    ):
         """
         Configure the scrubber such that it will run aggresively
         until the entire partition is scrubbed. Once that happens,
@@ -5913,7 +5986,7 @@ class RedpandaService(Service, RedpandaServiceABC):
             tolerate_stopped_nodes=True,
         )
 
-        unavailable = set()
+        unavailable: set[CloudStoragePartition] = set()
         for p in cloud_storage_partitions:
             try:
                 leader_id = self._admin.await_stable_leader(
@@ -5936,8 +6009,8 @@ class RedpandaService(Service, RedpandaServiceABC):
                     raise
 
         cloud_storage_partitions -= unavailable
-        scrubbed = set()
-        all_anomalies = []
+        scrubbed: set[CloudStoragePartition] = set()
+        all_anomalies: list[dict[str, Any]] = []
 
         allowed_keys = set(
             ["ns", "topic", "partition", "revision_id", "last_complete_scrub_at"]
@@ -5945,7 +6018,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         expected_damage = self.si_settings.get_expected_damage()
 
-        def filter_anomalies(detected):
+        def filter_anomalies(detected: dict[str, Any]):
             bad_delta_types = set(
                 ["non_monotonical_delta", "mising_delta", "end_delta_smaller"]
             )
@@ -6073,7 +6146,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                     0, status["start_offset"] - 1
                 )
             except Exception as e:
-                self.logger.warn(
+                self.logger.warning(
                     f"Failed to read controller status from {node.name}: {e}"
                 )
             else:
@@ -6081,7 +6154,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                     max_length = node_length
 
         if max_length is None:
-            self.logger.warn(
+            self.logger.warning(
                 "Failed to read controller status from any node, cannot validate record count"
             )
             return
@@ -6102,7 +6175,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 nodes=self.started_nodes(),
             )
         except Exception as e:
-            self.logger.warn(
+            self.logger.warning(
                 f"Cannot check metrics, did a test finish with all nodes down? ({e})"
             )
             return None
@@ -6118,7 +6191,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 "vectorized_io_queue_total_read_bytes_total", nodes=self.started_nodes()
             )
         except Exception as e:
-            self.logger.warn(
+            self.logger.warning(
                 f"Cannot check metrics, did a test finish with all nodes down? ({e})"
             )
             return None
@@ -6130,12 +6203,12 @@ class RedpandaService(Service, RedpandaServiceABC):
 
     def wait_node_add_rebalance_finished(
         self,
-        new_nodes,
-        admin=None,
-        min_partitions=5,
-        progress_timeout=60,
-        timeout=300,
-        backoff=2,
+        new_nodes: list[ClusterNode],
+        admin: Admin | None = None,
+        min_partitions: int = 5,
+        progress_timeout: int = 60,
+        timeout: int = 300,
+        backoff: int = 2,
     ):
         """Waits until the rebalance triggered by adding new nodes is finished."""
 
@@ -6144,7 +6217,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         if admin is None:
             admin = Admin(self)
         started_at = time.monotonic()
-        last_reconfiguring = set()
+        last_reconfiguring: set[str] = set()
         last_bytes_moved = 0
         last_update = started_at
 
@@ -6162,7 +6235,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                     f"rebalance after adding nodes {new_node_names} timed out"
                 )
 
-            cur_reconfiguring = set()
+            cur_reconfiguring: set[str] = set()
             cur_bytes_moved = 0
             for p in admin.list_reconfigurations():
                 cur_reconfiguring.add(f"{p['ns']}/{p['topic']}/{p['partition']}")
@@ -6190,6 +6263,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         """Install a sample Enterprise License for testing Enterprise features during upgrades"""
         self.logger.debug("Installing an Enterprise License")
         license = sample_license(assert_exists=True)
+        assert license is not None, "License must exist"
         assert self._admin.put_license(license).status_code == 200, (
             "Configuring the Enterprise license failed (required for feature upgrades)"
         )
