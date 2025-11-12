@@ -518,12 +518,12 @@ class TxUpgradeRevertTest(RedpandaTest):
         """Test validates that a broker can be upgraded and downgraded while keeping the transaction state consistent.
         Particularly the snapshot state should be compatible across these operations."""
         partition_count = 50
-        topic = TopicSpec(partition_count=50)
+        topic = TopicSpec(partition_count=partition_count)
         self.client().create_topic(topic)
         with self.TxStateGenerator(
             num_producers=20,
             topic_name=topic.name,
-            num_partitions=50,
+            num_partitions=partition_count,
             redpanda=self.redpanda,
         ) as traffic:
             # Populate some transactions state.

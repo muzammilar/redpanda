@@ -1799,9 +1799,7 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 "configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters"
             ]
         )
-        updated_link = self.update_link(
-            shadow_link=shadow_link, update_mask=update_mask
-        )
+        self.update_link(shadow_link=shadow_link, update_mask=update_mask)
 
         # Now the topic should be deletable, as it is not in the autocreate filters
         target_client.delete_topic(topic.name)
@@ -2962,7 +2960,7 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                     format="%o,",
                 )
                 return [int(o) for o in raw.split(",")[0:-1]]
-            except Exception as e:
+            except Exception:
                 return []
 
         produce(n=num_messages, redpanda=self.source_cluster.service)

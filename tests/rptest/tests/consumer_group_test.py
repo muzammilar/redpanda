@@ -390,7 +390,6 @@ class ConsumerGroupTest(RedpandaTest):
         self.start_producer()
         # wait for some messages
         wait_until(lambda: ConsumerGroupTest.consumed_at_least(consumers, 50), 30, 2)
-        rpk = RpkTool(self.redpanda)
         # at this point we have 2 consumers in stable group
         self.validate_group_state(
             group, expected_state="Stable", static_members=static_members
