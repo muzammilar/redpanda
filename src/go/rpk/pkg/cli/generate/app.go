@@ -137,7 +137,7 @@ func newAppCmd(fs afero.Fs, p *config.Params) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&langFlag, "language", "l", "go", "The language you want the code sample to be generated with. Available language: `go`.")
+	cmd.Flags().StringVarP(&langFlag, "language", "l", "go", "The language you want the code sample to be generated with. Available language: 'go'")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "", "The path where the app will be written")
 	cmd.Flags().StringVar(&saslCred, "new-sasl-credentials", "", "If provided, rpk will generate and use these credentials (<user>:<password>)")
 	cmd.Flags().BoolVar(&noUser, "no-user", false, "Generates the sample app without SASL user")
