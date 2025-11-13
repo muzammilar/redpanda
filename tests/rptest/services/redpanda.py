@@ -1570,7 +1570,7 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         if nodes is None:
             nodes = self.all_nodes_abc()
 
-        count = 0
+        value = 0.0
         metric_seen = False
         for n in nodes:
             metrics = self.metrics(n, metrics_endpoint=metrics_endpoint)
@@ -1595,10 +1595,18 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
                         if labels.get("redpanda_topic", labels.get("topic")) != topic:
                             continue
                     metric_seen = True
-                    count += int(sample.value)
-        if expect_metric:
+                    value += sample.value
+
+        # catch any weirdness, like if two metrics foo_total and foo both exist, which would
+        # be ambiguous
+        assert len(matched_families) <= 1, (
+            f"More than one family matched: {matched_families}"
+        )
+
+        if expect_metric and not matched_families:
             assert metric_seen, f"Metric {metric_name} was not observed"
-        return count
+
+        return value
 
 
 class KubeServiceMixin(ABC):
