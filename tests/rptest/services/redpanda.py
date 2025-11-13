@@ -1396,9 +1396,11 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         self,
         node: ClusterNode | CloudBroker,
         metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
-        query_string: str = "",
+        name: str | None = None,
     ) -> list[Metric]:
-        """Query and return all metrics from the given node's metrics endpoint."""
+        """Query and return all metrics from the given node's metrics endpoint.
+
+        :name: If not None, only return metrics matching this exact name."""
         pass
 
     def metrics_sample(
@@ -1517,9 +1519,10 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
             # metrics are involved
             if names:
                 for name in names:
-                    query_string = self._prepare_query_string(name, metrics_endpoint)
                     metrics = self.metrics(
-                        n, metrics_endpoint=metrics_endpoint, query_string=query_string
+                        n,
+                        metrics_endpoint=metrics_endpoint,
+                        name=name,
                     )
                     sample_values_per_pattern[name] += self._extract_samples(
                         metrics, name, n
@@ -1537,8 +1540,9 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
             if values
         }
 
-    def _prepare_query_string(self, name: str, endpoint: MetricsEndpoint) -> str:
-        """Prepare query string for exact metric name filtering."""
+    @staticmethod
+    def _adjust_metric_name(name: str, endpoint: MetricsEndpoint) -> str:
+        """Adjust the metric name to be used in the __name__ filter."""
 
         # do a pre-check of the expected prefix to catch user errors early
         prefix = {
@@ -1551,9 +1555,7 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         )
         # we need to strip the prefix, because seastar __name__ filtering
         # works on the metric name without the prefix
-        name = name.removeprefix(prefix)
-
-        return f"?__name__={name}"
+        return name.removeprefix(prefix)
 
     @staticmethod
     def _metric_basename(name: str) -> str:
@@ -2156,7 +2158,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         self,
         node: Any,
         metrics_endpoint: MetricsEndpoint = MetricsEndpoint.PUBLIC_METRICS,
-        query_string: str = "",
+        name: str | None = None,
     ):
         """Parse the prometheus text format metric from a given pod."""
         if metrics_endpoint == MetricsEndpoint.PUBLIC_METRICS:
@@ -2164,6 +2166,11 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         else:
             # operator V2 clusters use HTTPS for all the things
             p = "-k https" if self.is_operator_v2_cluster() else "http"
+            if name:
+                name = self._adjust_metric_name(name, metrics_endpoint)
+                query_string = f"?__name__={name}"
+            else:
+                query_string = ""
             text = self.kubectl.exec(
                 f"curl -f -s -S {p}://localhost:9644/metrics{query_string}", node.name
             )
@@ -4249,15 +4256,21 @@ class RedpandaService(Service, RedpandaServiceABC):
         self,
         node: ClusterNode,
         metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
-        query_string: str = "",
+        name: str | None = None,
     ):
         assert node in self._started, f"Node {node.account.hostname} is not started"
 
-        url = f"http://{node.account.hostname}:9644/{metrics_endpoint.value}{query_string}"
+        url = f"http://{node.account.hostname}:9644/{metrics_endpoint.value}"
+
+        params = (
+            {"__name__": self._adjust_metric_name(name, metrics_endpoint)}
+            if name
+            else None
+        )
         start_t = time.time()
         resp = None
         try:
-            resp = requests.get(url, timeout=10)
+            resp = requests.get(url, timeout=10, params=params)
         finally:
             elapsed = time.time() - start_t
             if resp:
@@ -4277,11 +4290,11 @@ class RedpandaService(Service, RedpandaServiceABC):
         self,
         node: ClusterNode | CloudBroker,
         metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
-        query_string: str = "",
+        name: str | None = None,
     ):
         """Parse the prometheus text format metric from a given node."""
         assert isinstance(node, ClusterNode)
-        text = self.raw_metrics(node, metrics_endpoint, query_string)
+        text = self.raw_metrics(node, metrics_endpoint, name)
         return list(text_string_to_metric_families(text))
 
     def cloud_storage_diagnostics(self):
