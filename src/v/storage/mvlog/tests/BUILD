@@ -98,6 +98,8 @@ redpanda_cc_gtest(
     srcs = [
         "file_test.cc",
     ],
+    # CORE-14523
+    flaky = True,
     deps = [
         "//src/v/container:chunked_vector",
         "//src/v/storage/mvlog",
