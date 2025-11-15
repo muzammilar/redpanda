@@ -214,7 +214,7 @@ ss::future<produce_response::partition> do_produce_topic_partition(
   ntp_produce_request req,
   std::unique_ptr<ss::promise<>> dispatched) {
     auto start = std::chrono::steady_clock::now();
-    auto validate_batch_res = validate_batch({
+    auto validate_batch_res = co_await validate_batch({
       .batch = *req.batch,
       .timestamp_type = req.timestamp_type,
       .message_timestamp_before_max_ms = req.message_timestamp_before_max_ms,
