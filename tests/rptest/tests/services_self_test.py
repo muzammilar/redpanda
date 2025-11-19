@@ -7,14 +7,17 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+from contextlib import contextmanager
+import signal
 from subprocess import CalledProcessError
-from typing import Any
+from typing import Any, Callable
 
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.cluster.remoteaccount import RemoteCommandError
 from ducktape.mark import matrix
 from ducktape.mark.resource import cluster as dt_cluster
-from ducktape.tests.test import Test
+from ducktape.services.service import Service
+from ducktape.tests.test import Test, TestContext
 
 from rptest.clients.kubectl import is_redpanda_pod
 from rptest.clients.rpk import RpkTool
@@ -34,6 +37,7 @@ from rptest.services.producer_swarm import ProducerSwarm
 from rptest.services.redpanda import (
     CloudStorageType,
     LogSearchLocal,
+    LoggingConfig,
     RedpandaService,
     RedpandaServiceCloud,
     SISettings,
@@ -41,7 +45,7 @@ from rptest.services.redpanda import (
     make_redpanda_mixed_service,
     make_redpanda_service,
 )
-from rptest.services.utils import BadLogLines
+from rptest.services.utils import BadLogLines, NodeCrash
 from rptest.tests.prealloc_nodes import PreallocNodesTest
 from rptest.tests.redpanda_test import RedpandaMixedTest, RedpandaTest
 from rptest.util import expect_exception
@@ -632,26 +636,50 @@ class RedpandaServiceSelfRawTest(Test):
     # We need something that looks like a RedpandaTest to use the @cluster decorator
     class InnerTest(RedpandaTest):
         def __init__(self, *args: Any):
-            super().__init__(*args, num_brokers=1)
+            # force the log level here because the behavior differs slightly between info and
+            # debug: at debug we pick up a different NodeCrash log line (emitted by crash tracker)
+            # which makes the content assertion in test_raise_on_crash fail
+            super().__init__(*args, num_brokers=1, log_config=LoggingConfig("info"))
 
         @cluster(num_nodes=1)
-        def run(self):
-            node = self.redpanda.nodes[0]
-            self.redpanda._admin.trigger_crash(node, CrashType.ASSERT)
+        def run(self, func: Callable[[RedpandaTest], None]):
+            func(self)
+
+    @contextmanager
+    def _with_inner(self, func: Callable[[RedpandaTest], None]):
+        test = self.InnerTest(self.test_context)
+        try:
+            test.setUp()
+            yield test
+        finally:
+            test.tearDown()
 
     @dt_cluster(num_nodes=1)
     @ignore_if_not_debug
     def test_cluster_decorator_backtrace(self):
-        test = self.InnerTest(self.test_context)
+        def func(rptest: RedpandaTest):
+            node = rptest.redpanda.nodes[0]
+            rptest.redpanda._admin.trigger_crash(node, CrashType.ASSERT)
 
-        try:
-            test.setUp()
+        with self._with_inner(func) as test:
             try:
-                test.run()
+                test.run(func=func)  # type: ignore
                 raise RuntimeError("inner test passed when it shouldn't")
             except BadLogLines:
                 # expected, as the test intentionally emits a bad log line
                 pass
             _assert_expected_backtrace_contents(test, "::trigger_crash")
-        finally:
-            test.tearDown()
+
+    @dt_cluster(num_nodes=1)
+    def test_raise_on_crash(self):
+        def func(rptest: RedpandaTest):
+            node = rptest.redpanda.nodes[0]
+            rptest.redpanda.signal_redpanda(node, signal.SIGSEGV)
+            raise RuntimeError("test is failing")  # to trigger raise_on_crash
+
+        with self._with_inner(func) as test:
+            try:
+                test.run(func=func)  # type: ignore
+                raise RuntimeError("inner test passed when it shouldn't")
+            except NodeCrash as e:
+                assert "SIGSEGV" in str(e)
