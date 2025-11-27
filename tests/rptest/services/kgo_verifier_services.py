@@ -41,6 +41,62 @@ REMOTE_PORT_BASE = 8080
 Topic: TypeAlias = str | TopicSpec
 
 
+class KgoVerifierParams:
+    def __init__(
+        self,
+        topic: Topic,
+        msg_size: int,
+        msg_count: int,
+        seq_max_msgs: int | None = None,
+        batch_max_bytes: int | None = None,
+        fake_timestamp_ms: int | None = None,
+        fake_timestamp_step_ms: int | None = None,
+        use_transactions: bool = False,
+        transaction_timeout_ms: int | None = None,
+        transaction_abort_rate: float | None = None,
+        msgs_per_transaction: int | None = None,
+        rate_limit_bps: int | None = None,
+        consume_throughput_mb: int | None = None,
+        key_set_cardinality: int | None = None,
+        msgs_per_producer_id: int | None = None,
+        max_buffered_records: int | None = None,
+        tolerate_data_loss: bool = False,
+        tolerate_failed_produce: bool = False,
+        tombstone_probability: float = 0.0,
+        client_name: str | None = None,
+        wait_for_acks: bool = True,
+        compacted: bool = False,
+        group_name: str | None = None,
+        consumer_group_readers: int | None = None,
+        max_uncommitted: int | None = None,
+    ):
+        self.topic: Topic = topic
+        self.msg_size: int = msg_size
+        self.msg_count: int = msg_count
+        self.seq_max_msgs: int | None = seq_max_msgs
+        self.batch_max_bytes: int | None = batch_max_bytes
+        self.fake_timestamp_ms: int | None = fake_timestamp_ms
+        self.fake_timestamp_step_ms: int | None = fake_timestamp_step_ms
+        self.use_transactions: bool = use_transactions
+        self.transaction_timeout_ms: int | None = transaction_timeout_ms
+        self.transaction_abort_rate: float | None = transaction_abort_rate
+        self.msgs_per_transaction: int | None = msgs_per_transaction
+        self.rate_limit_bps: int | None = rate_limit_bps
+        self.consume_throughput_mb: int | None = consume_throughput_mb
+        self.key_set_cardinality: int | None = key_set_cardinality
+        self.msgs_per_producer_id: int | None = msgs_per_producer_id
+        self.max_buffered_records: int | None = max_buffered_records
+        self.tolerate_data_loss: bool = tolerate_data_loss
+        self.tolerate_failed_produce: bool = tolerate_failed_produce
+        self.tombstone_probability: float = tombstone_probability
+        self.client_name: str | None = client_name
+        self.wait_for_acks: bool = wait_for_acks
+        self.compacted: bool = compacted
+        self.group_name: str | None = group_name
+        self.consumer_group_readers: int | None = consumer_group_readers
+        self.max_uncommitted: int | None = max_uncommitted
+
+
 class KgoVerifierService(Service):
     """
     KgoVerifierService is kgo-verifier service.
