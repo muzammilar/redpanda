@@ -5492,7 +5492,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         :returns: instances of ClusterStorage
         """
         if nodes is None:
-            nodes = list(self._started)
+            nodes = self._started
         assert nodes, "Empty node list specified for storage stat collection"
 
         store = ClusterStorage()
