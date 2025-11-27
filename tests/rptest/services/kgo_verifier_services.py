@@ -1244,4 +1244,264 @@ class ProduceStatus:
 
     def __str__(self):
         l = self.latency
-        return f"ProduceStatus<{self.sent} {self.acked} {self.bad_offsets} {self.restarts} {self.failed_transactions} {self.aborted_transaction_messages} {self.fails} {self.tombstones_produced} {l['p50']}/{l['p90']}/{l['p99']}>"
+        return f"ProduceStatus<{self.topic}: {self.sent} {self.acked} {self.bad_offsets} {self.restarts} {self.failed_transactions} {self.aborted_transaction_messages} {self.fails} {self.tombstones_produced} {l['p50']}/{l['p90']}/{l['p99']}>"
+
+
+Status: TypeAlias = ProduceStatus | ConsumerStatus
+
+
+class KgoVerifierMultiService(Service):
+    def __init__(
+        self,
+        context: TestContext,
+        redpanda: RedpandaServiceForClients,
+        topics: Sequence[KgoVerifierParams],
+        services: Sequence[KgoVerifierService],
+        custom_node: list[ClusterNode] | None = None,
+    ):
+        self.use_custom_node = custom_node is not None
+
+        # We should pass num_nodes to allocate for our service in BackgroundThreadService,
+        # but if user allocate node by themself, BackgroundThreadService should not allocate any nodes
+        nodes_for_allocate = 1
+        if self.use_custom_node:
+            nodes_for_allocate = 0
+
+        super().__init__(context, num_nodes=nodes_for_allocate)
+
+        self._redpanda = redpanda
+
+        # Should check that BackgroundThreadService did not allocate anything
+        # and store allocated nodes by user to self.nodes
+        if self.use_custom_node:
+            assert not self.nodes
+            assert custom_node is not None
+            self.nodes = custom_node
+
+        self._topics: Sequence[Topic] = [t.topic for t in topics]
+        self._services: Sequence[KgoVerifierService] = services
+
+    def start_node(self, node: ClusterNode, clean: bool = False, **kwargs: Any) -> None:
+        if clean:
+            self.clean_node(node, **kwargs)
+        for s in self._services:
+            s.start_node(node, clean=False, **kwargs)
+
+    def wait_node(self, node: ClusterNode, timeout_sec: float | None = None) -> Any:
+        return all(s.wait_node(node, timeout_sec) for s in self._services)
+
+    def stop_node(self, node: ClusterNode, **kwargs: Any) -> None:
+        for s in self._services:
+            s.stop_node(node, **kwargs)
+
+    def clean_node(self, node: ClusterNode, **kwargs: Any) -> None:
+        self._redpanda.logger.info(f"{self.__class__.__name__}.clean_node")
+        node.account.kill_process("kgo-verifier", clean_shutdown=False)
+        node.account.remove("valid_offsets*json", True)
+        node.account.remove("latest_value*json", True)
+        for s in self._services:
+            node.account.remove(s.log_path, True)
+
+
+class KgoVerifierMultiProducer(KgoVerifierMultiService):
+    def __init__(
+        self,
+        context: TestContext,
+        redpanda: RedpandaServiceForClients,
+        topics: Sequence[KgoVerifierParams],
+        custom_node: list[ClusterNode] | None = None,
+        validate_latest_values: bool = False,
+        username: str | None = None,
+        password: str | None = None,
+        enable_tls: bool = False,
+        debug_logs: bool = False,
+        trace_logs: bool = False,
+    ):
+        producers = [
+            KgoVerifierProducer(
+                context,
+                redpanda,
+                topic.topic,
+                topic.msg_size,
+                topic.msg_count,
+                custom_node=custom_node,
+                batch_max_bytes=topic.batch_max_bytes,
+                fake_timestamp_ms=topic.fake_timestamp_ms,
+                fake_timestamp_step_ms=topic.fake_timestamp_step_ms,
+                use_transactions=topic.use_transactions,
+                transaction_timeout_ms=topic.transaction_timeout_ms,
+                transaction_abort_rate=topic.transaction_abort_rate,
+                msgs_per_transaction=topic.msgs_per_transaction,
+                rate_limit_bps=topic.rate_limit_bps,
+                key_set_cardinality=topic.key_set_cardinality,
+                msgs_per_producer_id=topic.msgs_per_producer_id,
+                max_buffered_records=topic.max_buffered_records,
+                tolerate_data_loss=topic.tolerate_data_loss,
+                tombstone_probability=topic.tombstone_probability,
+                validate_latest_values=validate_latest_values,
+                client_name=topic.client_name,
+                wait_for_acks=topic.wait_for_acks,
+                username=username,
+                password=password,
+                enable_tls=enable_tls,
+                debug_logs=debug_logs,
+                trace_logs=trace_logs,
+            )
+            for topic in topics
+        ]
+        super().__init__(context, redpanda, topics, producers, custom_node)
+
+    @property
+    def producers(self) -> Sequence[KgoVerifierProducer]:
+        assert all(isinstance(s, KgoVerifierProducer) for s in self._services)
+        return cast(Sequence[KgoVerifierProducer], self._services)
+
+    def wait_for_acks(
+        self,
+        counts: list[int | None],
+        timeout_sec: float,
+        backoff_sec: float,
+        progress_sec: float | None = None,
+    ) -> None:
+        assert len(counts) == len(self.producers), (
+            f"Mismatch {counts=} vs {len(self.producers)}"
+        )
+        for p, c in zip(self.producers, counts):
+            count = c if c is not None else p._msg_count
+            p.wait_for_acks(count, timeout_sec, backoff_sec, progress_sec)
+
+    def wait_for_offset_map(self) -> None:
+        for p in self.producers:
+            p.wait_for_offset_map()
+
+    def wait_for_latest_value_map(self) -> None:
+        for p in self.producers:
+            p.wait_for_latest_value_map()
+
+
+class KgoVerifierMultiSeqConsumer(KgoVerifierMultiService):
+    def __init__(
+        self,
+        context: TestContext,
+        redpanda: RedpandaServiceForClients,
+        topics: Sequence[KgoVerifierParams],
+        producer: KgoVerifierMultiProducer,
+        custom_node: list[ClusterNode] | None = None,
+        loop: bool = True,
+        continuous: bool = False,
+        username: str | None = None,
+        password: str | None = None,
+        enable_tls: bool = False,
+        debug_logs: bool = False,
+        trace_logs: bool = False,
+        validate_latest_values: bool = False,
+    ):
+        consumers = [
+            KgoVerifierSeqConsumer(
+                context,
+                redpanda,
+                topic.topic,
+                max_msgs=topic.seq_max_msgs,
+                nodes=custom_node,
+                producer=producer,
+                max_throughput_mb=topic.consume_throughput_mb,
+                loop=loop,
+                continuous=continuous,
+                tolerate_data_loss=topic.tolerate_data_loss,
+                use_transactions=topic.use_transactions,
+                compacted=topic.compacted,
+                validate_latest_values=validate_latest_values,
+                username=username,
+                password=password,
+                enable_tls=enable_tls,
+                debug_logs=debug_logs,
+                trace_logs=trace_logs,
+            )
+            for topic, producer in zip(topics, producer.producers)
+        ]
+
+        super().__init__(context, redpanda, topics, consumers, custom_node=custom_node)
+
+
+class KgoVerifierMultiRandomConsumer(KgoVerifierMultiService):
+    def __init__(
+        self,
+        context: TestContext,
+        redpanda: RedpandaServiceForClients,
+        topics: Sequence[KgoVerifierParams],
+        rand_read_msgs: int,
+        parallel: int,
+        custom_node: list[ClusterNode] | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        enable_tls: bool = False,
+        debug_logs: bool = False,
+        trace_logs: bool = False,
+    ):
+        consumers = [
+            KgoVerifierRandomConsumer(
+                context,
+                redpanda,
+                topic.topic,
+                0,  # msg_size unused
+                rand_read_msgs,
+                parallel,
+                use_transactions=topic.use_transactions,
+                nodes=custom_node,
+                username=username,
+                password=password,
+                enable_tls=enable_tls,
+                debug_logs=debug_logs,
+                trace_logs=trace_logs,
+            )
+            for topic in topics
+        ]
+
+        super().__init__(context, redpanda, topics, consumers, custom_node=custom_node)
+
+
+class KgoVerifierMultiConsumerGroupConsumer(KgoVerifierMultiService):
+    def __init__(
+        self,
+        context: TestContext,
+        redpanda: RedpandaServiceForClients,
+        topics: Sequence[KgoVerifierParams],
+        readers: int = 1,
+        loop: bool = False,
+        continuous: bool = False,
+        validate_latest_values: bool = False,
+        custom_node: list[ClusterNode] | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        enable_tls: bool = False,
+        debug_logs: bool = False,
+        trace_logs: bool = False,
+    ):
+        consumers = [
+            KgoVerifierConsumerGroupConsumer(
+                context,
+                redpanda,
+                topic.topic,
+                msg_size=0,  # msg_size unused
+                readers=readers,
+                loop=loop,
+                max_msgs=topic.seq_max_msgs,
+                max_throughput_mb=topic.consume_throughput_mb,
+                continuous=continuous,
+                tolerate_data_loss=topic.tolerate_data_loss,
+                group_name=topic.group_name,
+                max_uncommitted=topic.max_uncommitted,
+                use_transactions=topic.use_transactions,
+                compacted=topic.compacted,
+                validate_latest_values=validate_latest_values,
+                nodes=custom_node,
+                username=username,
+                password=password,
+                enable_tls=enable_tls,
+                debug_logs=debug_logs,
+                trace_logs=trace_logs,
+            )
+            for topic in topics
+        ]
+
+        super().__init__(context, redpanda, topics, consumers, custom_node=custom_node)
