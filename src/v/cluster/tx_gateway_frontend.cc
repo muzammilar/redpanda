@@ -473,24 +473,22 @@ ss::future<try_abort_reply> tx_gateway_frontend::process_locally(
 
     if (reply.ec == tx::errc::none) {
         ssx::spawn_with_gate(
-          _gate, [this, stm, tx_id, timeout, synced_term]() mutable {
-              return stm->read_lock()
-                .then([this, stm, tx_id, timeout, synced_term](
-                        ss::basic_rwlock<>::holder unit) mutable {
-                    return with(
-                             stm,
-                             tx_id,
-                             "try_abort:get_tx",
-                             [this,
-                              stm,
-                              tx_id,
-                              timeout,
-                              synced_term]() mutable {
-                                 return find_and_try_progressing_transaction(
-                                   synced_term, stm, tx_id, timeout);
-                             })
-                      .finally([u = std::move(unit)] {});
-                })
+          _gate,
+          [this,
+           stm,
+           tx_id,
+           timeout,
+           synced_term,
+           read_units = std::move(read_units)]() mutable {
+              return with(
+                       stm,
+                       tx_id,
+                       "try_abort:get_tx",
+                       [this, stm, tx_id, timeout, synced_term]() mutable {
+                           return find_and_try_progressing_transaction(
+                             synced_term, stm, tx_id, timeout);
+                       })
+                .finally([u = std::move(read_units)] {})
                 .discard_result();
           });
     }
