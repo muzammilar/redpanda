@@ -20,6 +20,7 @@ from ducktape.cluster.remoteaccount import RemoteCommandError
 from ducktape.errors import TimeoutError
 from ducktape.utils.util import wait_until
 from requests.exceptions import HTTPError
+from enum import Enum
 
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.services.storage import Segment
@@ -671,3 +672,9 @@ def debounce(wait_sec: float):
         return wrapper
 
     return decorator
+
+
+class FIPSMode(Enum):
+    disabled = 0
+    permissive = 1
+    enabled = 2

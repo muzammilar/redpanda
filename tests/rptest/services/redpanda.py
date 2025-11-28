@@ -2591,11 +2591,6 @@ class RedpandaService(Service, RedpandaServiceABC):
     SHARD_0_THREAD_NAME = "redpanda"
     SHARD_1_THREAD_NAME = "reactor-1"
 
-    class FIPSMode(Enum):
-        disabled = 0
-        permissive = 1
-        enabled = 2
-
     nodes: list[ClusterNode]
 
     def __init__(
