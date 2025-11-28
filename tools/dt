@@ -400,6 +400,10 @@ class DucktapeRunner:
             if env_var in os.environ:
                 docker_cmd.extend(["--env", f"{env_var}={os.environ[env_var]}"])
 
+        # Enable fips permissive
+        if self.args.with_fips:
+            docker_cmd.extend(["--env", f"REDPANDA_FIPS_PERMISSIVE=1"])
+
         # Add the image
         docker_cmd.append(self.ducktape_test_node_image)
 
@@ -803,6 +807,12 @@ def main():
         nargs="*",
         help="Arguments to pass to ducktape (default: tests/rptest/test_suite_quick.yml)",
     )
+    run_parser.add_argument(
+        "--with-fips",
+        action="store_true",
+        default=False,
+        help="Run redpanda in fips permissive mode",
+    )
 
     # 'start' subcommand
     start_parser = subparsers.add_parser(
@@ -865,6 +875,12 @@ def main():
         nargs="*",
         help="Arguments to pass to ducktape (default: tests/rptest/test_suite_quick.yml)",
     )
+    test_parser.add_argument(
+        "--with-fips",
+        action="store_true",
+        default=False,
+        help="Run redpanda in fips permissive mode",
+    )
 
     # 'stop' subcommand
     _ = subparsers.add_parser(
@@ -921,6 +937,12 @@ def main():
         "--ducktape-globals",
         default="",
         help='Additional ducktape globals as JSON string (e.g. \'{"s3_bucket": "my-bucket"}\')',
+    )
+    repl_parser.add_argument(
+        "--with-fips",
+        action="store_true",
+        default=False,
+        help="Run redpanda in fips permissive mode",
     )
 
     args = parser.parse_args()
