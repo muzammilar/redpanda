@@ -701,7 +701,7 @@ class DucktapeRunner:
                         continue
 
                     # Parse test arguments
-                    self.args.ducktape_args = user_input.split()
+                    self.ducktape_args = user_input.split()
 
                     exit_code = self.run_ducktape_tests()
 
