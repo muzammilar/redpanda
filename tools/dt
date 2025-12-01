@@ -435,6 +435,14 @@ class DucktapeRunner:
         """Stop the docker compose cluster."""
         self.log("Stopping docker compose cluster...")
 
+        # Also stop the ducktape container if it's running.
+        # This can happen e.g. if a test is Ctrl-C'd.
+        subprocess.run(
+            ["docker", "stop", "ducktape"],
+            capture_output=True,
+            check=False,
+        )
+
         env = os.environ.copy()
         env["BUILD_ROOT"] = str(self.build_root)
 
