@@ -232,7 +232,7 @@ ss::future<result<std::monostate>> credential_manager::maybe_sign(
 }
 
 void credential_manager::start_auth_refresh_if_needed() {
-    if (ss::this_shard_id() != cloud_io::auth_refresh_shard_id) {
+    if (ss::this_shard_id() != cloud_roles::auth_refresh_shard_id) {
         return;
     }
 
@@ -243,6 +243,7 @@ void credential_manager::start_auth_refresh_if_needed() {
     }
 
     auth_refresh_bg_op_.emplace(
+      datalake_log,
       gate_,
       auth_refresh_as_,
       std::move(client_config.value()),

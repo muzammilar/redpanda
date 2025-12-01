@@ -10,10 +10,8 @@
 
 #pragma once
 
-#include "cloud_io/auth_refresh_bg_op.h"
 #include "cloud_io/io_resources.h"
 #include "cloud_io/remote.h"
-#include "cloud_roles/refresh_credentials.h"
 #include "cloud_storage/base_manifest.h"
 #include "cloud_storage/configuration.h"
 #include "cloud_storage/fwd.h"

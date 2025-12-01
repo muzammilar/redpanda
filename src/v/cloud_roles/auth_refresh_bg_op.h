@@ -18,7 +18,7 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/gate.hh>
 
-namespace cloud_io {
+namespace cloud_roles {
 
 inline constexpr ss::shard_id auth_refresh_shard_id = 0;
 
@@ -28,6 +28,7 @@ inline constexpr ss::shard_id auth_refresh_shard_id = 0;
 class auth_refresh_bg_op {
 public:
     auth_refresh_bg_op(
+      ss::logger& logger,
       ss::gate& gate,
       ss::abort_source& as,
       cloud_storage_clients::client_configuration client_conf,
@@ -67,6 +68,7 @@ private:
       cloud_roles::credentials_update_cb_t credentials_update_cb,
       ss::sstring metrics_tag);
 
+    ss::logger& _log;
     ss::gate& _gate;
     ss::abort_source& _as;
     cloud_storage_clients::client_configuration _client_conf;
@@ -76,4 +78,4 @@ private:
     uint64_t _refresh_cnt{0};
 };
 
-} // namespace cloud_io
+} // namespace cloud_roles

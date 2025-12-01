@@ -7,23 +7,24 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
-#include "cloud_io/auth_refresh_bg_op.h"
+#include "cloud_roles/auth_refresh_bg_op.h"
 
-#include "cloud_io/logger.h"
 #include "cloud_roles/refresh_credentials.h"
 #include "ssx/future-util.h"
 
 #include <optional>
 
-namespace cloud_io {
+namespace cloud_roles {
 static constexpr auto refresh_rate = std::chrono::seconds(10);
 
 auth_refresh_bg_op::auth_refresh_bg_op(
+  ss::logger& logger,
   ss::gate& gate,
   ss::abort_source& as,
   cloud_storage_clients::client_configuration client_conf,
   model::cloud_credentials_source cloud_credentials_source)
-  : _gate(gate)
+  : _log(logger)
+  , _gate(gate)
   , _as(as)
   , _client_conf(std::move(client_conf))
   , _cloud_credentials_source(cloud_credentials_source) {}
@@ -54,7 +55,7 @@ void auth_refresh_bg_op::do_start_auth_refresh_op(
         // If credentials are static IE not changing, we just need to set the
         // credential object once on all cores with static strings.
         vlog(
-          log.info,
+          _log.info,
           "creating static credentials based on credentials source {}",
           _cloud_credentials_source);
 
@@ -94,7 +95,7 @@ void auth_refresh_bg_op::do_start_auth_refresh_op(
                 std::move(metrics_tag)));
 
             vlog(
-              log.info,
+              _log.info,
               "created credentials refresh implementation based on credentials "
               "source {}: {}",
               _cloud_credentials_source,
@@ -102,7 +103,7 @@ void auth_refresh_bg_op::do_start_auth_refresh_op(
             _refresh_credentials->start();
         } catch (const std::exception& ex) {
             vlog(
-              log.error,
+              _log.error,
               "failed to initialize cloud storage authentication system: {}",
               ex.what());
         }
@@ -161,4 +162,4 @@ ss::future<> auth_refresh_bg_op::stop() {
     }
 }
 
-} // namespace cloud_io
+} // namespace cloud_roles

@@ -11,10 +11,10 @@
 #include "cloud_io/remote.h"
 
 #include "bytes/iostream.h"
-#include "cloud_io/auth_refresh_bg_op.h"
 #include "cloud_io/logger.h"
 #include "cloud_io/provider.h"
 #include "cloud_io/transfer_details.h"
+#include "cloud_roles/auth_refresh_bg_op.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/configuration.h"
 #include "cloud_storage_clients/types.h"
@@ -113,7 +113,7 @@ remote::remote(
   model::cloud_credentials_source cloud_credentials_source,
   ss::scheduling_group sg)
   : _pool(clients)
-  , _auth_refresh_bg_op{_gate, _as, conf, cloud_credentials_source}
+  , _auth_refresh_bg_op{log, _gate, _as, conf, cloud_credentials_source}
   , _resources(std::make_unique<io_resources>(sg))
   , _azure_shared_key_binding(
       config::shard_local_cfg().cloud_storage_azure_shared_key.bind())
@@ -1274,13 +1274,14 @@ remote::propagate_credentials(cloud_roles::credentials credentials) {
 }
 
 void remote::maybe_request_auth_refresh() {
-    if (ss::this_shard_id() == auth_refresh_shard_id) {
+    if (ss::this_shard_id() == cloud_roles::auth_refresh_shard_id) {
         _auth_refresh_bg_op.maybe_refresh_credentials();
     } else {
         ssx::spawn_with_gate(_gate, [this] {
-            return container().invoke_on(auth_refresh_shard_id, [](remote& r) {
-                r._auth_refresh_bg_op.maybe_refresh_credentials();
-            });
+            return container().invoke_on(
+              cloud_roles::auth_refresh_shard_id, [](remote& r) {
+                  r._auth_refresh_bg_op.maybe_refresh_credentials();
+              });
         });
     }
 }
