@@ -10,11 +10,11 @@
 
 #pragma once
 
-#include "cloud_io/auth_refresh_bg_op.h"
 #include "cloud_io/io_resources.h"
 #include "cloud_io/io_result.h"
 #include "cloud_io/provider.h"
 #include "cloud_io/remote_api.h"
+#include "cloud_roles/auth_refresh_bg_op.h"
 #include "cloud_storage_clients/client.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "model/metadata.h"
@@ -219,9 +219,10 @@ private:
     ss::sharded<cloud_storage_clients::client_pool>& _pool;
     ss::gate _gate;
     ss::abort_source _as;
-    auth_refresh_bg_op _auth_refresh_bg_op;
+    cloud_roles::auth_refresh_bg_op _auth_refresh_bg_op;
     std::unique_ptr<io_resources> _resources;
 
+    cloud_storage_clients::client_configuration _client_conf;
     config::binding<std::optional<ss::sstring>> _azure_shared_key_binding;
 
     model::cloud_storage_backend _cloud_storage_backend;
