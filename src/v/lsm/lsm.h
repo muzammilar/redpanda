@@ -58,6 +58,10 @@ public:
     // not).
     model::offset max_applied_offset() const;
 
+    // Flush existing buffered data such that that `max_persisted_offset()`
+    // becomes >= the current `max_applied_offset()`.
+    ss::future<> flush();
+
     // Apply a batch of data atomically to the database.
     ss::future<> apply(write_batch);
 
