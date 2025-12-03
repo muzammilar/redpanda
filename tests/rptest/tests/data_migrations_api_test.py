@@ -300,7 +300,7 @@ class DataMigrationsApiTest(DataMigrationTestMixin):
         self.create_and_wait(out1)
         self.assure_not_migratable(
             topic=None,
-            group="group2",
+            group="group1",
             expected_response={
                 "message": "Requested operation can not be executed as the resource is undergoing data migration",
                 "code": 400,
