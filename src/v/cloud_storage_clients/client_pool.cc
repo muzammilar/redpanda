@@ -557,14 +557,16 @@ void client_pool::populate_client_pool() {
       "Missing synchronization?");
 }
 
-client_pool::http_client_ptr client_pool::make_client() const noexcept {
+client_pool::http_client_ptr client_pool::make_client() noexcept {
     return std::visit(
       [this](const auto& cfg) -> http_client_ptr {
           using cfg_type = std::decay_t<decltype(cfg)>;
           if constexpr (std::is_same_v<s3_configuration, cfg_type>) {
-              return ss::make_shared<s3_client>(cfg, _as, _apply_credentials);
+              return ss::make_shared<s3_client>(
+                weak_from_this(), cfg, _as, _apply_credentials);
           } else if constexpr (std::is_same_v<abs_configuration, cfg_type>) {
-              return ss::make_shared<abs_client>(cfg, _as, _apply_credentials);
+              return ss::make_shared<abs_client>(
+                weak_from_this(), cfg, _as, _apply_credentials);
           } else {
               static_assert(always_false_v<cfg_type>, "Unknown client type");
           }

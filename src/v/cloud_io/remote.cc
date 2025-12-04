@@ -268,8 +268,6 @@ ss::future<upload_result> remote::upload_stream(
             result = upload_result::failed;
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = upload_result::failed;
             break;
         }
@@ -403,8 +401,6 @@ ss::future<download_result> remote::download_stream(
             result = download_result::notfound;
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = download_result::failed;
             break;
         }
@@ -498,8 +494,6 @@ remote::download_object(download_request download_request) {
             result = download_result::notfound;
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = download_result::failed;
             break;
         }
@@ -583,8 +577,6 @@ ss::future<download_result> remote::object_exists(
             result = download_result::notfound;
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = download_result::failed;
             break;
         }
@@ -670,8 +662,6 @@ remote::delete_object(transfer_details transfer_details) {
               bucket);
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = upload_result::failed;
             break;
         }
@@ -841,8 +831,6 @@ ss::future<upload_result> remote::delete_object_batch(
               bucket);
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = upload_result::failed;
             break;
         }
@@ -1080,8 +1068,6 @@ ss::future<list_result> remote::list_objects(
               "{}",
               bucket);
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = cloud_storage_clients::error_outcome::fail;
             break;
         }
@@ -1168,8 +1154,6 @@ ss::future<upload_result> remote::upload_object(upload_request upload_request) {
             result = upload_result::failed;
             break;
         case cloud_storage_clients::error_outcome::authentication_failed:
-            vlog(ctxlog.info, "Token expired, refreshing credentials");
-            maybe_request_auth_refresh();
             result = upload_result::failed;
             break;
         }
@@ -1197,14 +1181,6 @@ ss::future<upload_result> remote::upload_object(upload_request upload_request) {
           upload_type);
     }
     co_return *result;
-}
-
-void remote::maybe_request_auth_refresh() {
-    return _pool.local().maybe_refresh_credentials();
-}
-
-uint64_t remote::token_refresh_count() const noexcept {
-    return _pool.local().token_refresh_count();
 }
 
 } // namespace cloud_io
