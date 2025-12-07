@@ -139,7 +139,8 @@ public:
             for (const auto& added_file : mutation.added_files) {
                 auto copy = ss::make_lw_shared(*added_file);
                 copy->allowed_seeks = static_cast<int32_t>(
-                  copy->file_size / _vset->_options->compact_after_seek_bytes);
+                  copy->file_size
+                  / _vset->_options->seek_compaction_bytes_cost_ratio);
                 constexpr static int32_t min_allowed_seeks = 100;
                 if (copy->allowed_seeks < min_allowed_seeks) {
                     copy->allowed_seeks = min_allowed_seeks;
@@ -274,7 +275,7 @@ ss::future<bool> version::record_read_sample(internal::key_view key) {
     // deletions? Should we have another mechanism for finding such files?
     if (matches >= 2) {
         // 1MiB cost is about 1 seek (see comment in
-        // options::compact_after_seek_bytes).
+        // options::seek_compaction_bytes_cost_ratio).
         co_return update_stats(stats);
     }
     co_return false;
