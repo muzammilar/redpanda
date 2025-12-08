@@ -204,6 +204,23 @@ TEST_P_CORO(ossl_context_test_framework_param, sigver) {
     return ss::make_ready_future();
 }
 
+TEST_P_CORO(ossl_context_test_framework_param, hmac_key) {
+    auto& param = GetParam();
+
+    // Key less than 112 bits. This should fail in fips and succeed in non-fips
+    ss::sstring short_key = "short";
+    ss::sstring msg = "very secret message";
+    if (param.fips_mode) {
+        EXPECT_THROW(
+          crypto::hmac(crypto::digest_type::SHA256, short_key, msg),
+          crypto::exception);
+    } else {
+        EXPECT_NO_THROW(
+          crypto::hmac(crypto::digest_type::SHA256, short_key, msg));
+    }
+    return ss::make_ready_future();
+}
+
 INSTANTIATE_TEST_SUITE_P(
   ossl_context_tests,
   ossl_context_test_framework_param,

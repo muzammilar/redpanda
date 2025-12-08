@@ -10,6 +10,7 @@
  */
 
 #include "crypto/crypto.h"
+#include "crypto/exceptions.h"
 #include "internal.h"
 #include "ssl_utils.h"
 
@@ -51,6 +52,16 @@ public:
     impl(digest_type type, bytes_view key) {
         _mac_ctx = internal::EVP_MAC_CTX_ptr(
           EVP_MAC_CTX_new(internal::get_mac()));
+
+        // our fips-validated module (openssl 3.1.2) does not perform this
+        // check, but other validated modules do. When it's encountered it is
+        // hard to debug what the issue is, so an explicit check is added here
+        // to improve UX.
+        if (is_hmac_key_too_short(key)) {
+            throw exception{fmt::format(
+              "HMAC key needs to be {} bytes or longer in fips mode",
+              hmac_key_fips_min_bytes)};
+        }
         if (
           1
           != EVP_MAC_init(
