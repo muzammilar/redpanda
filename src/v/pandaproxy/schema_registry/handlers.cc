@@ -510,7 +510,7 @@ post_subject(server::request_t rq, server::reply_t rp) {
       std::move(def), format);
 
     auto resp = ppj::rjson_serialize_iobuf(
-      post_subject_versions_version_response{
+      post_subject_response{
         .schema{std::move(subject), std::move(formatted_schema)},
         .id{sub_schema.id},
         .version{sub_schema.version}});
