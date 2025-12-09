@@ -20,6 +20,7 @@ from rptest.services.redpanda import AnyRedpandaService, RedpandaServiceCloud
 
 class ClientSwarmBase(Service, ABC):
     EXE = "client-swarm"
+    PERSISTENT_ROOT = "/var/lib/client-swarm"
     LOG_PATH = "/opt/remote/var/client-swarm.log"
 
     # client swarm throttles producer startups to one every 33 ms by default,
@@ -59,8 +60,8 @@ class ClientSwarmBase(Service, ABC):
         self._redpanda.logger.debug(f"{self.__class__.__name__}.clean_node")
         self._node = None
         node.account.kill_process(self.EXE, clean_shutdown=False)
-        if node.account.exists(self.LOG_PATH):
-            node.account.remove(self.LOG_PATH)
+        node.account.remove(self.LOG_PATH, allow_fail=True)
+        node.account.remove(ClientSwarmBase.PERSISTENT_ROOT, allow_fail=True)
 
     @abstractmethod
     def _additional_args(self) -> str:
@@ -71,6 +72,8 @@ class ClientSwarmBase(Service, ABC):
             f"started on more than one node? {self._node} {node}"
         )
         self._node = node
+
+        node.account.mkdirs(ClientSwarmBase.PERSISTENT_ROOT)
 
         cmd = f"{self.EXE}"
         cmd += f" --brokers {self._redpanda.brokers()}"
