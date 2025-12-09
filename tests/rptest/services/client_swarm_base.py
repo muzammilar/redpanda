@@ -9,8 +9,9 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
+from ducktape.cluster.cluster import ClusterNode
 import requests
 from ducktape.services.service import Service
 from ducktape.tests.test import TestContext
@@ -43,7 +44,7 @@ class ClientSwarmBase(Service, ABC):
         self._topic = topic
         self._log_level = log_level
         self._properties = properties
-        self._node = None
+        self._node: Optional[ClusterNode] = None
         self._remote_port = 8080
         self._remote_addr = "0.0.0.0"
 
