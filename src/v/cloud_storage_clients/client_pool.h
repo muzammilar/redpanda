@@ -200,7 +200,10 @@ private:
 
     /// Configured capacity per shard
     const size_t _capacity;
+
     client_configuration _config;
+    net::base_transport::configuration _transport_config;
+
     ss::shared_ptr<client_probe> _probe;
     client_pool_overdraft_policy _policy;
 
