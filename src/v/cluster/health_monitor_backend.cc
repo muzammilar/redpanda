@@ -20,8 +20,10 @@
 #include "cluster/logger.h"
 #include "cluster/members_table.h"
 #include "cluster/node/local_monitor.h"
+#include "cluster/node_status_table.h"
 #include "cluster/partition_manager.h"
 #include "cluster/partition_probe.h"
+#include "cluster/types.h"
 #include "config/configuration.h"
 #include "config/property.h"
 #include "container/chunked_hash_map.h"
@@ -30,6 +32,7 @@
 #include "model/metadata.h"
 #include "raft/fwd.h"
 #include "rpc/connection_cache.h"
+#include "rpc/types.h"
 #include "ssx/async_algorithm.h"
 
 #include <seastar/core/chunked_fifo.hh>
@@ -47,6 +50,7 @@
 #include <fmt/ranges.h>
 
 #include <algorithm>
+#include <chrono>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -201,7 +205,11 @@ std::optional<node_health_report_ptr> health_monitor_backend::build_node_report(
     }
 
     node_health_report ret{
-      it->second->id, it->second->local_state, {}, it->second->drain_status};
+      it->second->id,
+      it->second->local_state,
+      {},
+      it->second->drain_status,
+      it->second->node_liveness_report};
     ret.local_state.logical_version
       = features::feature_table::get_latest_logical_version();
     ret.topics = filter_topic_status(it->second->topics, f.ntp_filters);
@@ -896,7 +904,11 @@ health_monitor_backend::collect_current_node_health() {
     it->second.last_reply_timestamp = ss::lowres_clock::now();
 
     co_return node_health_report{
-      id, std::move(local_state), std::move(topics), std::move(drain_status)};
+      id,
+      std::move(local_state),
+      std::move(topics),
+      std::move(drain_status),
+      {}};
 }
 ss::future<result<node_health_report_ptr>>
 health_monitor_backend::get_current_node_health() {
@@ -1026,6 +1038,7 @@ reports_acc_t reduce_reports_map(reports_acc_t acc, shard_report shard_report) {
     return acc;
 }
 } // namespace
+
 ss::future<chunked_vector<topic_status>>
 health_monitor_backend::collect_topic_status() {
     auto reports_map = co_await _partition_manager.map_reduce0(

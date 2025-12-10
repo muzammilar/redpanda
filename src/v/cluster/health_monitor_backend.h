@@ -17,6 +17,7 @@
 #include "cluster/node_status_table.h"
 #include "cluster/notification.h"
 #include "features/feature_table.h"
+#include "model/fundamental.h"
 #include "model/metadata.h"
 #include "rpc/fwd.h"
 #include "ssx/mutex.h"
