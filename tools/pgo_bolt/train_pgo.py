@@ -15,7 +15,6 @@ import yaml
 
 CLUSTER_STARTUP_MARKER = "Successfully started Redpanda"
 BENCH_START_MARKER = "Starting benchmark traffic"
-PERF_PROFILE_FILE = "perf.data"
 
 # Helper script to run PGO training workloads against a RP dev cluster
 # We use the devcluster to launch a basic rf=3 cluster and run OMB against it.
@@ -133,8 +132,6 @@ def check_omb(omb_target: OmbTarget):
 
 
 async def terminate(proc: asyncio.subprocess.Process, name: str) -> int:
-    if not proc:
-        return 0
     try:
         print(f"Terminating {name} (pid {proc.pid})")
         os.killpg(proc.pid, signal.SIGINT)
