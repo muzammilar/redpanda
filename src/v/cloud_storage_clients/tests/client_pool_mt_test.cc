@@ -10,7 +10,6 @@
 
 #include "base/seastarx.h"
 #include "cloud_storage_clients/client_pool.h"
-#include "cloud_storage_clients/s3_client.h"
 
 #include <seastar/core/future.hh>
 #include <seastar/core/loop.hh>
@@ -27,9 +26,7 @@
 #include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
 
-#include <chrono>
 #include <deque>
-#include <exception>
 
 using namespace std::chrono_literals;
 
@@ -47,11 +44,6 @@ static cloud_storage_clients::s3_configuration transport_configuration() {
     conf.service = cloud_roles::aws_service_name("s3");
     conf.url_style = cloud_storage_clients::s3_url_style::virtual_host;
     conf.server_addr = server_addr;
-    conf._probe = ss::make_shared<cloud_storage_clients::client_probe>(
-      net::metrics_disabled::yes,
-      net::public_metrics_disabled::yes,
-      cloud_roles::aws_region_name{"region"},
-      cloud_storage_clients::endpoint_url{"endpoint"});
     return conf;
 }
 
@@ -72,18 +64,9 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_another_shard) {
         cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
       .get();
 
-    pool
-      .invoke_on_all([](cloud_storage_clients::client_pool& p) {
-          auto tcfg = transport_configuration();
-          auto cred = cloud_roles::aws_credentials{
-            tcfg.access_key.value(),
-            tcfg.secret_key.value(),
-            std::nullopt,
-            tcfg.region,
-            cloud_roles::aws_service_name{"s3"}};
-          p.load_credentials(cred);
-      })
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
       .get();
+
     auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
 
     ss::abort_source as;
@@ -168,18 +151,9 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_this_shard) {
         cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
       .get();
 
-    pool
-      .invoke_on_all([](cloud_storage_clients::client_pool& p) {
-          auto tcfg = transport_configuration();
-          auto cred = cloud_roles::aws_credentials{
-            tcfg.access_key.value(),
-            tcfg.secret_key.value(),
-            std::nullopt,
-            tcfg.region,
-            cloud_roles::aws_service_name{"s3"}};
-          p.load_credentials(cred);
-      })
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
       .get();
+
     auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
 
     ss::abort_source as;
@@ -196,9 +170,11 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_this_shard) {
     leases
       .invoke_on_all(
         [&pool, num_connections_per_shard](shard_leases& sl) mutable {
-            for (size_t i = 0; i < num_connections_per_shard; i++) {
-                sl.leases.push_back(pool.local().acquire(sl.as).get());
-            }
+            return ss::async([&] {
+                for (size_t i = 0; i < num_connections_per_shard; i++) {
+                    sl.leases.push_back(pool.local().acquire(sl.as).get());
+                }
+            });
         })
       .get();
 
@@ -236,18 +212,9 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_after_leasing_all) {
         cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
       .get();
 
-    pool
-      .invoke_on_all([](cloud_storage_clients::client_pool& p) {
-          auto tcfg = transport_configuration();
-          auto cred = cloud_roles::aws_credentials{
-            tcfg.access_key.value(),
-            tcfg.secret_key.value(),
-            std::nullopt,
-            tcfg.region,
-            cloud_roles::aws_service_name{"s3"}};
-          p.load_credentials(cred);
-      })
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
       .get();
+
     auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
     auto pool_no_bg_ops = [&pool] {
         return pool.invoke_on_all([](cloud_storage_clients::client_pool& pool) {

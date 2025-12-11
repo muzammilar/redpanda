@@ -15,7 +15,6 @@
 #include "cloud_storage_clients/s3_client.h"
 #include "model/timeout_clock.h"
 #include "ssx/future-util.h"
-#include "utils/functional.h"
 
 #include <seastar/core/smp.hh>
 #include <seastar/core/timed_out_error.hh>
@@ -37,25 +36,15 @@ constexpr auto self_config_timeout = 15s;
 namespace cloud_storage_clients {
 
 client_pool::client_pool(
-  size_t size,
-  client_configuration conf,
-  client_pool_overdraft_policy policy,
-  std::optional<std::reference_wrapper<stop_signal>> application_stop_signal)
+  size_t size, client_configuration conf, client_pool_overdraft_policy policy)
   : _capacity(size)
   , _config(std::move(conf))
-  , _probe(std::visit([](auto&& p) { return p._probe; }, _config))
+  , _probe(std::visit([](auto&& p) { return p.make_probe(); }, _config))
   , _policy(policy)
   , _credential_manager(
       *this, _config, ss::visit(_config, [](const common_configuration& c) {
           return c.cloud_credentials_source;
-      })) {
-    if (ss::this_shard_id() == self_config_shard) {
-        ssx::spawn_with_gate(
-          _gate, [this, app_stop_signal = application_stop_signal]() {
-              return client_self_configure(app_stop_signal);
-          });
-    }
-}
+      })) {}
 
 ss::future<> client_pool::client_self_configure(
   std::optional<std::reference_wrapper<stop_signal>> application_stop_signal) {
@@ -173,7 +162,19 @@ ss::future<> client_pool::accept_self_configure_result(
     _self_config_barrier.signal(_self_config_barrier.max_counter());
 }
 
-ss::future<> client_pool::start() { co_await _credential_manager.start(); }
+ss::future<> client_pool::start(
+  std::optional<std::reference_wrapper<stop_signal>> application_stop_signal) {
+    _transport_config = co_await build_transport_configuration(_config);
+
+    if (ss::this_shard_id() == self_config_shard) {
+        ssx::spawn_with_gate(
+          _gate, [this, app_stop_signal = application_stop_signal]() {
+              return client_self_configure(app_stop_signal);
+          });
+    }
+
+    co_await _credential_manager.start();
+}
 
 ss::future<> client_pool::stop() {
     vlog(pool_log.info, "Stopping client pool: {}", _pool.size());
@@ -558,20 +559,26 @@ void client_pool::populate_client_pool() {
 }
 
 client_pool::http_client_ptr client_pool::make_client() noexcept {
-    return std::visit(
-      [this](const auto& cfg) -> http_client_ptr {
-          using cfg_type = std::decay_t<decltype(cfg)>;
-          if constexpr (std::is_same_v<s3_configuration, cfg_type>) {
-              return ss::make_shared<s3_client>(
-                weak_from_this(), cfg, _as, _apply_credentials);
-          } else if constexpr (std::is_same_v<abs_configuration, cfg_type>) {
-              return ss::make_shared<abs_client>(
-                weak_from_this(), cfg, _as, _apply_credentials);
-          } else {
-              static_assert(always_false_v<cfg_type>, "Unknown client type");
-          }
+    return ss::visit(
+      _config,
+      [this](const s3_configuration& cfg) -> http_client_ptr {
+          return ss::make_shared<s3_client>(
+            weak_from_this(),
+            cfg,
+            _transport_config,
+            _probe,
+            _as,
+            _apply_credentials);
       },
-      _config);
+      [this](const abs_configuration& cfg) -> http_client_ptr {
+          return ss::make_shared<abs_client>(
+            weak_from_this(),
+            cfg,
+            _transport_config,
+            _probe,
+            _as,
+            _apply_credentials);
+      });
 }
 
 void client_pool::release(http_client_ptr leased) {
