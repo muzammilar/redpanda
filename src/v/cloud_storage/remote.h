@@ -448,12 +448,14 @@ public:
             if (_promise.has_value()) {
                 _hook.unlink();
                 _promise.reset();
+                _gate_holder.release();
             }
         }
 
     private:
         absl::node_hash_set<const retry_chain_node*> _sources_to_ignore;
         std::unordered_set<api_activity_type> _events_to_ignore;
+        ss::gate::holder _gate_holder;
         std::optional<ss::promise<api_activity_notification>> _promise;
         intrusive_list_hook _hook;
     };
