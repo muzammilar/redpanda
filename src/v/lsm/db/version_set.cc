@@ -401,7 +401,8 @@ internal::level version::pick_level_for_memtable_output(
                 auto files = get_overlapping_inputs(
                   level + 2_level, begin, end);
                 size_t sum = total_file_size(files);
-                if (sum > _vset->_options->max_grandparent_overlap_bytes()) {
+                if (
+                  sum > _vset->_options->max_grandparent_overlap_bytes(level)) {
                     break;
                 }
             }
@@ -559,7 +560,8 @@ void version_set::finalize(version* v) {
     for (auto level = 1_level; level < _options->max_level(); ++level) {
         size_t level_bytes = total_file_size(v->_files[level]);
         double score = static_cast<double>(level_bytes)
-                       / static_cast<double>(max_bytes_for_level(level));
+                       / static_cast<double>(
+                         _options->levels[level].max_total_bytes);
         if (score > best_score) {
             best_level = level;
             best_score = score;
@@ -704,7 +706,7 @@ std::optional<compaction> version_set::pick_compaction() {
         if (
           expanded0.size() > c->_inputs[which::input_level].size()
           && inputs1_size + expanded0_size
-               < _options->expanded_compaction_byte_size_limit()) {
+               < _options->expanded_compaction_byte_size_limit(level)) {
             auto [new_smallest, new_largest] = get_range(expanded0);
             auto expanded1 = _current->get_overlapping_inputs(
               level + 1_level, new_smallest, new_largest);
@@ -793,7 +795,7 @@ bool compaction::is_trivial_move() const {
       num_input_files(which::input_level) == 1
       && num_input_files(which::output_level) == 0
       && total_file_size(_grandparents)
-           <= vset->_options->max_grandparent_overlap_bytes());
+           <= vset->_options->max_grandparent_overlap_bytes(_level));
 }
 
 void compaction::add_input_deletions(version_edit* edit) {
@@ -836,7 +838,9 @@ bool compaction::should_stop_before(internal::key_view key) {
         ++_grandparent_index;
     }
     _seen_key = true;
-    if (_overlapped_bytes > vset->_options->max_grandparent_overlap_bytes()) {
+    if (
+      _overlapped_bytes
+      > vset->_options->max_grandparent_overlap_bytes(_level)) {
         // Too much overlap for current output; start new output
         _overlapped_bytes = 0;
         return true;

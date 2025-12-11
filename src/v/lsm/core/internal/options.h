@@ -13,6 +13,7 @@
 
 #include "base/format_to.h"
 #include "base/units.h"
+#include "base/vassert.h"
 #include "lsm/core/compression.h"
 #include "lsm/core/internal/files.h"
 
@@ -31,21 +32,70 @@ struct options {
         // The level number in the database.
         internal::level number;
 
+        // The maximum number of total bytes in this level.
+        size_t max_total_bytes;
+
+        // Write up to this amount of bytes to a file in this level before
+        // switching to a new one.
+        //
+        // Increasing this provides better file system
+        // efficiency with larger files, but the downside of increasing this is
+        // longer compactions and longer latency/performance hiccups.
+        size_t max_file_size;
+
         fmt::iterator format_to(fmt::iterator) const;
     };
-    constexpr static auto default_max_level = 6_level;
-    static constexpr std::vector<level_config> make_default_levels() {
+
+    // Make a configuration of levels based on the initial level configuration,
+    // and a multiplier between each level.
+    static constexpr std::vector<level_config> make_levels(
+      level_config base_config, size_t multiplier, internal::level max_level) {
+        vassert(
+          max_level >= 1_level,
+          "there must be at least 2 levels in the LSM tree");
         std::vector<level_config> levels;
-        levels.reserve(default_max_level() + 1);
-        for (auto lvl = 0_level; lvl <= default_max_level; ++lvl) {
-            levels.emplace_back(lvl);
+        levels.reserve(max_level + 1_level);
+        // Level0 and level1 we want to be similar in size because usually
+        // compaction between the levels are the bottleneck. This is also the
+        // recommendation in RocksDB. Note that generally level0 is special in
+        // that the system uses the write buffer size and write triggers to
+        // determine the number of files and size of files in level0
+        levels.emplace_back(
+          level_config{
+            .number = 0_level,
+            .max_total_bytes = base_config.max_total_bytes,
+            .max_file_size = base_config.max_file_size,
+          });
+        auto* last_level = &levels.emplace_back(
+          level_config{
+            .number = 1_level,
+            .max_total_bytes = base_config.max_total_bytes,
+            .max_file_size = base_config.max_file_size,
+          });
+        for (auto lvl = 2_level; lvl <= max_level; ++lvl) {
+            last_level = &levels.emplace_back(
+              level_config{
+                .number = lvl,
+                .max_total_bytes = last_level->max_total_bytes * multiplier,
+                .max_file_size = last_level->max_file_size * multiplier,
+              });
         }
         return levels;
     }
     // The levels and their configuration in the database,
     // this will be sorted by level number and also will be monotonically
     // increasing from level 0 to level N (configurable).
-    std::vector<level_config> levels = make_default_levels();
+    constexpr static auto default_max_level = 6_level;
+    // The default size multiplier between levels
+    constexpr static size_t default_level_multipler = 10;
+    std::vector<level_config> levels = make_levels(
+      {
+        .max_total_bytes = default_level_zero_stop_writes_trigger
+                           * default_write_buffer_size,
+        .max_file_size = default_write_buffer_size,
+      },
+      default_level_multipler,
+      default_max_level);
     internal::level max_level() const { return levels.back().number; }
 
     // At what point do we start throttling writes in terms of the number of L0
@@ -67,20 +117,14 @@ struct options {
     constexpr static size_t default_level_one_compaction_trigger = 4;
     size_t level_one_compaction_trigger = default_level_one_compaction_trigger;
 
-    // Write up to this amount of bytes to a file before switching to a new one.
-    // Increasing this provides better file system efficiency with larger files,
-    // but the downside of increasing this is longer compactions and longer
-    // latency/performance hiccups.
-    size_t max_file_size = 2_GiB;
-
-    size_t target_file_size() const { return max_file_size; }
-    size_t max_grandparent_overlap_bytes() const {
+    size_t max_grandparent_overlap_bytes(internal::level lvl) const {
         static constexpr size_t multiplier = 10;
-        return multiplier * target_file_size();
+        return multiplier * levels[lvl].max_file_size;
     }
-    size_t expanded_compaction_byte_size_limit() const {
+
+    size_t expanded_compaction_byte_size_limit(internal::level lvl) const {
         static constexpr size_t multiplier = 25;
-        return multiplier * target_file_size();
+        return multiplier * levels[lvl].max_file_size;
     }
 
     // The approximate max number of SST files that should be opened at one

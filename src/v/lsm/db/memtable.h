@@ -78,6 +78,16 @@ public:
     // If the memtable is empty or not.
     bool empty() const { return _table.empty(); }
 
+    // What is the minimum key in the memtable?
+    //
+    // REQUIRES: !empty()
+    internal::key_view min_key() const { return _table.begin()->first; }
+
+    // What is the maximum key in the memtable?
+    //
+    // REQUIRES: !empty()
+    internal::key_view max_key() const { return _table.rbegin()->first; }
+
     std::optional<internal::sequence_number> last_seqno() const {
         return _last_seqno;
     }

@@ -361,6 +361,8 @@ ss::future<> impl::run_background_compaction() {
       // TODO: If we support snapshot reads we need to track the last seqno.
       .smallest_snapshot = _versions->last_seqno(),
     };
+    auto output_level = compaction.level() + 1_level;
+    auto max_file_size = _opts->levels[output_level].max_file_size;
     try {
         auto input = co_await _versions->make_input_iterator(&compaction);
         std::optional<internal::key> current_key;
@@ -423,7 +425,7 @@ ss::future<> impl::run_background_compaction() {
                 current.newest = std::max(key_seqno, current.newest);
                 co_await state.builder->add(internal::key(key), input->value());
                 // Close output file if it is big enough
-                if (state.builder->file_size() >= _opts->target_file_size()) {
+                if (state.builder->file_size() >= max_file_size) {
                     co_await state.finish_current_builder();
                 }
             }
@@ -460,18 +462,20 @@ ss::future<> impl::flush_memtable() {
     vassert(_imm, "immutable memtable required in order to flush a memtable");
     auto v = _versions->current();
     auto id = _versions->new_file_id();
+    auto& imm = *_imm;
+    auto level = imm->empty() ? 0_level
+                              : v->pick_level_for_memtable_output(
+                                  imm->min_key(), imm->max_key());
     auto result = co_await build_table(
       _persistence.data.get(),
       {.id = id, .epoch = _opts->database_epoch},
-      (*_imm)->create_iterator(),
+      imm->create_iterator(),
       _opts,
       &_as);
     if (!result) {
         _versions->reuse_file_id(id);
         co_return;
     }
-    auto level = v->pick_level_for_memtable_output(
-      result->smallest, result->largest);
     version_edit edit(*_opts);
     edit.set_last_seqno(result->newest_seqno);
     edit.add_file({

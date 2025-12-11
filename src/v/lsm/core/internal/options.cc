@@ -14,7 +14,12 @@
 namespace lsm::internal {
 
 fmt::iterator options::level_config::format_to(fmt::iterator it) const {
-    return fmt::format_to(it, "{{number:{}}}", number);
+    return fmt::format_to(
+      it,
+      "{{number:{},max_total_bytes:{},max_file_size:{}}}",
+      number,
+      max_total_bytes,
+      max_file_size);
 }
 
 fmt::iterator options::format_to(fmt::iterator it) const {

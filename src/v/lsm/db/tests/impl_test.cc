@@ -115,12 +115,17 @@ private:
 class ImplTest : public testing::Test {
 public:
     void SetUp() override {
+        // Make a smaller sized database so we get some actual leveling
+        // happening.
         _options = ss::make_lw_shared<lsm::internal::options>({
+          .levels = lsm::internal::options::make_levels(
+            {.max_total_bytes = 1_MiB, .max_file_size = 256_KiB},
+            /*multiplier=*/2,
+            lsm::internal::options::default_max_level),
           .level_zero_slowdown_writes_trigger = 4,
           .level_zero_stop_writes_trigger = 6,
           .write_buffer_size = 256_KiB,
           .level_one_compaction_trigger = 2,
-          .max_file_size = 2_MiB,
         });
         _underlying_data_persistence = lsm::io::make_memory_data_persistence();
         _meta_persistence = lsm::io::make_memory_metadata_persistence();
@@ -247,8 +252,8 @@ TEST_F(ImplTest, MemtableIsFlushed) {
 }
 
 TEST_F(ImplTest, Recovery) {
-    write_at_least(512_KiB);
-    write_at_least(512_KiB);
+    write_at_least(128_KiB);
+    write_at_least(128_KiB);
     EXPECT_TRUE(matches_shadow());
     tests::drain_task_queue().get();
     _db->flush().get();
@@ -264,7 +269,7 @@ TEST_F(ImplTest, Randomized) {
     int rounds = 1000;
 #endif
     for (int i = 0; i < rounds; ++i) {
-        write_at_least(512_KiB);
+        write_at_least(128_KiB);
         EXPECT_TRUE(matches_shadow());
     }
 }

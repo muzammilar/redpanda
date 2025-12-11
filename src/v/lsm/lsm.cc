@@ -70,13 +70,18 @@ ss::lw_shared_ptr<internal::options> translate_options(options opts) {
     internal_opts->database_epoch = internal::database_epoch{
       opts.database_epoch};
 
-    // Create level configs based on num_levels
-    internal_opts->levels.clear();
-    internal_opts->levels.reserve(opts.num_levels);
-    for (uint8_t i = 0; i < opts.num_levels; ++i) {
-        internal_opts->levels.emplace_back(internal::level{i});
-    }
-
+    // Create level configs based on num_levels, and the level 0 settings.
+    auto max_level = internal::level{
+      static_cast<uint8_t>(opts.num_levels - 1u)};
+    internal_opts->levels = internal::options::make_levels(
+      {
+        .number = internal::level::min(),
+        .max_total_bytes = opts.level_zero_stop_writes_trigger
+                           * opts.write_buffer_size,
+        .max_file_size = opts.write_buffer_size,
+      },
+      internal::options::default_level_multipler,
+      max_level);
     internal_opts->level_zero_slowdown_writes_trigger
       = opts.level_zero_slowdown_writes_trigger;
     internal_opts->level_zero_stop_writes_trigger
@@ -84,7 +89,6 @@ ss::lw_shared_ptr<internal::options> translate_options(options opts) {
     internal_opts->write_buffer_size = opts.write_buffer_size;
     internal_opts->level_one_compaction_trigger
       = opts.level_one_compaction_trigger;
-    internal_opts->max_file_size = opts.max_file_size;
     internal_opts->max_open_files = opts.max_open_files;
     internal_opts->max_pre_open_fibers = opts.max_pre_open_fibers;
     internal_opts->block_cache_size = opts.block_cache_size;

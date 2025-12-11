@@ -17,18 +17,6 @@
 
 namespace lsm::db {
 
-using internal::operator""_level;
-
-size_t max_bytes_for_level(internal::level level) {
-    // NOLINTBEGIN(*magic-number*)
-    size_t result = 10_MiB;
-    while (level > 1_level) {
-        result *= 10;
-        --level;
-    }
-    // NOLINTEND(*magic-number*)
-    return result;
-}
 size_t total_file_size(
   const chunked_vector<ss::lw_shared_ptr<file_meta_data>>& files) {
     size_t total = 0;
@@ -37,6 +25,7 @@ size_t total_file_size(
     }
     return total;
 }
+
 size_t find_file(
   const chunked_vector<ss::lw_shared_ptr<file_meta_data>>& files,
   internal::key_view target) {

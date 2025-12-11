@@ -33,9 +33,6 @@ struct by_smallest_key {
 size_t
 total_file_size(const chunked_vector<ss::lw_shared_ptr<file_meta_data>>& files);
 
-// TODO(lsm): This should be a config knob probably
-size_t max_bytes_for_level(internal::level level);
-
 // Return the smallest index i such that files[i]->largest >= key.
 // Return files.size() if there is no such file.
 // REQUIRES: "files" contains a sorted list of non-overlapping files.
