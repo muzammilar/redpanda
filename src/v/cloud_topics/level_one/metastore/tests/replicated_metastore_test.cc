@@ -728,8 +728,13 @@ TEST_F(ReplicatedMetastoreTest, TestBasicRemoveTopics) {
     // Sanity check that all topics exist.
     for (int i = 0; i < topics_count; ++i) {
         auto tp = make_topic_p0(i);
-        auto offsets = meta.get_offsets(tp).get();
-        ASSERT_TRUE(offsets.has_value());
+        std::expected<metastore::offsets_response, metastore::errc> offsets;
+        RPTEST_REQUIRE_EVENTUALLY(10s, [&] {
+            return meta.get_offsets(tp).then([&](auto offsets_res) {
+                offsets = std::move(offsets_res);
+                return offsets.has_value();
+            });
+        });
         ASSERT_EQ(offsets->next_offset, o{100});
     }
 
