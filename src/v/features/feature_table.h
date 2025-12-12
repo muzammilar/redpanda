@@ -158,7 +158,8 @@ enum class release_version : int64_t {
     v25_1_1 = 15,
     v25_2_1 = 16,
     v25_3_1 = 17,
-    MAX = v25_3_1, // affects the latest_version
+    v26_1_1 = 18,
+    MAX = v26_1_1, // affects the latest_version
 };
 
 constexpr cluster::cluster_version to_cluster_version(release_version rv) {
@@ -178,6 +179,7 @@ constexpr cluster::cluster_version to_cluster_version(release_version rv) {
     case release_version::v25_1_1:
     case release_version::v25_2_1:
     case release_version::v25_3_1:
+    case release_version::v26_1_1:
         return cluster::cluster_version{static_cast<int64_t>(rv)};
     }
     vunreachable("Invalid release_version");
