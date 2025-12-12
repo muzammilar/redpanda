@@ -15,7 +15,13 @@ from ducktape.mark import matrix, parametrize
 from ducktape.utils.util import wait_until
 
 from rptest.clients.kcl import RawKCL
-from rptest.clients.rpk import AclList, ClusterAuthorizationError, RpkException, RpkTool
+from rptest.clients.rpk import (
+    AclList,
+    ClusterAuthorizationError,
+    RpkException,
+    RpkTool,
+    RPKACLInput,
+)
 from rptest.services import tls
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
@@ -625,6 +631,30 @@ class AccessControlListTest(AccessControlListTestBase):
         )
         # Expect failure when set to RFC2253 format
         self.check_permissions(pass_w_cluster_user=True)
+
+    @cluster(num_nodes=3)
+    def test_smoke_test_group_acl(self):
+        """
+        Simple test that validates that ACL principals with Group: prefix is
+        permitted
+        """
+        self.prepare_cluster(use_tls=False, use_sasl=True)
+
+        acl_input = RPKACLInput()
+        acl_input.allow_principal = ["Group:test_group"]
+        acl_input.allow_host = ["*"]
+        acl_input.operation = ["all"]
+        acl_input.cluster = True
+
+        self.get_super_client().acl_create(acl=acl_input)
+
+        acls = self.get_super_client().acl_list(format="json")
+        self.logger.debug(f"ACLs: {acls}")
+        group_acl = next(
+            (acl for acl in acls["matches"] if acl["principal"] == "Group:test_group"),
+            None,
+        )
+        assert group_acl is not None, "Group:test_group ACL not found"
 
 
 class AccessControlListTestUpgrade(AccessControlListTest):
