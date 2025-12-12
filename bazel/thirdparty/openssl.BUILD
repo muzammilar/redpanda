@@ -59,6 +59,7 @@ configure_make(
         "--openssldir=/etc/ssl",
         "--libdir=lib",
         "no-tests",
+        "no-docs",
     ] + select({
         ":debug_mode": ["--debug"],
         ":release_mode": ["--release"],
