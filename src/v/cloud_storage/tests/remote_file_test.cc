@@ -12,7 +12,6 @@
 #include "cloud_io/cache_service.h"
 #include "cloud_io/tests/cache_test_fixture.h"
 #include "cloud_io/tests/s3_imposter.h"
-#include "cloud_io/tests/scoped_remote.h"
 #include "cloud_storage/download_exception.h"
 #include "cloud_storage/remote.h"
 #include "cloud_storage/remote_file.h"
@@ -29,6 +28,8 @@ namespace {
 
 ss::abort_source never_abort;
 lazy_abort_source always_continue{[]() { return std::nullopt; }};
+constexpr model::cloud_credentials_source config_file{
+  model::cloud_credentials_source::config_file};
 
 iobuf make_iobuf_from_string(std::string_view s) {
     iobuf b;
@@ -47,8 +48,26 @@ public:
       : data_dir("data_dir") {
         ss::recursive_touch_directory(data_dir.get_path().string()).get();
         auto conf = get_configuration();
-        scoped_remote_io = cloud_io::scoped_remote::create(10, conf);
-        remote.start(std::ref(scoped_remote_io->remote), conf).get();
+        pool
+          .start(
+            10, ss::sharded_parameter([this] { return get_configuration(); }))
+          .get();
+        pool
+          .invoke_on_all(
+            &cloud_storage_clients::client_pool::start, std::nullopt)
+          .get();
+        io.start(
+            std::ref(pool),
+            ss::sharded_parameter([this] { return get_configuration(); }),
+            ss::sharded_parameter([] { return config_file; }),
+            ss::sharded_parameter(
+              [] { return ss::default_scheduling_group(); }))
+          .get();
+        remote
+          .start(std::ref(io), ss::sharded_parameter([this] {
+                     return get_configuration();
+                 }))
+          .get();
         set_expectations_and_listen({});
     }
 
@@ -84,13 +103,16 @@ public:
 
     ~remote_file_fixture() {
         data_dir.remove().get();
-        scoped_remote_io->request_stop();
+        pool.local().shutdown_connections();
+        io.local().request_stop();
         remote.stop().get();
-        scoped_remote_io.reset();
+        io.stop().get();
+        pool.stop().get();
     }
 
     temporary_dir data_dir;
-    std::unique_ptr<cloud_io::scoped_remote> scoped_remote_io;
+    ss::sharded<cloud_storage_clients::client_pool> pool;
+    ss::sharded<cloud_io::remote> io;
     ss::sharded<remote> remote;
 };
 

@@ -10,7 +10,6 @@
 
 #include "base/seastarx.h"
 #include "cloud_storage_clients/client_pool.h"
-#include "cloud_storage_clients/tests/client_pool_builder.h"
 
 #include <seastar/core/future.hh>
 #include <seastar/core/loop.hh>
@@ -30,13 +29,12 @@
 #include <deque>
 
 using namespace std::chrono_literals;
-using namespace cloud_storage_clients::tests;
 
 ss::logger test_log("test-log");
 static const uint16_t httpd_port_number = 4434;
 static constexpr const char* httpd_host_name = "localhost";
 
-static cloud_storage_clients::s3_configuration client_configuration() {
+static cloud_storage_clients::s3_configuration transport_configuration() {
     net::unresolved_address server_addr(httpd_host_name, httpd_port_number);
     cloud_storage_clients::s3_configuration conf;
     conf.uri = cloud_storage_clients::access_point_uri(httpd_host_name);
@@ -49,22 +47,27 @@ static cloud_storage_clients::s3_configuration client_configuration() {
     return conf;
 }
 
-static const client_pool_builder test_pool_builder{client_configuration()};
-
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_another_shard) {
     BOOST_REQUIRE(ss::smp::count == 2);
-
-    constexpr size_t num_connections_per_shard = 4;
+    auto sconf = ss::sharded_parameter([] {
+        auto conf = transport_configuration();
+        return conf;
+    });
+    auto conf = transport_configuration();
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
+    size_t num_connections_per_shard = 4;
+    pool
+      .start(
+        num_connections_per_shard,
+        sconf,
+        cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
+      .get();
 
-    auto stop_guard = test_pool_builder
-                        .connections_per_shard(num_connections_per_shard)
-                        .overdraft_policy(
-                          cloud_storage_clients::client_pool_overdraft_policy::
-                            borrow_if_empty)
-                        .build(pool)
-                        .get();
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
+      .get();
+
+    auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
 
     ss::abort_source as;
 
@@ -133,17 +136,25 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_another_shard) {
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_this_shard) {
     BOOST_REQUIRE(ss::smp::count == 2);
-
-    constexpr size_t num_connections_per_shard = 4;
+    auto sconf = ss::sharded_parameter([] {
+        auto conf = transport_configuration();
+        return conf;
+    });
+    auto conf = transport_configuration();
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
-    auto pool_stop = test_pool_builder
-                       .connections_per_shard(num_connections_per_shard)
-                       .overdraft_policy(
-                         cloud_storage_clients::client_pool_overdraft_policy::
-                           borrow_if_empty)
-                       .build(pool)
-                       .get();
+    size_t num_connections_per_shard = 4;
+    pool
+      .start(
+        num_connections_per_shard,
+        sconf,
+        cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
+      .get();
+
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
+      .get();
+
+    auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
 
     ss::abort_source as;
 
@@ -157,13 +168,14 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_this_shard) {
     auto leases_stop = ss::defer([&leases] { leases.stop().get(); });
     // deplete all connections
     leases
-      .invoke_on_all([&pool](shard_leases& sl) mutable {
-          return ss::async([&] {
-              for (size_t i = 0; i < num_connections_per_shard; i++) {
-                  sl.leases.push_back(pool.local().acquire(sl.as).get());
-              }
-          });
-      })
+      .invoke_on_all(
+        [&pool, num_connections_per_shard](shard_leases& sl) mutable {
+            return ss::async([&] {
+                for (size_t i = 0; i < num_connections_per_shard; i++) {
+                    sl.leases.push_back(pool.local().acquire(sl.as).get());
+                }
+            });
+        })
       .get();
 
     vlog(test_log.debug, "connections depleted");
@@ -185,18 +197,25 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_this_shard) {
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_after_leasing_all) {
     BOOST_REQUIRE(ss::smp::count == 2);
-    constexpr size_t num_connections_per_shard = 4;
+    auto sconf = ss::sharded_parameter([] {
+        auto conf = transport_configuration();
+        return conf;
+    });
+    auto conf = transport_configuration();
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
+    size_t num_connections_per_shard = 4;
+    pool
+      .start(
+        num_connections_per_shard,
+        sconf,
+        cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
+      .get();
 
-    auto pool_stop = test_pool_builder
-                       .connections_per_shard(num_connections_per_shard)
-                       .overdraft_policy(
-                         cloud_storage_clients::client_pool_overdraft_policy::
-                           borrow_if_empty)
-                       .build(pool)
-                       .get();
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
+      .get();
 
+    auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
     auto pool_no_bg_ops = [&pool] {
         return pool.invoke_on_all([](cloud_storage_clients::client_pool& pool) {
             while (pool.has_background_operations()) {
@@ -235,8 +254,8 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_after_leasing_all) {
     leases
       .invoke_on(
         1,
-        [&pool](shard_leases& sl) {
-            return ss::async([&sl, &pool] {
+        [&pool, num_connections_per_shard](shard_leases& sl) {
+            return ss::async([&sl, &pool, num_connections_per_shard] {
                 for (size_t i = 0; i < num_connections_per_shard; i++) {
                     sl.leases.push_back(pool.local().acquire(sl.as).get());
                 }
@@ -257,8 +276,8 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_after_leasing_all) {
     leases
       .invoke_on(
         1,
-        [&pool_no_bg_ops](shard_leases& sl) {
-            return ss::async([&sl, &pool_no_bg_ops] {
+        [&pool_no_bg_ops, num_connections_per_shard](shard_leases& sl) {
+            return ss::async([&sl, &pool_no_bg_ops, num_connections_per_shard] {
                 for (size_t i = 0; i < num_connections_per_shard; i++) {
                     sl.leases.pop_back();
                     pool_no_bg_ops().get();
