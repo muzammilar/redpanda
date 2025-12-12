@@ -109,10 +109,10 @@ struct pipeline_sink {
 
 namespace l0 {
 struct write_request_balancer_accessor {
-    static void disable_data_threshold_uploads(write_request_scheduler* s) {
+    static void disable_data_threshold_uploads(write_request_scheduler<>* s) {
         s->_test_only_disable_data_threshold = true;
     }
-    static void disable_time_based_fallback(write_request_scheduler* s) {
+    static void disable_time_based_fallback(write_request_scheduler<>* s) {
         s->_test_only_disable_time_based_fallback = true;
     }
 };
@@ -137,7 +137,7 @@ public:
 
         co_await scheduler.invoke_on_all(
           [disable_data_threshold,
-           disable_time_based_fallback](l0::write_request_scheduler& s) {
+           disable_time_based_fallback](l0::write_request_scheduler<>& s) {
               if (disable_data_threshold) {
                   l0::write_request_balancer_accessor::
                     disable_data_threshold_uploads(&s);
@@ -150,7 +150,7 @@ public:
 
         vlog(test_log.info, "Starting scheduler");
         co_await scheduler.invoke_on_all(
-          [](l0::write_request_scheduler& sched) { return sched.start(); });
+          [](l0::write_request_scheduler<>& sched) { return sched.start(); });
 
         // Start the sink
         vlog(test_log.info, "Creating request_sink");
@@ -171,7 +171,7 @@ public:
     }
 
     ss::sharded<l0::write_pipeline<>> pipeline;
-    ss::sharded<l0::write_request_scheduler> scheduler;
+    ss::sharded<l0::write_request_scheduler<>> scheduler;
     ss::sharded<pipeline_sink> request_sink;
 };
 
@@ -280,7 +280,7 @@ TEST_F_CORO(write_request_balancer_fixture, test_core_affinity) {
     // requests is expected to be the one that produced the most data.
     ASSERT_TRUE_CORO(ss::smp::count > 1);
 
-    co_await scheduler.invoke_on_all([](l0::write_request_scheduler& s) {
+    co_await scheduler.invoke_on_all([](l0::write_request_scheduler<>& s) {
         l0::write_request_balancer_accessor::disable_data_threshold_uploads(&s);
     });
 
@@ -381,7 +381,7 @@ TEST_F_CORO(
     ASSERT_TRUE_CORO(ss::smp::count > 1);
     static constexpr size_t batch_size = 0x1000;
 
-    co_await scheduler.invoke_on_all([](l0::write_request_scheduler& s) {
+    co_await scheduler.invoke_on_all([](l0::write_request_scheduler<>& s) {
         l0::write_request_balancer_accessor::disable_data_threshold_uploads(&s);
     });
 

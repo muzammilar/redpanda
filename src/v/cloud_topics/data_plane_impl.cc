@@ -155,7 +155,7 @@ private:
     ss::sharded<l0::cluster_services> _cluster_services;
     // Write path
     ss::sharded<l0::write_pipeline<>> _write_pipeline;
-    ss::sharded<l0::write_request_scheduler> _write_req_scheduler;
+    ss::sharded<l0::write_request_scheduler<>> _write_req_scheduler;
     ss::sharded<l0::batcher<>> _batcher;
     // Read path
     ss::sharded<l0::read_pipeline<>> _read_pipeline;
