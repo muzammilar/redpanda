@@ -937,7 +937,7 @@ class LogCompactionTxRemovalUpgradeTest(LogCompactionTxRemovalTestBase):
         self.redpanda.restart_nodes(self.redpanda.nodes)
 
         wait_until(
-            lambda: logical_version() > current_active and self.redpanda.healthy,
+            lambda: logical_version() > current_active and self.redpanda.healthy(),
             timeout_sec=20,
             backoff_sec=2,
             err_msg=f"Cluster did not become healthy after restart/upgrade: {logical_version()}",
