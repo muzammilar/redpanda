@@ -47,13 +47,8 @@ ss::future<> base_transport::do_connect(clock_type::time_point timeout) {
     try {
         base_transport::reset_state();
         reset_state();
-        vlog(_log->trace, "Resolving {}", server_address());
         auto resolved_address = co_await net::resolve_dns(server_address());
-        vlog(
-          _log->trace,
-          "Address {} resolved to {}",
-          server_address(),
-          resolved_address);
+        vlog(_log->trace, "Resolved address {}", resolved_address);
         ss::connected_socket fd = co_await connect_with_timeout(
           resolved_address, timeout, _log);
 
