@@ -897,11 +897,22 @@ private:
         return v_it;
     }
 
+    // NOTE: sharded_store shards data into multiple store instances
+    // Sharded fields:
+    //   _schemas: sharded by schema_id
+    //   _subjects: sharded by subject
+    //   _marked_schemas: sharded by schema_id
+    //
+    // Replicated fields (kept on all shards):
+    //   _compatibility
+    //   _mode
+
     schema_map _schemas;
     subject_map _subjects;
     chunked_vector<schema_id> _marked_schemas;
     compatibility_level _compatibility{compatibility_level::backward};
     mode _mode{mode::read_write};
+
     is_mutable _mutable;
     metrics::internal_metric_groups _metrics;
     metrics::public_metric_groups _public_metrics;
