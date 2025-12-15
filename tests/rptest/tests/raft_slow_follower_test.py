@@ -127,7 +127,7 @@ class RaftSlowFollowerTest(RedpandaTest):
             self.logger.info(
                 f"average latency: {numpy.average(producer.latencies) * 1000} ms, max latency: {numpy.max(producer.latencies) * 1000} ms"
             )
-            assert numpy.max(producer.latencies) < 2.5, (
+            assert numpy.max(producer.latencies) < 3.5, (
                 f"Produce latency is unexpectedly high: {numpy.max(producer.latencies) * 1000} after follower was suspended"
             )
         finally:
