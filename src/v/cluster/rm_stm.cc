@@ -2297,6 +2297,31 @@ ss::future<> rm_stm::apply_raft_snapshot(const iobuf&) {
     co_return;
 }
 
+bool rm_stm::is_last_batch_for_idempotent_producer(
+  const model::record_batch_header& hdr) const {
+    const auto bid = model::batch_identity::from(hdr);
+    if (!bid.is_idempotent()) {
+        return false;
+    }
+
+    const auto& pid = bid.pid;
+
+    auto it = _producers.find(pid.get_id());
+    if (it == _producers.end()) {
+        // We cannot know for sure if this is the last batch for the
+        // producer or not. But we cannot retain placeholder batches forever
+        // either.
+        return false;
+    }
+
+    const tx::producer_ptr& producer = it->second;
+
+    const auto last_seq = producer->last_sequence_number();
+    const auto producer_epoch = producer->id().get_epoch();
+
+    return last_seq == bid.last_seq && producer_epoch == pid.get_epoch();
+}
+
 void rm_stm::setup_metrics() {
     if (config::shard_local_cfg().disable_metrics()) {
         return;
