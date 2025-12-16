@@ -6,6 +6,7 @@ import requests
 from ducktape.services.service import Service
 from ducktape.utils.util import wait_until
 from keycloak import KeycloakAdmin
+from keycloak.exceptions import KeycloakGetError
 
 KC_INSTALL_DIR = os.path.join("/", "opt", "keycloak")
 KC_DATA_DIR = os.path.join(KC_INSTALL_DIR, "data")
@@ -96,6 +97,8 @@ class OAuthConfig:
 
 
 class KeycloakAdminClient:
+    GROUP_MAPPER_NAME = "groups-mapper"
+
     def __init__(
         self,
         logger,
@@ -141,6 +144,37 @@ class KeycloakAdminClient:
         id = self.kc_admin.create_client(payload=rep)
         self.logger.debug(f"client_id: {id}")
         return id
+
+    def create_group_mapper(self, client_id: str, use_full_path: bool = True):
+        id = self.kc_admin.get_client_id(client_id)
+        assert id is not None, f"Client {client_id} not found"
+        self.logger.debug(f"Creating group mapper for client {client_id} (id: {id})")
+
+        try:
+            mappers = self.kc_admin.get_mappers_from_client(id)
+            mapper = next(
+                (m for m in mappers if m["name"] == self.GROUP_MAPPER_NAME), None
+            )
+        except KeycloakGetError:
+            mapper = None
+
+        mapper_representation = {
+            "name": self.GROUP_MAPPER_NAME,
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-group-membership-mapper",
+            "config": {
+                "access.token.claim": "true",
+                "id.token.claim": "true",
+                "userinfo.token.claim": "true",
+                "full.path": f"{use_full_path}".lower(),
+                "claim.name": "groups",
+                "jsonType.label": "String",
+            },
+        }
+
+        if mapper is None:
+            self.logger.debug("Creating group mapper")
+            self.kc_admin.add_mapper_to_client(id, mapper_representation)
 
     def generate_client_secret(self, client_id):
         id = self.kc_admin.get_client_id(client_id)
@@ -221,7 +255,7 @@ class KeycloakService(Service):
             self.https_port = https_port
 
     @property
-    def admin(self):
+    def admin(self) -> KeycloakAdminClient:
         assert self._admin is not None
         return self._admin
 
