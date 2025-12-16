@@ -10,6 +10,20 @@
         }
       }
     },
+    "schema_reference": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      }
+    },
     "schema_def": {
       "type": "object",
       "properties": {
@@ -22,18 +36,7 @@
         "references": {
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "subject": {
-                "type": "string"
-              },
-              "version": {
-                "type": "integer"
-              }
-            }
+            "$ref": "#/definitions/schema_reference"
           }
         }
       }
@@ -56,18 +59,7 @@
         "references": {
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "subject": {
-                "type": "string"
-              },
-              "version": {
-                "type": "integer"
-              }
-            }
+            "$ref": "#/definitions/schema_reference"
           }
         },
         "schema": {
