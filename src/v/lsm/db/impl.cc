@@ -27,7 +27,6 @@
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/as_future.hh>
-#include <seastar/util/defer.hh>
 
 #include <exception>
 #include <memory>
@@ -60,6 +59,10 @@ ss::future<std::unique_ptr<impl>> impl::open(
         auto ex = fut.get_exception();
         co_await db->close().handle_exception([](const std::exception_ptr&) {});
         std::rethrow_exception(ex);
+    }
+    // If we're readonly, we don't need to start any compaction loop.
+    if (db->_opts->readonly) {
+        co_return db;
     }
     db->_background_work = ss::do_until(
       [db = db.get()] { return db->_as.abort_requested(); },
@@ -104,6 +107,10 @@ ss::future<std::unique_ptr<impl>> impl::open(
 }
 
 ss::future<> impl::apply(ss::lw_shared_ptr<memtable> batch) {
+    if (_opts->readonly) [[unlikely]] {
+        throw invalid_argument_exception(
+          "attempted to write to a readonly database");
+    }
     if (batch->empty()) {
         co_return;
     }
@@ -226,6 +233,10 @@ impl::create_internal_iterator(ss::optimized_optional<memtable*> wb) {
 }
 
 ss::future<> impl::flush() {
+    if (_opts->readonly) [[unlikely]] {
+        throw invalid_argument_exception(
+          "attempted to flush a readonly database");
+    }
     auto applied_seqno = max_applied_seqno();
     while (applied_seqno > max_persisted_seqno()) {
         if (_imm) {

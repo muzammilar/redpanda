@@ -46,6 +46,10 @@ struct options {
     // This value should never decrease.
     uint64_t database_epoch = 0;
 
+    // If the database is opened in readonly mode. Readonly mode causes all
+    // write operations to fail. However, read operations can be performed.
+    bool readonly = false;
+
     // The number of levels in the LSM tree. More levels allow more smaller and
     // faster compactions, but causes more read amplication.
     //

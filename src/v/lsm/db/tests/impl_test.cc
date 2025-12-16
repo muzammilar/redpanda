@@ -131,15 +131,7 @@ public:
         _meta_persistence = lsm::io::make_memory_metadata_persistence();
         _tracking_data = std::make_unique<tracking_data_persistence>(
           _underlying_data_persistence.get());
-        _db = lsm::db::impl::open(
-                _options,
-                {
-                  .data = std::make_unique<proxy_data_persistence>(
-                    _tracking_data.get()),
-                  .metadata = std::make_unique<proxy_metadata_persistence>(
-                    _meta_persistence.get()),
-                })
-                .get();
+        open();
     }
 
     void TearDown() override {
@@ -150,6 +142,7 @@ public:
 
     void write_at_least(size_t size) {
         auto batch = ss::make_lw_shared<lsm::db::memtable>();
+        decltype(_shadow) shadow_batch;
         auto seqno = _db->max_applied_seqno();
         while (batch->approximate_memory_usage() < size) {
             auto key = lsm::internal::key::encode({
@@ -158,11 +151,15 @@ public:
             });
             auto value = iobuf::from(
               random_generators::gen_alphanum_string(1_KiB));
-            _shadow.insert_or_assign(
+            shadow_batch.insert_or_assign(
               ss::sstring(key.user_key()), value.share());
             batch->put(key, value.share());
         }
         _db->apply(std::move(batch)).get();
+        // Only apply writes if db write was a success
+        for (auto& [k, v] : shadow_batch) {
+            _shadow.insert_or_assign(k, std::move(v));
+        }
     }
 
     testing::AssertionResult matches_shadow() {
@@ -197,8 +194,14 @@ public:
     }
 
     void restart() {
+        close();
+        open();
+    }
+    void close() {
         _db->close().get();
         _tracking_data->reset_tracking();
+    }
+    void open() {
         _db = lsm::db::impl::open(
                 _options,
                 {
@@ -382,6 +385,25 @@ TEST_F(ImplTest, PreOpenFiles) {
           << "File " << file << " was not pre-opened";
     }
     EXPECT_TRUE(matches_shadow());
+}
+
+TEST_F(ImplTest, Readonly) {
+    // Write some data and flush to create SST files
+    write_at_least(512_KiB);
+    write_at_least(512_KiB);
+    EXPECT_TRUE(matches_shadow());
+    tests::drain_task_queue().get();
+    _db->flush().get();
+
+    // Restart in readonly mode
+    close();
+    _options->readonly = true;
+    open();
+
+    EXPECT_TRUE(matches_shadow());
+    EXPECT_ANY_THROW(write_at_least(1_KiB));
+    EXPECT_TRUE(matches_shadow());
+    EXPECT_ANY_THROW(write_at_least(1_KiB));
 }
 
 } // namespace

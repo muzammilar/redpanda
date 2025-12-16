@@ -28,6 +28,10 @@ struct options {
     // storage.
     internal::database_epoch database_epoch;
 
+    // If the database is opened in readonly mode. Readonly mode causes all
+    // write operations to fail. However, read operations can be performed.
+    bool readonly = false;
+
     struct level_config {
         // The level number in the database.
         internal::level number;
