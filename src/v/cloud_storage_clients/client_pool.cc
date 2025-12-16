@@ -15,6 +15,7 @@
 #include "cloud_storage_clients/s3_client.h"
 #include "crash_tracker/recorder.h"
 #include "model/timeout_clock.h"
+#include "ssx/abort_source.h"
 #include "ssx/future-util.h"
 
 #include <seastar/core/smp.hh>
@@ -199,6 +200,7 @@ ss::future<> client_pool::stop() {
     }
     _cvar.broken();
     _self_config_barrier.broken();
+    _pool_ready_barrier.broken();
     _credentials_var.broken();
     // Wait for all background operations to complete.
     co_await _bg_gate.close();
@@ -230,6 +232,7 @@ void client_pool::shutdown_connections() {
     _as.request_abort();
     _cvar.broken();
     _self_config_barrier.broken();
+    _pool_ready_barrier.broken();
     _credentials_var.broken();
 
     for (auto& it : _leased) {
@@ -295,6 +298,13 @@ ss::future<client_pool::client_lease> client_pool::acquire(
         if (std::optional<ssx::semaphore_units> u = ss::try_get_units(
               _pool_ready_barrier, 1);
             !u.has_value()) {
+            const auto ready_deadline = std::min(
+              deadline.value_or(ss::lowres_clock::time_point::max()),
+              ss::lowres_clock::now() + pool_ready_timeout);
+            auto timeout_as = ss::abort_on_expiry(ready_deadline);
+            auto wait_as = ssx::composite_abort_source(
+              as, timeout_as.abort_source());
+
             // Timeout exception will be thrown if the credentials are not
             // refreshed yet. The code in the 'remote' class handles this
             // exception. Most of the time this exception means that the
@@ -302,11 +312,11 @@ ss::future<client_pool::client_lease> client_pool::acquire(
             // properly.
             try {
                 u = co_await ss::get_units(
-                  _pool_ready_barrier, 1, pool_ready_timeout);
+                  _pool_ready_barrier, 1, wait_as.as());
             } catch (const ss::timed_out_error&) {
                 vlog(
-                  pool_log.error,
-                  "Failed to acquire credentials within timeout");
+                  pool_log.warn,
+                  "Timed out waiting for client pool to be ready");
                 throw;
             }
         }
