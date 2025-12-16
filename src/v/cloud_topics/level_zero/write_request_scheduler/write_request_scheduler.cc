@@ -193,10 +193,12 @@ ss::future<> write_request_scheduler<Clock>::pull_and_roundtrip(
         if (ss::this_shard_id() == info.shard && info.bytes > 0) {
             // Fast path: process requests locally
             // This shard is the one that has the most data.
-            _stage.process([&signaled](write_request<Clock>&) noexcept {
-                signaled = true;
-                return request_processing_result::advance_and_continue;
-            });
+            _stage.process(
+              [this, &signaled](const write_request<Clock>& r) noexcept {
+                  signaled = true;
+                  _probe.register_time_fallback(r.size_bytes());
+                  return request_processing_result::advance_and_continue;
+              });
             break;
         }
     }
@@ -346,7 +348,6 @@ write_request_scheduler<Clock>::proxy_write_request(
     // the holder was created on the target shard and
     // it will be destroyed on the target shard as well.
     auto h = _gate.hold();
-    _probe.register_time_fallback(req->size_bytes());
     _probe.register_receive_xshard(req->size_bytes());
     write_request<Clock> proxy(
       req->ntp,
