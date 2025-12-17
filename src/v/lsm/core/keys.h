@@ -19,4 +19,8 @@ namespace lsm {
 // user provided keys (see internal::key for more information).
 using user_key_view = named_type<std::string_view, struct user_key_view_tag>;
 
+consteval user_key_view operator""_user_key(const char* s, size_t len) {
+    return user_key_view{s, len};
+}
+
 } // namespace lsm

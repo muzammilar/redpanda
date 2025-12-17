@@ -25,6 +25,7 @@
 namespace {
 
 using lsm::internal::operator""_level;
+using lsm::operator""_user_key;
 using lsm::internal::operator""_file_id;
 using lsm::internal::operator""_key;
 using lsm::internal::operator""_seqno;
@@ -311,21 +312,27 @@ TEST_F(VersionSetTest, OverlapInLevel0) {
     });
     vset.log_and_apply(std::move(edit)).get();
     auto current = vset.current();
-    EXPECT_TRUE(current->overlap_in_level(0_level, "a"_key, "z"_key));
-    EXPECT_TRUE(current->overlap_in_level(0_level, "k"_key, "l"_key));
-    EXPECT_TRUE(current->overlap_in_level(0_level, "f"_key, "h"_key));
-    EXPECT_TRUE(current->overlap_in_level(0_level, "h"_key, "j"_key));
-    EXPECT_TRUE(current->overlap_in_level(0_level, "g"_key, "h"_key));
-    EXPECT_TRUE(current->overlap_in_level(0_level, "h"_key, "i"_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "a"_user_key, "z"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "k"_user_key, "l"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "f"_user_key, "h"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "h"_user_key, "j"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "g"_user_key, "h"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "h"_user_key, "i"_user_key));
     EXPECT_TRUE(current->overlap_in_level(0_level, std::nullopt, std::nullopt));
-    EXPECT_TRUE(current->overlap_in_level(0_level, "k"_key, std::nullopt));
-    EXPECT_TRUE(current->overlap_in_level(0_level, std::nullopt, "d"_key));
-    EXPECT_FALSE(current->overlap_in_level(0_level, std::nullopt, "a"_key));
-    EXPECT_FALSE(current->overlap_in_level(0_level, "l"_key, std::nullopt));
-    EXPECT_FALSE(current->overlap_in_level(0_level, "a"_key, "a"_key));
-    EXPECT_FALSE(current->overlap_in_level(0_level, "y"_key, "z"_key));
-    EXPECT_FALSE(current->overlap_in_level(0_level, "h"_key, "h"_key));
-    EXPECT_FALSE(current->overlap_in_level(1_level, "a"_key, "z"_key));
+    EXPECT_TRUE(current->overlap_in_level(0_level, "k"_user_key, std::nullopt));
+    EXPECT_TRUE(current->overlap_in_level(0_level, std::nullopt, "d"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(0_level, std::nullopt, "a"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(0_level, "l"_user_key, std::nullopt));
+    EXPECT_FALSE(
+      current->overlap_in_level(0_level, "a"_user_key, "a"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(0_level, "y"_user_key, "z"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(0_level, "h"_user_key, "h"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(1_level, "a"_user_key, "z"_user_key));
 }
 
 TEST_F(VersionSetTest, OverlapInLevel1) {
@@ -347,21 +354,27 @@ TEST_F(VersionSetTest, OverlapInLevel1) {
     });
     vset.log_and_apply(std::move(edit)).get();
     auto current = vset.current();
-    EXPECT_TRUE(current->overlap_in_level(1_level, "a"_key, "z"_key));
-    EXPECT_TRUE(current->overlap_in_level(1_level, "k"_key, "l"_key));
-    EXPECT_TRUE(current->overlap_in_level(1_level, "f"_key, "h"_key));
-    EXPECT_TRUE(current->overlap_in_level(1_level, "h"_key, "j"_key));
-    EXPECT_TRUE(current->overlap_in_level(1_level, "g"_key, "h"_key));
-    EXPECT_TRUE(current->overlap_in_level(1_level, "h"_key, "i"_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "a"_user_key, "z"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "k"_user_key, "l"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "f"_user_key, "h"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "h"_user_key, "j"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "g"_user_key, "h"_user_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "h"_user_key, "i"_user_key));
     EXPECT_TRUE(current->overlap_in_level(1_level, std::nullopt, std::nullopt));
-    EXPECT_TRUE(current->overlap_in_level(1_level, "k"_key, std::nullopt));
-    EXPECT_TRUE(current->overlap_in_level(1_level, std::nullopt, "d"_key));
-    EXPECT_FALSE(current->overlap_in_level(1_level, std::nullopt, "c"_key));
-    EXPECT_FALSE(current->overlap_in_level(1_level, "l"_key, std::nullopt));
-    EXPECT_FALSE(current->overlap_in_level(1_level, "a"_key, "b"_key));
-    EXPECT_FALSE(current->overlap_in_level(1_level, "y"_key, "z"_key));
-    EXPECT_FALSE(current->overlap_in_level(1_level, "h"_key, "h"_key));
-    EXPECT_FALSE(current->overlap_in_level(2_level, "a"_key, "z"_key));
+    EXPECT_TRUE(current->overlap_in_level(1_level, "k"_user_key, std::nullopt));
+    EXPECT_TRUE(current->overlap_in_level(1_level, std::nullopt, "d"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(1_level, std::nullopt, "c"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(1_level, "l"_user_key, std::nullopt));
+    EXPECT_FALSE(
+      current->overlap_in_level(1_level, "a"_user_key, "b"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(1_level, "y"_user_key, "z"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(1_level, "h"_user_key, "h"_user_key));
+    EXPECT_FALSE(
+      current->overlap_in_level(2_level, "a"_user_key, "z"_user_key));
 }
 
 TEST_F(VersionSetTest, Get) {
@@ -607,7 +620,7 @@ TEST_F(CompactionTest, NoCompactionBelowThreshold) {
 
 TEST_F(CompactionTest, SameUserKeyDifferentSeqnosOverlap) {
     // Tests overlap detection when the same user key exists at different
-    // sequence numbers across files. This is critical for tombstone
+    // sequence numbers across files. This is needed for tombstone
     // compaction - if we don't detect these as overlapping, tombstones
     // won't compact with older versions of the key and deletions won't work.
     //
@@ -642,7 +655,7 @@ TEST_F(CompactionTest, SameUserKeyDifferentSeqnosOverlap) {
     // includes one L1 file), it means we're not properly detecting overlaps for
     // the same user key at different sequence numbers.
     //
-    // This would be a bug because:
+    // This would be an issue because:
     // 1. Tombstones (deletes) wouldn't compact with older versions
     // 2. Old versions of keys would accumulate
     // 3. Space wouldn't be reclaimed properly

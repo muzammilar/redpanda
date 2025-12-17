@@ -96,12 +96,13 @@ public:
     bool empty() const { return _value.empty(); }
 
     // Returns the user portion of the key.
-    std::string_view user_key() const {
+    user_key_view user_key() const {
         dassert(
           _value.size() >= 5,
           "expected key size to be at least 5, got: {}",
           _value.size());
-        return {_value.data(), _value.size() - sizeof(uint64_t) - 1};
+        return user_key_view{
+          _value.data(), _value.size() - sizeof(uint64_t) - 1};
     }
 
     bool operator==(const key& other) const = default;
@@ -149,8 +150,8 @@ public:
           _value.size() >= 5,
           "expected key size to be at least 5, got: {}",
           _value.size());
-        return user_key_view{std::string_view{
-          _value.data(), _value.size() - sizeof(uint64_t) - 1}};
+        return user_key_view{
+          _value.data(), _value.size() - sizeof(uint64_t) - 1};
     }
     // Returns this key's value type
     value_type type() const;

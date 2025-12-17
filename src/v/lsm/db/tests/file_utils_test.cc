@@ -23,7 +23,6 @@ namespace {
 
 using namespace lsm;
 using lsm::internal::operator""_key;
-using lsm::internal::operator""_seqno;
 using ::testing::ElementsAre;
 
 constexpr static auto default_seqno = internal::sequence_number{100};
@@ -65,24 +64,11 @@ protected:
 
 private:
     bool overlaps(bool disjoint, const char* smallest, const char* largest) {
-        internal::key s, l;
-        if (smallest != nullptr) {
-            s = internal::key::encode({
-              .key = user_key_view(smallest),
-              .seqno = default_seqno,
-            });
-        }
-        if (largest != nullptr) {
-            l = internal::key::encode({
-              .key = user_key_view(largest),
-              .seqno = default_seqno,
-            });
-        }
         return db::some_file_overlaps_range(
           disjoint,
           _files,
-          smallest ? std::make_optional(s) : std::nullopt,
-          largest ? std::make_optional(l) : std::nullopt);
+          smallest ? std::make_optional(user_key_view(smallest)) : std::nullopt,
+          largest ? std::make_optional(user_key_view(largest)) : std::nullopt);
     }
     chunked_vector<ss::lw_shared_ptr<db::file_meta_data>> _files;
 };
