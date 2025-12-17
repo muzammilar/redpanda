@@ -452,17 +452,17 @@ http_archive(
 http_archive(
     name = "grafana_x86_64",
     build_file = "//bazel/thirdparty:grafana.BUILD",
-    integrity = "sha256-L+f4mkpjbAHVS6BQnkLZnrirmH8tEeJcxcVeaAkBa/c=",
-    strip_prefix = "grafana-12.2.1",
-    urls = ["https://dl.grafana.com/grafana/release/12.2.1/grafana_12.2.1_18655849634_linux_amd64.tar.gz"],
+    integrity = "sha256-ddA7WsLcewCWJYaTVSJdc+WymGbvvZmUeb3SRCmmlds=",
+    strip_prefix = "grafana-12.3.1",
+    urls = ["https://dl.grafana.com/grafana/release/12.3.1/grafana_12.3.1_20271043721_linux_amd64.tar.gz"],
 )
 
 http_archive(
     name = "grafana_aarch64",
     build_file = "//bazel/thirdparty:grafana.BUILD",
-    integrity = "sha256-bWTD/jaZs7sukoMUvCqWhSCQnaR+qrx1W4Z1YOOlc98=",
-    strip_prefix = "grafana-12.2.1",
-    urls = ["https://dl.grafana.com/grafana/release/12.2.1/grafana_12.2.1_18655849634_linux_arm64.tar.gz"],
+    integrity = "sha256-iJysZjSjZdrLxxLh5J6iIz1AuclY5hJm85lJU3zmPN0=",
+    strip_prefix = "grafana-12.3.1",
+    urls = ["https://dl.grafana.com/grafana/release/12.3.1/grafana_12.3.1_20271043721_linux_arm64.tar.gz"],
 )
 
 http_archive(
