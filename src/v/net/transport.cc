@@ -1,5 +1,6 @@
 #include "net/transport.h"
 
+#include "base/compiler_utils.h"
 #include "base/vassert.h"
 #include "base/vlog.h"
 #include "net/dns.h"
@@ -53,12 +54,15 @@ ss::future<> base_transport::do_connect(clock_type::time_point timeout) {
           resolved_address, timeout, _log);
 
         if (_creds) {
+            // CORE-14958
+            REDPANDA_BEGIN_IGNORE_DEPRECATIONS
             fd = co_await ss::tls::wrap_client(
               _creds,
               std::move(fd),
               ss::tls::tls_options{
                 .wait_for_eof_on_shutdown = _wait_for_tls_server_eof,
                 .server_name = _tls_sni_hostname.value_or("")});
+            REDPANDA_END_IGNORE_DEPRECATIONS
         }
         _fd = std::make_unique<ss::connected_socket>(std::move(fd));
         if (auto* p = _probe.value_or(nullptr); p != nullptr) {
