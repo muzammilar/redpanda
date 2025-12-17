@@ -64,43 +64,47 @@ ss::future<std::unique_ptr<impl>> impl::open(
     if (db->_opts->readonly) {
         co_return db;
     }
-    db->_background_work = ss::do_until(
-      [db = db.get()] { return db->_as.abort_requested(); },
-      [db = db.get()] {
-          vlog(log.trace, "waiting for background work");
-          return db->_start_background_work_signal.wait(db->_as)
-            .then([db] {
-                db->_background_work_running = true;
-                vlog(log.trace, "start background compaction");
-                return db->run_background_compaction();
-            })
-            .then_wrapped([db](ss::future<> fut) {
-                db->_background_work_running = false;
-                db->maybe_schedule_compaction();
-                db->_background_work_finished_signal.broadcast();
-                try {
-                    fut.get();
-                    return;
-                } catch (const abort_requested_exception& ex) {
-                    vlog(
-                      log.debug,
-                      "LSM background loop got abort request: {}",
-                      ex.what());
-                } catch (const io_error_exception& ex) {
-                    vlog(
-                      log.warn,
-                      "LSM background loop hit IO error: {}",
-                      ex.what());
-                } catch (...) {
-                    auto ep = std::current_exception();
-                    vlog(
-                      log.error,
-                      "Unexpected error in LSM background loop: {}",
-                      ep);
-                }
-                // Signal so that we immediately retry
-                // TODO(lsm): consider some kind of backoff or backpressure?
-                db->_start_background_work_signal.signal();
+    db->_background_work = ss::with_scheduling_group(
+      db->_opts->compaction_scheduling_group, [db = db.get()] {
+          return ss::do_until(
+            [db] { return db->_as.abort_requested(); },
+            [db] {
+                vlog(log.trace, "waiting for background work");
+                return db->_start_background_work_signal.wait(db->_as)
+                  .then([db] {
+                      db->_background_work_running = true;
+                      vlog(log.trace, "start background compaction");
+                      return db->run_background_compaction();
+                  })
+                  .then_wrapped([db](ss::future<> fut) {
+                      db->_background_work_running = false;
+                      db->maybe_schedule_compaction();
+                      db->_background_work_finished_signal.broadcast();
+                      try {
+                          fut.get();
+                          return;
+                      } catch (const abort_requested_exception& ex) {
+                          vlog(
+                            log.debug,
+                            "LSM background loop got abort request: {}",
+                            ex.what());
+                      } catch (const io_error_exception& ex) {
+                          vlog(
+                            log.warn,
+                            "LSM background loop hit IO error: {}",
+                            ex.what());
+                      } catch (...) {
+                          auto ep = std::current_exception();
+                          vlog(
+                            log.error,
+                            "Unexpected error in LSM background loop: {}",
+                            ep);
+                      }
+                      // Signal so that we immediately retry
+                      // TODO(lsm): consider some kind of backoff or
+                      // backpressure?
+                      db->_start_background_work_signal.signal();
+                  });
             });
       });
     co_return db;

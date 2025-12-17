@@ -32,6 +32,11 @@ struct options {
     // write operations to fail. However, read operations can be performed.
     bool readonly = false;
 
+    // The scheduling group for background operations in the LSM tree, such as
+    // memtable flushing and compaction. Note that this is unused if the
+    // database is in readonly mode.
+    ss::scheduling_group compaction_scheduling_group;
+
     struct level_config {
         // The level number in the database.
         internal::level number;

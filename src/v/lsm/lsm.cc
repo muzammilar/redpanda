@@ -83,6 +83,9 @@ ss::lw_shared_ptr<internal::options> translate_options(options opts) {
       internal::options::default_level_multipler,
       max_level);
     internal_opts->readonly = opts.readonly;
+    internal_opts->compaction_scheduling_group
+      = opts.compaction_scheduling_group.value_or(
+        ss::current_scheduling_group());
     internal_opts->level_zero_slowdown_writes_trigger
       = opts.level_zero_slowdown_writes_trigger;
     internal_opts->level_zero_stop_writes_trigger
