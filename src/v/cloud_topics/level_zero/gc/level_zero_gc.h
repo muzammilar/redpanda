@@ -247,6 +247,8 @@ public:
       seastar::sharded<cluster::controller_stm>*,
       seastar::sharded<cluster::topic_table>*);
 
+    ~level_zero_gc();
+
     /*
      * Request that GC be started or paused. These can be called multiple times
      * and in any order. The last invocation will eventually take effect.
@@ -262,7 +264,6 @@ public:
 
 private:
     level_zero_gc_config config_;
-    std::unique_ptr<object_storage> storage_;
     std::unique_ptr<epoch_source> epoch_source_;
 
     bool should_run_;
@@ -278,6 +279,7 @@ private:
     level_zero_gc_probe probe_;
 
     class list_delete_worker;
+    std::unique_ptr<list_delete_worker> delete_worker_{};
 };
 
 } // namespace cloud_topics
