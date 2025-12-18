@@ -34,11 +34,13 @@ object_path_factory::level_zero_path(object_id id) {
     vassert(id.epoch() >= 0, "level zero object has negative epoch: {}", id);
     return cloud_storage_clients::object_key(
       ssx::sformat(
-        "{0}{2:0{1}}/{3}",
+        "{0}{5:0{4}}/{2:0{1}}/{3}",
         level_zero_data_dir_str,
         epoch_digits,
         id.epoch(),
-        id.name));
+        id.name,
+        prefix_digits,
+        id.prefix));
 }
 
 cloud_storage_clients::object_key object_path_factory::level_zero_data_dir() {
@@ -55,6 +57,13 @@ object_path_factory::level_zero_path_to_epoch(std::string_view key) {
           fmt::format("L0 object name missing prefix: {}", key));
     }
     name.remove_prefix(it + std::strlen(level_zero_data_dir_str));
+
+    if (name.size() < prefix_digits + 1) {
+        return std::unexpected(
+          fmt::format("L0 object name is too short: {}", key));
+    }
+    name.remove_prefix(prefix_digits + 1);
+
     if (name.size() < epoch_digits) {
         return std::unexpected(
           fmt::format("L0 object name is too short: {}", key));
