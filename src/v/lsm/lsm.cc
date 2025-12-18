@@ -191,8 +191,16 @@ ss::future<std::optional<iobuf>> database::get(std::string_view target) {
 }
 
 ss::future<iterator> database::create_iterator() {
-    auto iter = co_await _impl->create_iterator(std::nullopt);
+    auto iter = co_await _impl->create_iterator({});
     co_return iterator(std::move(iter));
+}
+
+snapshot database::create_snapshot() {
+    auto snap = _impl->create_snapshot();
+    if (!snap) {
+        return {nullptr, _impl.get()};
+    }
+    return {std::move(*snap), _impl.get()};
 }
 
 write_batch database::create_write_batch() { return write_batch{_impl.get()}; }
@@ -236,7 +244,35 @@ ss::future<std::optional<iobuf>> write_batch::get(std::string_view target) {
 }
 
 ss::future<iterator> write_batch::create_iterator() {
-    auto iter = co_await _db->create_iterator(_batch);
+    auto iter = co_await _db->create_iterator({.memtable = _batch});
+    co_return iterator(std::move(iter));
+}
+
+snapshot::snapshot(std::unique_ptr<db::snapshot> snap, db::impl* db)
+  : _snap(std::move(snap))
+  , _db(db) {}
+snapshot& snapshot::operator=(snapshot&&) noexcept = default;
+snapshot::snapshot(snapshot&&) noexcept = default;
+snapshot::~snapshot() = default;
+
+ss::future<std::optional<iobuf>> snapshot::get(std::string_view target) {
+    if (_snap == nullptr) {
+        co_return std::nullopt;
+    }
+    auto key = internal::key::encode({
+      .key = lsm::user_key_view(target),
+      .seqno = _snap->seqno(),
+      .type = internal::value_type::value,
+    });
+    auto result = co_await _db->get(key);
+    co_return std::move(result).take_value();
+}
+
+ss::future<iterator> snapshot::create_iterator() {
+    if (_snap == nullptr) {
+        co_return iterator(internal::iterator::create_empty());
+    }
+    auto iter = co_await _db->create_iterator({.snapshot = _snap.get()});
     co_return iterator(std::move(iter));
 }
 

@@ -24,6 +24,7 @@ namespace lsm {
 namespace db {
 class impl;
 class memtable;
+class snapshot;
 } // namespace db
 
 namespace internal {
@@ -31,6 +32,7 @@ class iterator;
 } // namespace internal
 
 class iterator;
+class snapshot;
 
 // Options for the database.
 struct options {
@@ -178,10 +180,16 @@ public:
     // this future completes will not be seen by the iterator.
     ss::future<iterator> create_iterator();
 
+    // Create an explicit snapshot of the database.
+    //
+    // The snapshot must not outlive the database being closed.
+    snapshot create_snapshot();
+
     // Create a write batch that can be applied to the the database.
     //
-    // This write batch can only be used with this database and it's lifetime is
-    // tied to this database as well.
+    // This write batch can only be used with this database. It's lifetime is
+    // tied to this database as well, meaning the write batch must not outlive
+    // the database being closed.
     write_batch create_write_batch();
 
 private:
@@ -278,7 +286,7 @@ public:
     // The resulting iterator is safe to use concurrently with additional writes
     // being applied to the batch.
     //
-    // The returned iterator must not be used after the write_batch is applied
+    // The returned iterator must be destroyed before the write_batch is applied
     // to the database.
     ss::future<iterator> create_iterator();
 
@@ -288,6 +296,34 @@ private:
     friend class database;
     ss::lw_shared_ptr<db::memtable> _batch;
     db::impl* _db;
+};
+
+// A snapshot of the database.
+class snapshot {
+public:
+    snapshot(const snapshot&) = delete;
+    snapshot(snapshot&&) noexcept;
+    snapshot& operator=(const snapshot&) = delete;
+    snapshot& operator=(snapshot&&) noexcept;
+    ~snapshot();
+    // Lookup a value in the database snapshot.
+    //
+    // The returned future must finish resolving before the snapshot is
+    // destroyed.
+    ss::future<std::optional<iobuf>> get(std::string_view key);
+
+    // Create an iterator over the database snapshot.
+    //
+    // The snapshot must outlive the returned iterator.
+    ss::future<iterator> create_iterator();
+
+private:
+    snapshot(std::unique_ptr<db::snapshot> snap, db::impl* db);
+
+    friend class database;
+    // nullptr iff the database snapshot is for an empty database.
+    std::unique_ptr<db::snapshot> _snap;
+    db::impl* _db{};
 };
 
 } // namespace lsm

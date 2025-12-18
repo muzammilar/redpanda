@@ -65,6 +65,7 @@ redpanda_cc_library(
     ],
     deps = [
         ":memtable",
+        ":snapshot",
         ":table_cache",
         ":version_set",
         "//src/v/base",
