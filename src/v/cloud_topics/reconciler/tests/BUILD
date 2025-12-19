@@ -66,6 +66,7 @@ redpanda_cc_gtest(
         "//src/v/storage:record_batch_builder",
         "//src/v/test_utils:gtest",
         "//src/v/test_utils:random_bytes",
+        "//src/v/test_utils:scoped_config",
         "@googletest//:gtest",
         "@seastar",
     ],

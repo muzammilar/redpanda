@@ -122,10 +122,6 @@ private:
     chunked_hash_map<model::ntp, ss::shared_ptr<source>> _sources;
 
 private:
-    // Maximum size of an L1 object. With target fill ratio of 0.8, this gives
-    // an effective target object size of 64 MiB.
-    static constexpr size_t max_object_size = 80_MiB;
-
     /*
      * A container for an object in the process of being built.
      * Always requires cleanup via close_builder() and cleanup_staging().
@@ -133,7 +129,7 @@ private:
     struct builder_context {
         std::unique_ptr<l1::staging_file> staging;
         std::unique_ptr<l1::object_builder> builder;
-        size_t size_budget{max_object_size};
+        size_t size_budget{0};
 
         // Close the builder.
         // Should be called before cleanup_staging.

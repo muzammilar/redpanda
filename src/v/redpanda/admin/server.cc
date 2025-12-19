@@ -2038,8 +2038,8 @@ void config_multi_property_validation(
     }
 
     // Validate cloud topics reconciliation intervals
-    auto interval_err
-      = config::validate_cloud_topics_reconciliation_intervals(updated_config);
+    auto interval_err = config::validate_cloud_topics_reconciliation_intervals(
+      updated_config);
     if (interval_err.has_value()) {
         errors[ss::sstring{
           updated_config.cloud_topics_reconciliation_min_interval.name()}]

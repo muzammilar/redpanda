@@ -69,7 +69,8 @@ reconciler::reconciler(l1::io* l1_io, l1::metastore* metastore)
         .cloud_topics_reconciliation_speedup_blend.bind(),
       config::shard_local_cfg()
         .cloud_topics_reconciliation_slowdown_blend.bind(),
-      max_object_size) {}
+      config::shard_local_cfg()
+        .cloud_topics_reconciliation_max_object_size.bind()) {}
 
 ss::future<> reconciler::start() {
     _probe.setup_metrics();
@@ -476,6 +477,8 @@ reconciler::make_context() {
     auto output_stream = stream_fut.get();
     ctx.builder = l1::object_builder::create(
       std::move(output_stream), l1::object_builder::options{});
+    ctx.size_budget
+      = config::shard_local_cfg().cloud_topics_reconciliation_max_object_size();
 
     co_return ctx;
 }
@@ -483,6 +486,8 @@ reconciler::make_context() {
 ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
 reconciler::build_object(
   builder_context& ctx, const chunked_vector<ss::shared_ptr<source>>& sources) {
+    const auto max_size = ctx.size_budget;
+
     chunked_vector<commit_info> metas;
     metas.reserve(sources.size());
     for (const auto& src : sources) {
@@ -493,19 +498,18 @@ reconciler::build_object(
 
         // Enforce the size limit, but always allow one partition in.
         auto current_size = ctx.builder->file_size();
-        if (!metas.empty() && current_size >= max_object_size) {
+        if (!metas.empty() && current_size >= max_size) {
             vlog(
               lg.debug,
               "Stopping object build: size {} >= max {}",
               current_size,
-              max_object_size);
+              max_size);
             break;
         }
         // Beware underflow if the first partition sneaks a batch in over the
         // size limit.
-        ctx.size_budget = current_size >= max_object_size
-                            ? 0
-                            : max_object_size - current_size;
+        ctx.size_budget = current_size >= max_size ? 0
+                                                   : max_size - current_size;
         auto start_offset = kafka::next_offset(src->last_reconciled_offset());
         auto read_result = co_await add_source_to_object(
           ctx, src, start_offset);

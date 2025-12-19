@@ -44,7 +44,7 @@ adaptive_interval make_test_scheduler(
       config::mock_binding<double>(target_fill),
       config::mock_binding<double>(speedup_blend),
       config::mock_binding<double>(slowdown_blend),
-      max_object_size};
+      config::mock_binding<size_t>(max_object_size)};
 }
 
 double interval_ms(const adaptive_interval& scheduler) {
@@ -60,7 +60,8 @@ void stabilize(adaptive_interval& scheduler, double data_rate_mib_per_sec) {
     for (int i = 0; i < many_rounds; i++) {
         double interval_sec = interval_ms(scheduler) / 1000.0;
         double bytes_mib = data_rate_mib_per_sec * interval_sec;
-        size_t bytes = static_cast<size_t>(std::min(bytes_mib, 80.0) * MiB);
+        double max_mib = static_cast<double>(max_object_size) / MiB;
+        size_t bytes = static_cast<size_t>(std::min(bytes_mib, max_mib) * MiB);
         scheduler.adapt(bytes);
     }
 }

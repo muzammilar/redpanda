@@ -4571,6 +4571,14 @@ configuration::configuration()
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       0.4,
       validate_0_to_1_ratio)
+  , cloud_topics_reconciliation_max_object_size(
+      *this,
+      "cloud_topics_reconciliation_max_object_size",
+      "Maximum size in bytes for L1 objects produced by the reconciler. "
+      "With the default target fill ratio of 0.8, this gives an effective "
+      "target object size of 64 MiB.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      80_MiB)
   , cloud_topics_long_term_garbage_collection_interval(
       *this,
       "cloud_topics_long_term_garbage_collection_interval",
