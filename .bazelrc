@@ -86,11 +86,9 @@ build:debug --copt -fsanitize=address,undefined,vptr,function,alignment
 build:debug --linkopt -fsanitize=address,undefined,vptr,function,alignment
 build:debug --linkopt -fsanitize-link-c++-runtime
 build:debug --copt -O1
-build:debug --//bazel:has_sanitizers=True
+build:debug --//bazel:sanitizer_mode=all
 # seastar has to be run with system allocator when using sanitizers
 build:debug --@seastar//:system_allocator=True
-# krb5 is a foreign cc build and needs explicit list of sanitizers to build the shared library
-build:debug --@krb5//:sanitizers=address,undefined,vptr,function,alignment
 
 
 # =================================
