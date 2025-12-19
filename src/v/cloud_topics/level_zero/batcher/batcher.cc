@@ -256,7 +256,9 @@ ss::future<> batcher<Clock>::bg_controller_loop() {
 
         auto list = _stage.pull_write_requests(
           config::shard_local_cfg()
-            .cloud_topics_produce_batching_size_threshold());
+            .cloud_topics_produce_batching_size_threshold(),
+          config::shard_local_cfg()
+            .cloud_topics_produce_cardinality_threshold());
 
         bool complete = list.complete;
 
