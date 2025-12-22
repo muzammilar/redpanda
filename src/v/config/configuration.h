@@ -864,6 +864,8 @@ private:
         return !enable_developmental_unrecoverable_data_corrupting_features()
                   .empty();
     }
+
+    ss::sstring store_name() const override { return "cluster"; }
 };
 
 template<typename T>
