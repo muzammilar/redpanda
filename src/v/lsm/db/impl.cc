@@ -550,9 +550,23 @@ ss::future<> impl::remove_obsolete_files() {
         if (file_handle.epoch > _opts->database_epoch) {
             continue;
         }
+        auto now = ss::lowres_clock::now();
+        auto it = _pending_file_deletes.find(file_handle);
+        if (it == _pending_file_deletes.end()) {
+            it = _pending_file_deletes.insert_or_assign(
+              it,
+              file_handle,
+              now + absl::ToChronoNanoseconds(_opts->file_deletion_delay));
+        }
+        if (now < it->second) {
+            continue;
+        }
+        _pending_file_deletes.erase(it);
         co_await _table_cache->evict(file_handle);
         co_await _persistence.data->remove_file(file_handle);
     }
+    // TODO(rockwood): Also remove files that we don't see anymore (ie. was
+    // deleted by some other process)
 }
 
 std::optional<internal::sequence_number> impl::max_persisted_seqno() const {

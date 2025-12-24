@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "absl/time/time.h"
 #include "base/seastarx.h"
 #include "lsm/io/persistence.h"
 #include "utils/named_type.h"
@@ -135,6 +136,12 @@ struct options {
     //
     // If empty all levels are uncompressed.
     std::vector<compression_type> compression_by_level;
+
+    // The delay at which to wait until actually deleting files.
+    //
+    // If set to zero, then files are immediately GC'd after new manifest files
+    // are written.
+    absl::Duration file_deletion_delay;
 };
 
 class write_batch;

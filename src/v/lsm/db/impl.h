@@ -12,6 +12,7 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "container/chunked_hash_map.h"
 #include "lsm/core/internal/iterator.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/options.h"
@@ -124,6 +125,9 @@ private:
     bool _background_work_running = false;
     std::optional<ss::future<>> _background_work;
     snapshot_list _snapshots;
+
+    chunked_hash_map<internal::file_handle, ss::lowres_clock::time_point>
+      _pending_file_deletes;
 };
 
 } // namespace lsm::db

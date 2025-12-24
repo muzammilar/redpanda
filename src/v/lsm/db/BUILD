@@ -68,6 +68,7 @@ redpanda_cc_library(
         ":version_set",
         "//src/v/base",
         "//src/v/bytes:iobuf",
+        "//src/v/container:chunked_hash_map",
         "//src/v/lsm/core:exceptions",
         "//src/v/lsm/core/internal:files",
         "//src/v/lsm/core/internal:iterator",
