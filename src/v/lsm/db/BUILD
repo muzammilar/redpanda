@@ -227,3 +227,26 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "gc_actor",
+    srcs = [
+        "gc_actor.cc",
+    ],
+    hdrs = [
+        "gc_actor.h",
+    ],
+    implementation_deps = [
+        "//src/v/lsm/core/internal:logger",
+    ],
+    deps = [
+        ":table_cache",
+        "//src/v/base",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/lsm/core/internal:files",
+        "//src/v/lsm/core/internal:options",
+        "//src/v/lsm/io:persistence",
+        "//src/v/ssx:actor",
+        "@seastar",
+    ],
+)
