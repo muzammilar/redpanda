@@ -142,4 +142,64 @@ private:
     bool _done{false};
 };
 
+/// \brief Individual HTTP response from a multipart response body
+///
+/// Represents a single HTTP response extracted from a multipart response.
+/// Each subresponse contains its own HTTP status code, headers, and body,
+/// allowing batch operations to return individual results for each operation
+/// within a single HTTP response. This is used to parse individual delete
+/// results from cloud storage batch operations.
+struct multipart_subresponse {
+    using status = boost::beast::http::status;
+
+    /// \brief Get the HTTP status code of this subresponse
+    ///
+    /// \return The HTTP status code (e.g., 200 OK, 404 Not Found)
+    status result() const;
+
+    /// \brief Check if this subresponse indicates success
+    ///
+    /// \return True if the status code is in the 2xx range or 404
+    bool is_ok() const;
+
+    /// \brief Extract an error message from the response headers if one is
+    /// present.
+    ///
+    /// \param error_code_name The name of the error code field to extract
+    ///        (e.g., "x-ms-error-code" in an ABS response)
+    /// \return The error message, or nullopt if not found or not an error
+    std::optional<ss::sstring> error(std::string_view error_code_name) const;
+
+    /// \brief Extract an error message from the response body if one is present
+    ///
+    /// Note that this function is non-const because the transformation requires
+    /// a share from a stored body.
+    ///
+    /// \param Transformation function to extract some string from the body,
+    ///        (e.g. a known field from a raw json object)
+    ///  \return The extracted error message, or nullopt if not an error
+    std::optional<ss::sstring> error(const std::function<ss::sstring(iobuf)>&);
+
+    /// \brief Parse a subresponse from an iobuf
+    ///
+    /// Parses a single HTTP response (with headers and body) from the given
+    /// parser. The parser should be positioned at the start of an HTTP
+    /// response within a multipart response part.
+    ///
+    /// \param in Parser positioned at the start of an HTTP response
+    /// \return Parsed subresponse structure
+    static multipart_subresponse from(iobuf_parser& in);
+
+private:
+    static std::vector<boost::asio::const_buffer>
+    iobuf_to_constbufseq(const iobuf& buf);
+    using parser_t = boost::beast::http::response_parser<http::iobuf_body>;
+    using response_t = parser_t::value_type;
+    std::optional<response_t> _response{};
+    size_t _noctets{0};
+    boost::beast::error_code _ec{};
+    bool _header_done{false};
+    iobuf _body;
+};
+
 } // namespace cloud_storage_clients::util
