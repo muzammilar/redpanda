@@ -111,4 +111,35 @@ private:
     field_map_t _fields;
 };
 
+/// \brief Parser for multipart HTTP response bodies
+///
+/// Parses HTTP responses with multipart content encoding, where multiple
+/// subresponses are separated by boundary delimiters. This is used by cloud
+/// storage APIs (like ABS batch delete) to return multiple operation results
+/// in a single HTTP response. The parser extracts individual parts between
+/// boundaries, allowing each subresponse to be processed independently.
+struct multipart_response_parser {
+    /// \param b The complete multipart response body
+    /// \param delim The boundary delimiter string (with leading dashes)
+    explicit multipart_response_parser(iobuf b, ss::sstring delim);
+
+    /// \brief Extract the next part from the multipart response
+    ///
+    /// Returns the content of the next part in the multipart response,
+    /// excluding the boundary markers. Call repeatedly to iterate through
+    /// all parts in the response.
+    ///
+    /// \return The next part's content, or nullopt if all parts have been
+    ///         consumed or the final boundary has been reached
+    std::optional<iobuf> get_part();
+
+private:
+    void advance_to_first_boundary();
+    iobuf _buffer;
+    iobuf_const_parser _parser;
+    ss::sstring _delim;
+    bool _found_first{false};
+    bool _done{false};
+};
+
 } // namespace cloud_storage_clients::util
