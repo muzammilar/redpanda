@@ -85,6 +85,17 @@ public:
     make_delete_objects_request(
       const plain_bucket_name& name, const chunked_vector<object_key>& keys);
 
+    /// \brief Create a GCS batch delete request header and body
+    /// Uses the GCS batch API endpoint with multipart/mixed format
+    /// https://cloud.google.com/storage/docs/batch
+    ///
+    /// \param name of the bucket
+    /// \param keys to delete
+    /// \return the header and an the body as an input_stream
+    result<std::tuple<http::client::request_header, ss::input_stream<char>>>
+    make_gcs_batch_delete_request(
+      const plain_bucket_name& name, const chunked_vector<object_key>& keys);
+
     /// \brief Initialize http header for 'ListObjectsV2' request
     ///
     /// \param name of the bucket
@@ -282,6 +293,17 @@ public:
       const ss::abort_source& as,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>
         apply_credentials);
+
+    ss::future<result<delete_objects_result, error_outcome>> delete_objects(
+      const plain_bucket_name& bucket,
+      const chunked_vector<object_key>& keys,
+      ss::lowres_clock::duration timeout) override;
+
+private:
+    ss::future<delete_objects_result> do_delete_objects(
+      const plain_bucket_name& bucket,
+      const chunked_vector<object_key>& keys,
+      ss::lowres_clock::duration timeout);
 };
 
 std::variant<client::delete_objects_result, rest_error_response>
