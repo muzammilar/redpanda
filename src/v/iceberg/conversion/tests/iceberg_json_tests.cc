@@ -341,6 +341,48 @@ TEST(JsonSchema, PrimitiveTypesMixed) {
       result.error().what());
 }
 
+TEST(JsonSchema, ThreeWayAmbiguousUnion) {
+    constexpr std::string_view schema = R"({
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": ["boolean", "integer", "string"]
+    })";
+
+    auto result = to_iceberg_type(schema);
+    ASSERT_TRUE(result.has_error());
+    ASSERT_STREQ(
+      "Type constraint is not sufficient for transforming. Types: [boolean, "
+      "integer, string]",
+      result.error().what());
+}
+
+TEST(JsonSchema, NullableAmbiguousUnion) {
+    constexpr std::string_view schema = R"({
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": ["null", "integer", "string"]
+    })";
+
+    auto result = to_iceberg_type(schema);
+    ASSERT_TRUE(result.has_error());
+    ASSERT_STREQ(
+      "Type constraint is not sufficient for transforming. Types: [null, "
+      "integer, string]",
+      result.error().what());
+}
+
+TEST(JsonSchema, ContainerTypeUnion) {
+    constexpr std::string_view schema = R"({
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": ["object", "array"]
+    })";
+
+    auto result = to_iceberg_type(schema);
+    ASSERT_TRUE(result.has_error());
+    ASSERT_STREQ(
+      "Type constraint is not sufficient for transforming. Types: [object, "
+      "array]",
+      result.error().what());
+}
+
 TEST(JsonSchema, Nested) {
     auto result = to_iceberg_type(nested_schema);
     ASSERT_TRUE(result.has_value()) << result.error().what();
@@ -520,6 +562,24 @@ TEST(JsonSchema, ListWithItem) {
       "$id": "https://example.com/root.json",
       "type": "array",
       "items": { "type": "string" }
+    })";
+    auto result = to_iceberg_type(schema);
+    ASSERT_TRUE(result.has_value()) << result.error().what();
+
+    ASSERT_EQ(result.value().fields.size(), 1);
+    ASSERT_TRUE(field_matches(
+      result.value().fields[0],
+      "root",
+      iceberg::list_type::create(
+        0, iceberg::field_required::yes, iceberg::string_type{}),
+      iceberg::field_required::no));
+}
+
+TEST(JsonSchema, ListWithNullableItem) {
+    constexpr std::string_view schema = R"({
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "array",
+      "items": { "type": ["null", "string"] }
     })";
     auto result = to_iceberg_type(schema);
     ASSERT_TRUE(result.has_value()) << result.error().what();
@@ -748,6 +808,25 @@ TEST(JsonSchema, Format) {
         ASSERT_TRUE(field_matches(
           result.value().fields[0], "root", type, iceberg::field_required::no));
     }
+}
+
+TEST(JsonSchema, FormatIgnoredOnNonStringTypes) {
+    // Format annotations should be silently ignored on non-string types
+    // per JSON Schema spec (format is only meaningful for strings).
+    constexpr std::string_view schema = R"({
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "number",
+      "format": "date"
+    })";
+
+    auto result = to_iceberg_type(schema);
+    ASSERT_TRUE(result.has_value()) << result.error().what();
+    ASSERT_EQ(result.value().fields.size(), 1);
+    ASSERT_TRUE(field_matches(
+      result.value().fields[0],
+      "root",
+      iceberg::double_type{},
+      iceberg::field_required::no));
 }
 
 TEST(JsonSchema, BannedKeywords) {
