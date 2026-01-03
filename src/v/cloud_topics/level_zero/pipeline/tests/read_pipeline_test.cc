@@ -130,3 +130,132 @@ TEST_CORO(read_pipeline_test, interleaving_stages_bug) {
 
     ASSERT_EQ_CORO(accessor.read_requests_pending(0), true);
 }
+
+TEST_CORO(read_pipeline_test, oversized_request) {
+    // This test verifies that get_fetch_requests returns at least one
+    // request even if it exceeds the max_bytes limit, to prevent pipeline
+    // stalls with oversized requests.
+    cloud_topics::l0::read_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::read_pipeline_accessor accessor{
+      .pipeline = &pipeline,
+    };
+
+    auto stage = pipeline.register_read_pipeline_stage();
+    const auto timeout = ss::manual_clock::now() + 10s;
+
+    // Create requests with different sizes
+    std::vector<
+      std::unique_ptr<cloud_topics::l0::read_request<ss::manual_clock>>>
+      requests;
+
+    // First request is oversized (10000 bytes)
+    cloud_topics::l0::dataplane_query query1;
+    query1.output_size_estimate = 10000;
+    auto req1
+      = std::make_unique<cloud_topics::l0::read_request<ss::manual_clock>>(
+        model::controller_ntp,
+        std::move(query1),
+        timeout,
+        &pipeline.get_root_rtc());
+    requests.push_back(std::move(req1));
+
+    // Second request is normal size (1000 bytes)
+    cloud_topics::l0::dataplane_query query2;
+    query2.output_size_estimate = 1000;
+    auto req2
+      = std::make_unique<cloud_topics::l0::read_request<ss::manual_clock>>(
+        model::controller_ntp,
+        std::move(query2),
+        timeout,
+        &pipeline.get_root_rtc());
+    requests.push_back(std::move(req2));
+
+    // Add both requests to stage
+    accessor.add_request_with_stage(*requests[0], stage.id());
+    accessor.add_request_with_stage(*requests[1], stage.id());
+
+    co_await ss::yield();
+
+    ASSERT_EQ_CORO(accessor.read_requests_pending(2), true);
+
+    // Try to get requests with max_bytes = 5000 (less than first request)
+    // Should still get the first request to avoid stalling
+    auto result = accessor.get_fetch_requests(5000, stage.id());
+
+    // Should return exactly 1 request (the oversized one)
+    ASSERT_EQ_CORO(result.requests.size(), 1);
+    result.requests.front().set_value(
+      cloud_topics::l0::dataplane_query_result{});
+
+    // Second request should still be pending
+    ASSERT_EQ_CORO(accessor.read_requests_pending(1), true);
+
+    // Get the second request
+    auto result2 = accessor.get_fetch_requests(
+      std::numeric_limits<size_t>::max(), stage.id());
+    ASSERT_EQ_CORO(result2.requests.size(), 1);
+    result2.requests.front().set_value(
+      cloud_topics::l0::dataplane_query_result{});
+
+    ASSERT_EQ_CORO(accessor.read_requests_pending(0), true);
+}
+
+TEST_CORO(read_pipeline_test, multiple_requests_within_limit) {
+    // This test verifies that get_fetch_requests returns multiple requests
+    // when they fit within the size limit.
+    cloud_topics::l0::read_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::read_pipeline_accessor accessor{
+      .pipeline = &pipeline,
+    };
+
+    auto stage = pipeline.register_read_pipeline_stage();
+    const auto timeout = ss::manual_clock::now() + 10s;
+
+    // Create 3 requests with size 1000 each
+    std::vector<
+      std::unique_ptr<cloud_topics::l0::read_request<ss::manual_clock>>>
+      requests;
+
+    for (int i = 0; i < 3; i++) {
+        cloud_topics::l0::dataplane_query query;
+        query.output_size_estimate = 1000;
+        auto req
+          = std::make_unique<cloud_topics::l0::read_request<ss::manual_clock>>(
+            model::controller_ntp,
+            std::move(query),
+            timeout,
+            &pipeline.get_root_rtc());
+        requests.push_back(std::move(req));
+    }
+
+    // Add all requests to stage
+    for (auto& req : requests) {
+        accessor.add_request_with_stage(*req, stage.id());
+    }
+
+    co_await ss::yield();
+
+    ASSERT_EQ_CORO(accessor.read_requests_pending(3), true);
+
+    // Get requests with max_bytes = 2500 (should get 2 requests, not 3)
+    auto result = accessor.get_fetch_requests(2500, stage.id());
+
+    // Should return 2 requests (total 2000 bytes, within limit)
+    ASSERT_EQ_CORO(result.requests.size(), 2);
+
+    for (auto& req : result.requests) {
+        req.set_value(cloud_topics::l0::dataplane_query_result{});
+    }
+
+    // One request should still be pending
+    ASSERT_EQ_CORO(accessor.read_requests_pending(1), true);
+
+    // Get the last request
+    auto result2 = accessor.get_fetch_requests(
+      std::numeric_limits<size_t>::max(), stage.id());
+    ASSERT_EQ_CORO(result2.requests.size(), 1);
+    result2.requests.front().set_value(
+      cloud_topics::l0::dataplane_query_result{});
+
+    ASSERT_EQ_CORO(accessor.read_requests_pending(0), true);
+}

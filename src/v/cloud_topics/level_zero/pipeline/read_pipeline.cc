@@ -176,9 +176,9 @@ read_pipeline<Clock>::get_fetch_requests(
           "get_fetch_requests processing req for {}, size estimate: {}",
           it->ntp,
           acc_size);
-        if (acc_size >= max_bytes) {
-            // Include last element
-            it++;
+        // Always include the first request even if it exceeds max_bytes
+        // to avoid stalling the pipeline with oversized requests
+        if (acc_size >= max_bytes && !result.requests.empty()) {
             break;
         }
         auto& el = *it;
