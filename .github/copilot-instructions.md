@@ -19,6 +19,7 @@ It uses extensively the thread-per-core model and asynchronous (coroutines, futu
   - `tools/`: Development and helper scripts
   - `tests/`: Test suites
   - `conf/`: Configuration files
+  - `proto/`: Protobuf definitions for Redpanda services and APIs
   - `.github/`, `.buildkite/`: CI/workflow automation
 - **Documentation:** [Docs site](https://redpanda.com/documentation) and `docs/`.
 
@@ -95,6 +96,19 @@ It uses extensively the thread-per-core model and asynchronous (coroutines, futu
 - `.bazelignore`, `.bazelrc`, `.bazelversion`, `BUILD`, `MODULE.bazel`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `LICENSES/`, `bazel/`, `src/`, `tests/`, `conf/`, `tools/`, `.github/`, `.buildkite/`, etc.
 
 ---
+
+## Protobuf-Specific Instructions
+
+### Protobuf Coding Guidelines
+
+Follow the guidelines provided in `proto/redpanda/README.md` for basic Protobuf standards.
+
+### Protobuf Build & Environment
+- **Primary Protobuf code lives in `proto/`.**
+- **Formatting:** `.clang-format` in the root directory is enforced. Always run `clang-format` before committing changes or submitting a PR:
+  ```bash
+  bazel run //tools:clang_format
+  ```
 
 ## C++-Specific Instructions
 
