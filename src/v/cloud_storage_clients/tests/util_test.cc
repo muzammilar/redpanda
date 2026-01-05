@@ -495,3 +495,313 @@ TEST(FullMultipartParsing, WithErrors) {
     EXPECT_EQ(content_ids[2].value(), 2);
     EXPECT_TRUE(is_ok_results[2]);
 }
+
+// ----------------------------------------------------------------------------
+// Malformed MIME header tests
+// ----------------------------------------------------------------------------
+
+TEST(MimeHeaderMalformed, MalformedHeaders) {
+    using namespace cloud_storage_clients;
+
+    // Header without colon separator
+    std::string_view mime_data = "Content-Type application/http\r\n"
+                                 "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Missing separator, parser will throw
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, MissingSeparatorSpace) {
+    using namespace cloud_storage_clients;
+
+    // Header with colon but missing space after it
+    std::string_view mime_data = "Content-Type:application/http\r\n"
+                                 "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Should parse but the value won't match due to missing space
+    auto header = util::mime_header::from(parser);
+    auto content_type = header.get(boost::beast::http::field::content_type);
+    // The field won't be found because we look for ": " separator
+    EXPECT_FALSE(content_type.has_value());
+}
+
+TEST(MimeHeaderMalformed, OnlyLfLineEndings) {
+    using namespace cloud_storage_clients;
+
+    // Using LF only instead of CRLF (malformed per HTTP spec)
+    std::string_view mime_data = "Content-Type: application/http\n"
+                                 "Content-ID: 10\n"
+                                 "\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Should throw because parser expects CRLF
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, MixedLineEndings) {
+    using namespace cloud_storage_clients;
+
+    // Mix of CRLF and LF
+    std::string_view mime_data = "Content-Type: application/http\r\n"
+                                 "Content-ID: 10\n" // LF only
+                                 "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Should throw due to inconsistent line endings
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, ExceedsMaxBuffer) {
+    using namespace cloud_storage_clients;
+
+    // Create a header that exceeds max_buf (1024 bytes)
+    std::string long_value(1100, 'x');
+    std::string mime_data = fmt::format(
+      "Content-Type: {}\r\n"
+      "\r\n",
+      long_value);
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Should throw due to exceeding buffer size
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, MissingFinalCrlf) {
+    using namespace cloud_storage_clients;
+
+    // Header without final CRLF CRLF (truncated)
+    std::string_view mime_data = "Content-Type: application/http\r\n"
+                                 "Content-ID: 5\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Parser consumes all data but doesn't find the final CRLF CRLF
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+    EXPECT_EQ(parser.bytes_left(), 0);
+}
+
+TEST(MimeHeaderMalformed, CrWithoutLf) {
+    using namespace cloud_storage_clients;
+
+    // CR not followed by LF
+    std::string_view mime_data = "Content-Type: application/http\rX\n"
+                                 "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Should throw due to malformed line ending
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, LfWithoutCr) {
+    using namespace cloud_storage_clients;
+
+    // LF not preceded by CR
+    std::string_view mime_data = "Content-Type: application/http\n\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    // Should throw due to malformed line ending
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, MultipleColons) {
+    using namespace cloud_storage_clients;
+
+    // Header with multiple colons (valid HTTP - should take first)
+    std::string_view mime_data = "Content-Type: text/plain: with: colons\r\n"
+                                 "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    auto header = util::mime_header::from(parser);
+    auto content_type = header.get(boost::beast::http::field::content_type);
+    EXPECT_TRUE(content_type.has_value());
+    // Should include everything after first ": "
+    EXPECT_TRUE(content_type.value().contains("text/plain: with: colons"));
+}
+
+TEST(MimeHeaderMalformed, ParseEmpty) {
+    using namespace cloud_storage_clients;
+
+    std::string_view mime_data = "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+TEST(MimeHeaderMalformed, ParseLeadingCrlf) {
+    using namespace cloud_storage_clients;
+
+    std::string_view mime_data = "\r\n"
+                                 "Content-Type: application/http\r\n"
+                                 "\r\n";
+
+    auto buf = iobuf::from(mime_data);
+    iobuf_parser parser(std::move(buf));
+
+    EXPECT_THROW(util::mime_header::from(parser), std::runtime_error);
+}
+
+// ----------------------------------------------------------------------------
+// Malformed multipart boundary tests
+// ----------------------------------------------------------------------------
+
+TEST(MultipartMalformed, MissingStartBoundary) {
+    using namespace cloud_storage_clients;
+
+    // Content without opening boundary
+    std::string_view multipart_data = "Content-Type: text/plain\r\n"
+                                      "\r\n"
+                                      "Some content\r\n"
+                                      "--boundary--\r\n";
+
+    auto buf = iobuf::from(multipart_data);
+
+    util::multipart_response_parser parser(
+      std::move(buf), ss::sstring("--boundary"));
+
+    // Should not find any parts without start boundary
+    auto part = parser.get_part();
+    EXPECT_FALSE(part.has_value());
+}
+
+TEST(MultipartMalformed, TruncatedBoundary) {
+    using namespace cloud_storage_clients;
+
+    // Boundary cut off in the middle
+    std::string_view multipart_data = "--boundary\r\n"
+                                      "Content\r\n"
+                                      "\r\n"
+                                      "--boun"; // Truncated
+
+    auto buf = iobuf::from(multipart_data);
+
+    util::multipart_response_parser parser(
+      std::move(buf), ss::sstring("--boundary"));
+
+    // Should return nullopt due to truncation
+    auto part = parser.get_part();
+    EXPECT_FALSE(part.has_value());
+}
+
+TEST(MultipartMalformed, BoundaryWithExtraDashes) {
+    using namespace cloud_storage_clients;
+
+    // Boundary with extra dashes
+    std::string_view multipart_data = "---boundary\r\n" // Three dashes
+                                      "Content\r\n"
+                                      "\r\n"
+                                      "--boundary--\r\n";
+
+    auto buf = iobuf::from(multipart_data);
+
+    util::multipart_response_parser parser(
+      std::move(buf), ss::sstring("--boundary"));
+
+    // Parser expects exactly "--boundary" at the very start of the buffer
+    auto part = parser.get_part();
+    EXPECT_FALSE(part.has_value());
+}
+
+TEST(MultipartMalformed, MissingCrlfBeforeBoundary) {
+    using namespace cloud_storage_clients;
+
+    // Missing CRLF before boundary delimiter
+    std::string_view multipart_data = "--boundary\r\n"
+                                      "First part\r\n"
+                                      "--boundary\r\n" // No CRLF before this
+                                      "Second part\r\n"
+                                      "\r\n"
+                                      "--boundary--\r\n";
+
+    auto buf = iobuf::from(multipart_data);
+
+    util::multipart_response_parser parser(
+      std::move(buf), ss::sstring("--boundary"));
+
+    // Missing CRLF before boundary is equivalent to finding the boundary in the
+    // message, which is illegal per RFC 2046
+    auto part1 = parser.get_part();
+    EXPECT_FALSE(part1.has_value());
+}
+
+TEST(MultipartMalformed, BoundaryInContent) {
+    using namespace cloud_storage_clients;
+
+    // Boundary string appears in content
+    // NOTE: Multipart parsers cannot distinguish between boundary delimiters
+    // and boundary strings in content. This is why RFC 2046 requires that
+    // boundaries must not appear in the content, or content must be encoded.
+    std::string_view multipart_data = "--boundary\r\n"
+                                      "Content-Type: text/plain\r\n"
+                                      "\r\n"
+                                      "This contains --boundary in text\r\n"
+                                      "--boundary--\r\n";
+
+    auto buf = iobuf::from(multipart_data);
+
+    util::multipart_response_parser parser(
+      std::move(buf), ss::sstring("--boundary"));
+
+    // Parser should fail when the boundary appears in the message
+    EXPECT_FALSE(parser.get_part().has_value());
+}
+
+TEST(MultipartMalformed, EmptyBoundary) {
+    using namespace cloud_storage_clients;
+
+    std::string_view multipart_data = "--boundary\r\n"
+                                      "Content\r\n"
+                                      "--boundary--\r\n";
+
+    auto buf = iobuf::from(multipart_data);
+
+    // Empty boundary string
+    util::multipart_response_parser parser(std::move(buf), ss::sstring(""));
+
+    // Should not find parts with empty boundary
+    auto part = parser.get_part();
+    EXPECT_FALSE(part.has_value());
+}
+
+TEST(MultipartMalformed, OnlyEndBoundary) {
+    using namespace cloud_storage_clients;
+
+    // Only end boundary, no opening boundary
+    std::string_view multipart_data = "--boundary--\r\n";
+
+    auto buf = iobuf::from(multipart_data);
+
+    util::multipart_response_parser parser(
+      std::move(buf), ss::sstring("--boundary"));
+
+    // Should not find any parts
+    auto part = parser.get_part();
+    EXPECT_FALSE(part.has_value());
+}
+
+// NOTE: multipart_subresponse is effectively a thin wrapper around beast
+// request parsers, so we rely on the correctness (and known limitations) of
+// their implementation rather than any limited edge case testing we could
+// accomplish here. As long as multipart_response_parser returns iobuf parts
+// that themselves contain properly trimmed HTTP responses (header + body w/
+// correct line endings), then multipart_subresponse should work as expected.
