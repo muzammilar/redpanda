@@ -383,7 +383,7 @@ make_credentials(const cloud_storage_clients::s3_configuration& cfg) {
 /// testing paths and listening.
 configured_test_pair
 started_client_and_server(const cloud_storage_clients::s3_configuration& conf) {
-    auto transport_conf = build_transport_configuration(conf).get();
+    auto transport_conf = build_transport_configuration(conf, nullptr);
     auto client = ss::make_shared<cloud_storage_clients::s3_client>(
       nullptr, conf, transport_conf, conf.make_probe(), make_credentials(conf));
     auto server = ss::make_shared<ss::httpd::http_server_control>();

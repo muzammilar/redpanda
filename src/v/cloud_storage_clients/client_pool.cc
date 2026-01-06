@@ -171,7 +171,9 @@ ss::future<> client_pool::accept_self_configure_result(
 
 ss::future<> client_pool::start(
   std::optional<std::reference_wrapper<stop_signal>> application_stop_signal) {
-    _transport_config = co_await build_transport_configuration(_config);
+    _tls_credentials = co_await build_tls_credentials(_config);
+    _transport_config = build_transport_configuration(
+      _config, _tls_credentials);
 
     if (ss::this_shard_id() == self_config_shard) {
         ssx::spawn_with_gate(

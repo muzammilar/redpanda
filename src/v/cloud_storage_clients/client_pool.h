@@ -250,6 +250,7 @@ private:
     const size_t _capacity;
 
     client_configuration _config;
+    ss::shared_ptr<ss::tls::certificate_credentials> _tls_credentials;
     net::base_transport::configuration _transport_config;
 
     ss::shared_ptr<client_probe> _probe;
