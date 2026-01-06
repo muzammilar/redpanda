@@ -898,6 +898,7 @@ health_monitor_backend::collect_current_node_health() {
 
     auto drain_status = co_await _drain_manager.local().status();
     auto topics = co_await collect_topic_status();
+    auto node_liveness_report = collect_node_liveness_report();
 
     auto [it, _] = _status.try_emplace(id);
     it->second.is_alive = alive::yes;
@@ -908,7 +909,7 @@ health_monitor_backend::collect_current_node_health() {
       std::move(local_state),
       std::move(topics),
       std::move(drain_status),
-      {}};
+      std::move(node_liveness_report)};
 }
 ss::future<result<node_health_report_ptr>>
 health_monitor_backend::get_current_node_health() {
@@ -1053,6 +1054,30 @@ health_monitor_backend::collect_topic_status() {
     }
 
     co_return topics;
+}
+
+node_liveness_report health_monitor_backend::collect_node_liveness_report() {
+    const auto now = rpc::clock_type::now();
+    absl::flat_hash_map<model::node_id, rpc::clock_type::duration>
+      node_to_last_seen{};
+    auto node_status_range
+      = _members.local().node_ids()
+        | std::ranges::views::transform([this](model::node_id node_id) {
+              return _node_status_table.local().get_node_status(node_id);
+          })
+        | std::ranges::views::filter(
+          [](auto maybe_node_status) { return maybe_node_status.has_value(); })
+        | std::ranges::views::transform(
+          [](auto maybe_node_status) { return *maybe_node_status; });
+
+    std::ranges::for_each(
+      std::move(node_status_range),
+      [&node_to_last_seen, &now](node_status node_status) {
+          node_to_last_seen.emplace(
+            node_status.node_id, now - node_status.last_seen);
+      });
+    return node_liveness_report{
+      {.node_id_to_last_seen = std::move(node_to_last_seen)}};
 }
 
 std::chrono::milliseconds health_monitor_backend::max_metadata_age() {

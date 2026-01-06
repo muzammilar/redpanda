@@ -168,6 +168,9 @@ private:
 
     ss::future<chunked_vector<topic_status>> collect_topic_status();
 
+    // get the status info of all nodes which are past auto decommission timeout
+    node_liveness_report collect_node_liveness_report();
+
     result<node_health_report>
       process_node_reply(model::node_id, result<get_node_health_reply>);
 
