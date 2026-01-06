@@ -42,11 +42,19 @@ public:
     seastar::future<std::expected<
       cloud_storage_clients::client::list_bucket_result,
       cloud_storage_clients::error_outcome>>
-    list_objects(seastar::abort_source* as) override {
+    list_objects(
+      seastar::abort_source* as,
+      std::optional<ss::sstring> continuation_token) override {
         chunked_vector<cloud_storage_clients::client::list_bucket_item> keep;
         co_await seastar::sleep(cfg_->list_cost);
         auto lu = co_await list_mtx_.get_units(*as);
         for (const auto& object : *listed_) {
+            if (continuation_token.has_value()) {
+                if (object.key == continuation_token) {
+                    continuation_token.reset();
+                }
+                continue;
+            }
             auto not_deleted = true;
             {
                 auto du = co_await delete_mtx_.get_units(*as);
@@ -60,7 +68,10 @@ public:
             }
         }
 
+        auto continuation = keep.empty() ? ss::sstring{} : keep.back().key;
+
         co_return cloud_storage_clients::client::list_bucket_result{
+          .next_continuation_token = std::move(continuation),
           .contents = std::move(keep),
         };
     }

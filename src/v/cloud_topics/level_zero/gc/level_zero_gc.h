@@ -162,7 +162,10 @@ public:
         virtual seastar::future<std::expected<
           cloud_storage_clients::client::list_bucket_result,
           cloud_storage_clients::error_outcome>>
-        list_objects(seastar::abort_source*) = 0;
+        list_objects(
+          seastar::abort_source*,
+          std::optional<ss::sstring> continuation_token = std::nullopt)
+          = 0;
 
         virtual seastar::future<std::expected<void, cloud_io::upload_result>>
         delete_objects(

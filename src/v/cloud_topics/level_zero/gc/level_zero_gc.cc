@@ -37,10 +37,18 @@ public:
     seastar::future<std::expected<
       cloud_storage_clients::client::list_bucket_result,
       cloud_storage_clients::error_outcome>>
-    list_objects(seastar::abort_source* asrc) override {
+    list_objects(
+      seastar::abort_source* asrc,
+      std::optional<ss::sstring> continuation_token) override {
         retry_chain_node rtc(*asrc, timeout, backoff);
         auto res = co_await remote_->list_objects(
-          bucket_, rtc, object_path_factory::level_zero_data_dir());
+          bucket_,
+          rtc,
+          object_path_factory::level_zero_data_dir(),
+          std::nullopt /*delimiter*/,
+          std::nullopt /*item_filter*/,
+          std::nullopt /*max_keys*/,
+          std::move(continuation_token));
         if (res.has_value()) {
             co_return std::move(res).assume_value();
         }
