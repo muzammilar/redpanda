@@ -15,6 +15,7 @@
 #include "cloud_storage_clients/client.h"
 #include "cloud_storage_clients/client_probe.h"
 #include "cloud_storage_clients/credential_manager.h"
+#include "cloud_storage_clients/upstream_registry.h"
 #include "container/intrusive_list_helpers.h"
 #include "ssx/watchdog.h"
 #include "utils/stop_signal.h"
@@ -103,6 +104,8 @@ public:
 
     /// C-tor
     ///
+    /// \param registry upstream registry to obtain upstreams from for creating
+    /// clients
     /// \param size is a size of the pool
     /// \param conf is a client configuration
     /// \param policy controls what happens when the pool is empty (wait or try
@@ -110,6 +113,7 @@ public:
     /// \param application_abort_source abort source which can be used to stop
     /// Redpanda gracefully
     client_pool(
+      upstream_registry& registry,
       size_t size,
       client_configuration conf,
       client_pool_overdraft_policy policy
@@ -245,6 +249,8 @@ private:
     ///  Wait for credentials to be acquired. Once credentials are acquired,
     ///  based on the policy, optionally wait for client pool to initialize.
     ss::future<> wait_for_credentials();
+
+    [[maybe_unused]] upstream_registry& _upstreams;
 
     /// Configured capacity per shard
     const size_t _capacity;

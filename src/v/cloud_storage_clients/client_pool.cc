@@ -39,8 +39,12 @@ constexpr auto pool_ready_timeout = 15s;
 namespace cloud_storage_clients {
 
 client_pool::client_pool(
-  size_t size, client_configuration conf, client_pool_overdraft_policy policy)
-  : _capacity(size)
+  upstream_registry& registry,
+  size_t size,
+  client_configuration conf,
+  client_pool_overdraft_policy policy)
+  : _upstreams(registry)
+  , _capacity(size)
   , _config(std::move(conf))
   , _probe(std::visit([](auto&& p) { return p.make_probe(); }, _config))
   , _policy(policy)
