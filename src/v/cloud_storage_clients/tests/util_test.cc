@@ -147,8 +147,8 @@ TEST(MultipartParser, SinglePart) {
     EXPECT_TRUE(part1.has_value());
 
     auto content = part1.value().linearize_to_string();
-    EXPECT_TRUE(content.contains("Content-Type: text/plain"));
-    EXPECT_TRUE(content.contains("Hello World"));
+    EXPECT_THAT(content, testing::HasSubstr("Content-Type: text/plain"));
+    EXPECT_THAT(content, testing::HasSubstr("Hello World"));
 
     // Should be no more parts
     auto part2 = parser.get_part();
@@ -191,9 +191,12 @@ TEST(MultipartParser, MultipleParts) {
     EXPECT_TRUE(part3.has_value());
 
     // Verify content
-    EXPECT_TRUE(part1.value().linearize_to_string().contains("First part"));
-    EXPECT_TRUE(part2.value().linearize_to_string().contains("Second part"));
-    EXPECT_TRUE(part3.value().linearize_to_string().contains("Third part"));
+    EXPECT_THAT(
+      part1.value().linearize_to_string(), testing::HasSubstr("First part"));
+    EXPECT_THAT(
+      part2.value().linearize_to_string(), testing::HasSubstr("Second part"));
+    EXPECT_THAT(
+      part3.value().linearize_to_string(), testing::HasSubstr("Third part"));
 
     // Should be no more parts
     auto part4 = parser.get_part();
@@ -325,10 +328,11 @@ TEST(MultipartSubresponse, ParseErrorHeader) {
     // Should extract error message
     auto error = subresponse.error("x-ms-error-code");
     EXPECT_TRUE(error.has_value());
-    EXPECT_TRUE(error.value().contains("403"));
-    EXPECT_TRUE(
-      error.value().contains(fmt::format("{}", subresponse.result())));
-    EXPECT_TRUE(error.value().contains("AuthenticationFailed"));
+    EXPECT_THAT(error.value(), testing::HasSubstr("403"));
+    EXPECT_THAT(
+      error.value(),
+      testing::HasSubstr(fmt::format("{}", subresponse.result())));
+    EXPECT_THAT(error.value(), testing::HasSubstr("AuthenticationFailed"));
 }
 
 TEST(MultipartSubresponse, ParseErrorNoMessage) {
@@ -350,10 +354,11 @@ TEST(MultipartSubresponse, ParseErrorNoMessage) {
     // Error should still be returned with "Unknown" reason
     auto error = subresponse.error("x-ms-error-code");
     EXPECT_TRUE(error.has_value());
-    EXPECT_TRUE(error.value().contains("500"));
-    EXPECT_TRUE(
-      error.value().contains(fmt::format("{}", subresponse.result())));
-    EXPECT_TRUE(error.value().contains("Unknown"));
+    EXPECT_THAT(error.value(), testing::HasSubstr("500"));
+    EXPECT_THAT(
+      error.value(),
+      testing::HasSubstr(fmt::format("{}", subresponse.result())));
+    EXPECT_THAT(error.value(), testing::HasSubstr("Unknown"));
 }
 
 TEST(MultipartSubresponse, ParseErrorInBody) {
@@ -378,10 +383,11 @@ TEST(MultipartSubresponse, ParseErrorInBody) {
     auto error = subresponse.error(
       [](iobuf b) { return b.linearize_to_string(); });
     EXPECT_TRUE(error.has_value());
-    EXPECT_TRUE(error.value().contains("500"));
-    EXPECT_TRUE(
-      error.value().contains(fmt::format("{}", subresponse.result())));
-    EXPECT_TRUE(error.value().contains("OOPS"));
+    EXPECT_THAT(error.value(), testing::HasSubstr("500"));
+    EXPECT_THAT(
+      error.value(),
+      testing::HasSubstr(fmt::format("{}", subresponse.result())));
+    EXPECT_THAT(error.value(), testing::HasSubstr("OOPS"));
 }
 
 // ============================================================================
@@ -635,7 +641,8 @@ TEST(MimeHeaderMalformed, MultipleColons) {
     auto content_type = header.get(boost::beast::http::field::content_type);
     EXPECT_TRUE(content_type.has_value());
     // Should include everything after first ": "
-    EXPECT_TRUE(content_type.value().contains("text/plain: with: colons"));
+    EXPECT_THAT(
+      content_type.value(), testing::HasSubstr("text/plain: with: colons"));
 }
 
 TEST(MimeHeaderMalformed, ParseEmpty) {
