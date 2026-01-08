@@ -30,6 +30,7 @@ level_zero_log_reader_impl::level_zero_log_reader_impl(
   ss::lw_shared_ptr<cluster::partition> ctp,
   data_plane_api* ct_api)
   : _config(cfg)
+  , _next_offset(_config.start_offset)
   , _ctp(std::move(ctp))
   , _ct_api(ct_api)
   , _log(cd_log, fmt::format("[{}/{}]", fmt::ptr(this), _ctp->ntp())) {
@@ -88,57 +89,61 @@ level_zero_log_reader_impl::do_load_slice(
 
 std::optional<chunked_circular_buffer<model::record_batch>>
 level_zero_log_reader_impl::maybe_load_slices_from_cache() {
+    /*
+     * Fetch batches from the cache starting at `_next_offset` until we hit a
+     * gap or a control batch and must then fetch the data from object storage.
+     */
     chunked_circular_buffer<model::record_batch> ret;
-    auto current = _config.start_offset;
-    while (current <= _config.max_offset) {
+    while (_next_offset <= _config.max_offset) {
         auto batch = _ct_api->cache_get(
-          _ctp->ntp(), kafka::offset_cast(current));
+          _ctp->ntp(), kafka::offset_cast(_next_offset));
         if (!batch.has_value()) {
-            // We hit a gap in the cache and have to download objects
-            // from S3.
-            //
-            // NOTE: this can also happen when transactions are used and
-            // we would encounter reading a control batch from the local log.
             break;
         }
+
         vlog(
           _log.trace,
           "Loaded batch from cache for {}: {} @ term {}",
-          current,
+          _next_offset,
           batch.value().base_offset(),
           batch.value().term());
+
         vassert(
           batch.value().term() > model::term_id{-1},
           "Batch without term in the cache: {}",
           batch.value().header());
+
         auto batch_size = batch.value().size_bytes();
         if (is_over_limit(batch_size)) {
             break;
         }
+
         vassert(
-          batch->base_offset() <= kafka::offset_cast(current)
-            && kafka::offset_cast(current) <= batch->last_offset(),
+          batch->base_offset() <= kafka::offset_cast(_next_offset)
+            && kafka::offset_cast(_next_offset) <= batch->last_offset(),
           "Unexpected batch for {}, got range: [{},{}] for offset {}",
           _ctp->ntp(),
           batch->base_offset(),
           batch->last_offset(),
-          current);
+          _next_offset);
+
         ret.push_back(std::move(batch.value()));
         _config.bytes_consumed += batch_size;
-        current = model::offset_cast(
+        _next_offset = model::offset_cast(
           model::next_offset(ret.back().last_offset()));
     }
-    _config.start_offset = current;
-    if (_config.start_offset > _config.max_offset) {
+
+    if (_next_offset > _config.max_offset) {
         vlog(
           _log.debug,
           "reached end of stream, start offset: {}, max offset: {}, "
-          "current: {}",
+          "next offset: {}",
           _config.start_offset,
           _config.max_offset,
-          current);
+          _next_offset);
         _current = state::end_of_stream_state;
     }
+
     if (!ret.empty()) {
         return ret;
     }
@@ -153,7 +158,7 @@ storage::local_log_reader_config level_zero_log_reader_impl::ctp_read_config() {
      */
     auto ot_state = _ctp->get_offset_translator_state();
     auto start_offset = ot_state->to_log_offset(
-      kafka::offset_cast(_config.start_offset));
+      kafka::offset_cast(_next_offset));
     auto max_offset = ot_state->to_log_offset(
       kafka::offset_cast(_config.max_offset));
 
@@ -450,7 +455,7 @@ void level_zero_log_reader_impl::consume_materialized_batches(
       _hydrated.size(),
       _unhydrated.size());
     *dest = std::exchange(_hydrated, {});
-    _config.start_offset = model::offset_cast(
+    _next_offset = model::offset_cast(
       model::next_offset(dest->back().last_offset()));
     _current = _unhydrated.empty() ? state::empty_state : state::ready_state;
 }
