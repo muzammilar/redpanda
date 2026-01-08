@@ -21,7 +21,6 @@
 #include <gtest/gtest.h>
 
 #include <exception>
-#include <unordered_map>
 #include <variant>
 
 using namespace pandaproxy::schema_registry;
@@ -536,7 +535,7 @@ namespace {
 struct counting_store : public pandaproxy::schema_registry::schema_getter {
     counting_store(
       schema::fake_registry& registry,
-      std::unordered_map<pandaproxy::schema_registry::schema_id, size_t>&
+      absl::flat_hash_map<pandaproxy::schema_registry::schema_id, size_t>&
         counts)
       : registry(registry)
       , counts(counts) {}
@@ -565,7 +564,7 @@ struct counting_store : public pandaproxy::schema_registry::schema_getter {
     }
 
     schema::fake_registry& registry;
-    std::unordered_map<pandaproxy::schema_registry::schema_id, size_t>& counts;
+    absl::flat_hash_map<pandaproxy::schema_registry::schema_id, size_t>& counts;
 };
 
 class counting_registry : public schema::registry {
@@ -614,7 +613,7 @@ public:
 
 private:
     schema::fake_registry _registry{};
-    std::unordered_map<pandaproxy::schema_registry::schema_id, size_t>
+    absl::flat_hash_map<pandaproxy::schema_registry::schema_id, size_t>
       _counts{};
     mutable counting_store _store{_registry, _counts};
 };
