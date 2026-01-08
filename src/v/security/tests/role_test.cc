@@ -33,15 +33,22 @@ BOOST_AUTO_TEST_CASE(role_members_user_format) {
     BOOST_CHECK_EQUAL(rep, "{User}:{member0}");
 }
 
+BOOST_AUTO_TEST_CASE(role_members_group_format) {
+    const role_member mem0{role_member_type::group, "group0"};
+
+    auto rep = fmt::format("{}", mem0);
+    BOOST_CHECK_EQUAL(rep, "{Group}:{group0}");
+}
+
 BOOST_AUTO_TEST_CASE(role_format_includes_all_members) {
     const role_member mem0{role_member_type::user, "member0"};
-    const role_member mem1{role_member_type::user, "member1"};
+    const role_member mem1{role_member_type::group, "group0"};
 
     const role rol{{mem0, mem1}};
 
     auto rep = fmt::format("{}", rol);
     BOOST_CHECK(rep.find("{User}:{member0}") != std::string::npos);
-    BOOST_CHECK(rep.find("{User}:{member1}") != std::string::npos);
+    BOOST_CHECK(rep.find("{Group}:{group0}") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(role_can_be_empty) {
