@@ -47,6 +47,8 @@ public:
         materialize_rows();
 
     private:
+        ss::sstring to_string();
+
         ss::sstring _base_key;
         ss::sstring _last_key;
 

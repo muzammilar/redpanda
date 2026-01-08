@@ -10,6 +10,7 @@
 #include "cloud_topics/level_one/metastore/lsm/state_reader.h"
 
 #include "cloud_topics/level_one/metastore/lsm/keys.h"
+#include "cloud_topics/logger.h"
 #include "lsm/core/exceptions.h"
 #include "ssx/future-util.h"
 
@@ -58,6 +59,14 @@ bool is_at_extent(
 
 } // namespace
 
+ss::sstring state_reader::extent_key_range::to_string() {
+    return fmt::format(
+      "extent_key_range: [{}, {}], iter: {}",
+      _base_key,
+      _last_key,
+      _iter.valid() ? _iter.key() : "{invalid iterator}");
+}
+
 ss::coroutine::experimental::generator<
   std::expected<state_reader::extent_row, state_reader::errc>>
 state_reader::extent_key_range::get_rows() {
@@ -68,6 +77,7 @@ state_reader::extent_key_range::get_rows() {
         co_return;
     }
     if (!_iter.valid() || _iter.key() != _base_key) {
+        vlog(cd_log.error, "Expected base key: {}", to_string());
         co_yield std::unexpected(errc::corruption);
         co_return;
     }
@@ -83,6 +93,7 @@ state_reader::extent_key_range::get_rows() {
                 co_return;
             }
             if (_iter.key() > _last_key) {
+                vlog(cd_log.error, "Unexpected key past last: {}", to_string());
                 co_yield std::unexpected(errc::corruption);
                 co_return;
             }
@@ -91,6 +102,8 @@ state_reader::extent_key_range::get_rows() {
             ex = std::current_exception();
         }
         if (ex) {
+            vlog(
+              cd_log.warn, "Exception when iterating {}: {}", to_string(), ex);
             co_yield std::unexpected(to_errc(ex));
             co_return;
         }
@@ -145,6 +158,7 @@ ss::future<std::expected<std::optional<term_start>, state_reader::errc>>
 state_reader::get_max_term(const model::topic_id_partition& tidp) {
     iobuf val_buf;
     model::term_id term;
+    ss::sstring base_key_str;
     try {
         // Seek to the first term of the next partition and then iterate
         // backwards to find the highest term of this partition.
@@ -159,7 +173,8 @@ state_reader::get_max_term(const model::topic_id_partition& tidp) {
         if (!iter.valid()) {
             co_return std::nullopt;
         }
-        auto key = term_row_key::decode(iter.key());
+        base_key_str = ss::sstring(iter.key());
+        auto key = term_row_key::decode(base_key_str);
         if (!key.has_value() || key->tidp != tidp) {
             co_return std::nullopt;
         }
@@ -173,6 +188,14 @@ state_reader::get_max_term(const model::topic_id_partition& tidp) {
         co_return term_start{
           .term_id = term, .start_offset = val.term_start_offset};
     } catch (...) {
+        vlog(
+          cd_log.error,
+          "Unexpected exception decoding term row value for {} term {} "
+          "key {}: {}",
+          tidp,
+          term,
+          base_key_str,
+          std::current_exception());
         co_return std::unexpected(errc::corruption);
     }
 }
@@ -182,6 +205,7 @@ state_reader::get_extent_ge(
   const model::topic_id_partition& tidp, kafka::offset o) {
     iobuf val_buf;
     kafka::offset base_offset;
+    ss::sstring base_key_str;
     try {
         auto iter = co_await snap_.create_iterator();
         // Seek to o+1 and iterate backwards to find the extent that may
@@ -207,7 +231,8 @@ state_reader::get_extent_ge(
             co_return std::nullopt;
         }
 
-        auto key = extent_row_key::decode(iter.key());
+        base_key_str = ss::sstring(iter.key());
+        auto key = extent_row_key::decode(base_key_str);
         if (!key.has_value() || key->tidp != tidp) {
             co_return std::nullopt;
         }
@@ -232,6 +257,14 @@ state_reader::get_extent_ge(
           .oid = val.oid,
         };
     } catch (...) {
+        vlog(
+          cd_log.error,
+          "Unexpected exception decoding extent row value for {} offset {} "
+          "key {}: {}",
+          tidp,
+          base_offset,
+          base_key_str,
+          std::current_exception());
         co_return std::unexpected(errc::corruption);
     }
 }
@@ -279,6 +312,14 @@ state_reader::get_extent_range(
             co_return std::nullopt;
         }
     } catch (...) {
+        vlog(
+          cd_log.error,
+          "Unexpected exception decoding extent row value for {} offset {} "
+          "key {}: {}",
+          tidp,
+          base,
+          base_key,
+          std::current_exception());
         co_return std::unexpected(errc::corruption);
     }
     // Position iterator back at base_key to return to the caller.
@@ -295,8 +336,8 @@ state_reader::get_extent_range(
 template<typename KeyT, typename ValT, typename... KeyEncodeArgs>
 ss::future<std::expected<std::optional<ValT>, state_reader::errc>>
 state_reader::get_val(KeyEncodeArgs... args) {
-    auto fut = co_await ss::coroutine::as_future(
-      snap_.get(KeyT::encode(args...)));
+    auto key_str = KeyT::encode(args...);
+    auto fut = co_await ss::coroutine::as_future(snap_.get(key_str));
     if (fut.failed()) {
         co_return std::unexpected(to_errc(fut.get_exception()));
     }
@@ -308,6 +349,11 @@ state_reader::get_val(KeyEncodeArgs... args) {
         auto val = serde::from_iobuf<ValT>(std::move(*opt_buf));
         co_return val;
     } catch (...) {
+        vlog(
+          cd_log.error,
+          "Unexpected exception decoding value at key {}: {}",
+          key_str,
+          std::current_exception());
         co_return std::unexpected(errc::corruption);
     }
 }
