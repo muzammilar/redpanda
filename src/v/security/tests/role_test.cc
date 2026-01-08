@@ -88,4 +88,20 @@ BOOST_AUTO_TEST_CASE(role_member_view_from_user_principal) {
     BOOST_CHECK_EQUAL(member_view.name(), "test_user");
 }
 
+// Test that role_member can be created from a group principal type
+BOOST_AUTO_TEST_CASE(role_member_from_group_principal) {
+    acl_principal group_principal{principal_type::group, "test_group"};
+    auto member = role_member::from_principal(group_principal);
+    BOOST_CHECK_EQUAL(member.type(), role_member_type::group);
+    BOOST_CHECK_EQUAL(member.name(), "test_group");
+}
+
+// Test that role_member_view can be created from a group principal type
+BOOST_AUTO_TEST_CASE(role_member_view_from_group_principal) {
+    acl_principal group_principal{principal_type::group, "test_group"};
+    auto member_view = role_member_view::from_principal(group_principal);
+    BOOST_CHECK_EQUAL(member_view.type(), role_member_type::group);
+    BOOST_CHECK_EQUAL(member_view.name(), "test_group");
+}
+
 } // namespace security
