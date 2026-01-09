@@ -682,9 +682,45 @@ db_domain_manager::get_end_offset_for_term(
 }
 
 ss::future<rpc::set_start_offset_reply>
-db_domain_manager::set_start_offset(rpc::set_start_offset_request) {
+db_domain_manager::set_start_offset(rpc::set_start_offset_request req) {
+    auto gl_res = co_await gate_and_open_writes();
+    if (!gl_res.has_value()) {
+        co_return rpc::set_start_offset_reply{
+          .ec = gl_res.error(),
+        };
+    }
+
+    auto update = set_start_offset_db_update{
+      .tp = req.tp,
+      .new_start_offset = req.start_offset,
+    };
+
+    auto reader = state_reader(db_->db().create_snapshot());
+    chunked_vector<write_batch_row> rows;
+    auto build_res = co_await update.build_rows(reader, rows);
+    if (!build_res.has_value()) {
+        co_return rpc::set_start_offset_reply{
+          .ec = log_and_convert(
+            build_res.error(), "Rejecting request to set start offset: "),
+        };
+    }
+
+    if (rows.empty()) {
+        // No-op case: new_start_offset <= current start_offset.
+        co_return rpc::set_start_offset_reply{
+          .ec = rpc::errc::ok,
+        };
+    }
+
+    auto apply_res = co_await write_rows(gl_res.value(), std::move(rows));
+    if (!apply_res.has_value()) {
+        co_return rpc::set_start_offset_reply{
+          .ec = apply_res.error(),
+        };
+    }
+
     co_return rpc::set_start_offset_reply{
-      .ec = rpc::errc::concurrent_requests,
+      .ec = rpc::errc::ok,
     };
 }
 
