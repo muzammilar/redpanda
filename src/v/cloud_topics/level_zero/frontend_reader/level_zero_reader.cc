@@ -287,7 +287,6 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
       std::to_underlying(_current));
 
     // Cherry-pick enough L0 meta batches to materialize.
-    try {
         chunked_vector<cloud_topics::extent_meta> to_materialize;
         auto unhydrated_it = _unhydrated.begin();
         size_t materialize_bytes = 0;
@@ -417,16 +416,6 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
           _log.debug,
           "Materialized {} batches from the L0 meta batches",
           _hydrated.size());
-    } catch (...) {
-        vlog(
-          _log.info,
-          "Failed to materialize batches {}",
-          std::current_exception());
-        _hydrated.clear();
-        _unhydrated.clear();
-        _current = state::end_of_stream_state;
-        throw;
-    }
 
     _current = _hydrated.empty() ? state::end_of_stream_state
                                  : state::materialized_state;
