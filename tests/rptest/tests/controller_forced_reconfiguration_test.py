@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from random import shuffle
 from rptest.clients.kcl import KCL
+import threading
 from typing import Any, Optional
 
 from ducktape.cluster.cluster import ClusterNode
@@ -868,3 +869,151 @@ class ControllerForcedReconfiguration_Size5(
         producer.wait(timeout_sec=medium_timeout.timeout_s)
         status = producer.produce_status
         assert status.sent == 3000
+
+
+class ControllerForcedReconfiguration_Size6(
+    ControllerForceReconfigurationTestBase, PartitionMovementMixin
+):
+    cluster_size: int = 6
+
+    def __init__(self, test_context: TestContext, *args: Any, **kwargs: Any):
+        super(ControllerForcedReconfiguration_Size6, self).__init__(
+            test_context,
+            cluster_size=ControllerForcedReconfiguration_Size6.cluster_size,
+            *args,
+            **kwargs,
+        )
+
+    @cluster(num_nodes=6)
+    def test_longest_log(self):
+        """
+        This test will ensure that the longest log is always chosen.
+        The scheme is as follows:
+          Node ids:
+           1  2  3  4  5  6
+        A [1  2  3  4  5  6] -> will receive the creation of topic "all"
+        B             [5  6] -> will be shut down
+        C [1  2  3  4]       -> will receive the creation of topic "some"
+        D    [2  3  4]       -> will be shut down
+        E             [5  6] -> will be started up
+        F [1           5  6] -> will receive a cfr command
+        G then we check that the resultant post CFR cluster contains all and some
+          after new leader election
+        """
+
+        """constants"""
+        cluster_size: int = ControllerForcedReconfiguration_Size6.cluster_size
+        all_topic_spec = TopicSpec(name="all", replication_factor=3, partition_count=3)
+        some_topic_spec = TopicSpec(
+            name="some", replication_factor=3, partition_count=3
+        )
+        designated_survivor_id = 1
+        step_b_shut_down_ids = [5, 6]
+        step_d_shut_down_ids = [2, 3, 4]
+        step_e_start_up_ids = step_b_shut_down_ids
+        step_f_survivor_ids = step_e_start_up_ids.copy()
+        step_f_survivor_ids.append(designated_survivor_id)
+        step_f_dead_ids = step_d_shut_down_ids
+
+        admin = AdminV2(self.redpanda)
+        _ = self._start_redpanda(cluster_size=cluster_size)
+
+        step_b_shut_down_nodes = [
+            self.redpanda.node_by_id(node_id) for node_id in step_b_shut_down_ids
+        ]
+        step_d_shut_down_nodes = [
+            self.redpanda.node_by_id(node_id) for node_id in step_d_shut_down_ids
+        ]
+        step_e_start_up_nodes = [
+            self.redpanda.node_by_id(node_id) for node_id in step_e_start_up_ids
+        ]
+        step_f_survivor_nodes = [
+            self.redpanda.node_by_id(node_id) for node_id in step_f_survivor_ids
+        ]
+
+        """ step A: all receive the creation of topic"""
+        self.client().create_topic(all_topic_spec)
+
+        """ step B: stop step_b_shut_down_nodes """
+        for stop_node in step_b_shut_down_nodes:
+            self.redpanda.stop_node(stop_node, timeout=really_short_timeout.timeout_s)
+
+        """ step C: create topic some"""
+        self.client().create_topic(some_topic_spec)
+
+        """ step D: stop step_d_shut_down_nodes """
+        for stop_node in step_d_shut_down_nodes:
+            self.redpanda.stop_node(stop_node, timeout=really_short_timeout.timeout_s)
+
+        """ step E: start step_e_start_up_nodes """
+        for start_node in step_e_start_up_nodes:
+            self.redpanda.start_node(start_node, timeout=short_timeout.timeout_s)
+
+        """ step F: CFR the surviving nodes"""
+
+        """ bulk reboot into recovery mode """
+        self._bulk_toggle_recovery_mode(
+            nodes=step_f_survivor_nodes,
+            timeout=medium_timeout,
+            recovery_mode_enabled=True,
+        )
+
+        """ do CFR requests """
+        self.redpanda.logger.debug("beginning CFR requests")
+        cfr_threads: list[threading.Thread] = []
+        for survivor in step_f_survivor_nodes:
+
+            def execute_cfr_against_node():
+                # concurrency: survivor will change definition
+                local_survivor_id = self.redpanda.node_id(survivor)
+                local_survivor = self.redpanda.get_node_by_id(local_survivor_id)
+                self.redpanda.logger.debug(
+                    f"cfr on node {local_survivor.name} with id {local_survivor_id}"
+                )
+                breaklgass_client = admin.breakglass(node=local_survivor)
+                request = breakglass_pb2.ControllerForcedReconfigurationRequest(
+                    dead_node_ids=step_f_dead_ids,
+                    surviving_node_count=len(step_f_survivor_ids),
+                )
+                result = self._do_request(breaklgass_client, request)
+                self.redpanda.logger.debug(
+                    f"CFR request on {local_survivor.name} finished"
+                )
+
+                error = result.error()
+                if error is not None:
+                    # this happens when there are multiple candidate leaders
+                    # and one wins the election before all cfr requests have been finished
+                    if "use the existing controller leader" in error.message:
+                        return
+                    error_message = f"CFR request on node {local_survivor.name} failed with error {result.error()}"
+                    self.redpanda.logger.info(error_message)
+                    assert False, error_message
+
+            cfr_thread = threading.Thread(target=execute_cfr_against_node)
+            cfr_thread.start()
+            cfr_threads.append(cfr_thread)
+
+        for cfr_thread in cfr_threads:
+            cfr_thread.join()
+
+        def controller_available():
+            controller = self.redpanda.controller()
+            return (
+                controller is not None
+                and self.redpanda.node_id(controller) not in step_f_dead_ids
+            )
+
+        self.redpanda.logger.debug("waiting for controller to recover")
+        wait_until(
+            lambda: controller_available(),
+            timeout_sec=long_timeout.timeout_s,
+            backoff_sec=long_timeout.backoff_s,
+            err_msg="Controller never came back",
+        )
+        self.redpanda.logger.debug("controller recovered")
+
+        """ step G: ensure 'some' is in the topic list """
+        rpk = RpkTool(self.redpanda)
+        assert "some" in rpk.list_topics()
+        assert int(self.redpanda.node_id(self.redpanda.controller())) == 1
