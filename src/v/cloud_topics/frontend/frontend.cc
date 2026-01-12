@@ -612,7 +612,6 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
       placeholders.batches.size() == 1,
       "Expected single batch, got {}",
       placeholders.batches.size());
-    
     opts = update_replicate_options(opts, fence->term);
     auto replicate_stages = partition->replicate_in_stages(
       batch_id, std::move(placeholders.batches.front()), opts);
