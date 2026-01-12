@@ -60,7 +60,14 @@ level_zero_log_reader_impl::do_load_slice(
     chunked_circular_buffer<model::record_batch> res;
     switch (_current) {
     case state::empty_state:
-        co_await fetch_metadata(deadline);
+        if (_unhydrated.empty()) {
+            _unhydrated = co_await fetch_metadata(deadline);
+        }
+        if (_unhydrated.empty()) {
+            _current = state::end_of_stream_state;
+        } else {
+            _current = state::ready_state;
+        }
         [[fallthrough]];
     case state::ready_state:
         co_await materialize_batches(deadline);
@@ -186,17 +193,14 @@ storage::local_log_reader_config level_zero_log_reader_impl::ctp_read_config() {
     return cfg;
 }
 
-ss::future<> level_zero_log_reader_impl::fetch_metadata(
+ss::future<chunked_circular_buffer<level_zero_log_reader_impl::local_log_batch>>
+level_zero_log_reader_impl::fetch_metadata(
   model::timeout_clock::time_point deadline) {
     vassert(
       _current == state::empty_state || _current == state::materialized_state,
       "Invalid state transition, unexpected current state: {}",
       std::to_underlying(_current));
-    if (_unhydrated.size() > 0) {
-        // If we already have metadata, we can skip fetching it again.
-        _current = state::ready_state;
-        co_return;
-    }
+    chunked_circular_buffer<local_log_batch> ret;
     try {
         auto cfg = ctp_read_config();
         auto reader = co_await _ctp->make_local_reader(cfg);
@@ -209,7 +213,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
             if (header.type == model::record_batch_type::raft_data) {
                 local_log_batch local_batch{.header = header};
                 local_batch.data = std::move(batch).release_data();
-                _unhydrated.push_back(std::move(local_batch));
+                ret.push_back(std::move(local_batch));
                 continue;
             }
             if (header.type != model::record_batch_type::ctp_placeholder) {
@@ -223,16 +227,16 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
             e.id = placeholder.id;
             e.first_byte_offset = placeholder.offset;
             e.byte_range_size = placeholder.size_bytes;
-            _unhydrated.push_back(local_log_batch{.header = header, .data = e});
+            ret.push_back(local_log_batch{.header = header, .data = e});
         }
-        if (!_unhydrated.empty()) {
+        if (!ret.empty()) {
             vlog(
               _log.debug,
               "Fetched {} L0 meta batches from the underlying "
               "partition, first offset: {}, last offset: {}",
-              _unhydrated.size(),
-              _unhydrated.front().header.base_offset,
-              _unhydrated.back().header.last_offset());
+              ret.size(),
+              ret.front().header.base_offset,
+              ret.back().header.last_offset());
         } else {
             vlog(
               _log.debug,
@@ -251,8 +255,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
         _current = state::end_of_stream_state;
         throw;
     }
-    _current = _unhydrated.empty() ? state::end_of_stream_state
-                                   : state::ready_state;
+    co_return ret;
 }
 
 ss::future<> level_zero_log_reader_impl::materialize_batches(

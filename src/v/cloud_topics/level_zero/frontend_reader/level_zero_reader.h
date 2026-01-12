@@ -80,6 +80,20 @@ public:
     void print(std::ostream& o) final;
 
 private:
+    // A batch read from the local log, these can be either placeholder batches
+    // with pointers to the actual data in cloud storage, or it can be control
+    // batches from the local log (i.e. transaction markers). We need to
+    // preserve transactional markers because clients expect to be able to read
+    // them.
+    struct local_log_batch {
+        model::record_batch_header header;
+        // For control batches, we preserve the batch record data, but for
+        // placeholder batches we extract out the extent_meta to be hydrated
+        // later.
+        using payload = iobuf;
+        std::variant<cloud_topics::extent_meta, payload> data;
+    };
+
     // States
     enum class state {
         empty_state,
@@ -94,7 +108,9 @@ private:
     // other metadata batches from the CTP.
     storage::local_log_reader_config ctp_read_config();
 
-    ss::future<> fetch_metadata(model::timeout_clock::time_point deadline);
+    ss::future<
+      chunked_circular_buffer<level_zero_log_reader_impl::local_log_batch>>
+    fetch_metadata(model::timeout_clock::time_point deadline);
     ss::future<> materialize_batches(model::timeout_clock::time_point deadline);
     void consume_materialized_batches(
       chunked_circular_buffer<model::record_batch>* dest);
@@ -108,20 +124,6 @@ private:
     bool is_over_limit(size_t size) const;
 
     state _current{state::empty_state};
-
-    // A batch read from the local log, these can be either placeholder batches
-    // with pointers to the actual data in cloud storage, or it can be control
-    // batches from the local log (i.e. transaction markers). We need to
-    // preserve transactional markers because clients expect to be able to read
-    // them.
-    struct local_log_batch {
-        model::record_batch_header header;
-        // For control batches, we preserve the batch record data, but for
-        // placeholder batches we extract out the extent_meta to be hydrated
-        // later.
-        using payload = iobuf;
-        std::variant<cloud_topics::extent_meta, payload> data;
-    };
 
     // Data from the local log that is not yet hydrated from data in L0
     //
