@@ -85,6 +85,22 @@ level_zero_log_reader_impl::read_some(
         }
         [[fallthrough]];
     case state::ready_state:
+        if (_current == state::end_of_stream_state) {
+            vlog(_log.trace, "Materialize batches called while EOS");
+            break;
+        }
+        if (_hydrated.size() > 0) {
+            _current = state::materialized_state;
+            vlog(
+              _log.trace,
+              "Materialize batches call redundant, already materialized");
+            break;
+        }
+        if (_unhydrated.empty()) {
+            _current = state::end_of_stream_state;
+            vlog(_log.trace, "Materialize batches without unhydrated batches");
+            break;
+        }
         co_await materialize_batches(deadline);
         [[fallthrough]];
     case state::materialized_state:
@@ -265,31 +281,10 @@ level_zero_log_reader_impl::fetch_metadata(
 
 ss::future<> level_zero_log_reader_impl::materialize_batches(
   model::timeout_clock::time_point deadline) {
-    if (_current == state::end_of_stream_state) {
-        _current = state::end_of_stream_state;
-        vlog(_log.trace, "Materialize batches called while EOS");
-        co_return;
-    }
     vassert(
       _current == state::ready_state || _current == state::materialized_state,
       "Invalid state transition, unexpected current state: {}",
       std::to_underlying(_current));
-
-    if (_hydrated.size() > 0) {
-        // We're already materialized.
-        _current = state::materialized_state;
-        vlog(
-          _log.trace,
-          "Materialize batches call redundant, already materialized");
-        co_return;
-    }
-
-    if (_unhydrated.empty()) {
-        // Nothing to materialize.
-        _current = state::end_of_stream_state;
-        vlog(_log.trace, "Materialize batches without unhydrated batches");
-        co_return;
-    }
 
     // Cherry-pick enough L0 meta batches to materialize.
     try {
