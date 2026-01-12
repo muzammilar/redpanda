@@ -385,8 +385,9 @@ ss::future<result<model::offset, errc>> worker::block_groups(
   const model::ntp& ntp,
   const chunked_vector<kafka::group_id>& groups,
   bool block,
-  model::revision_id) {
-    auto res = co_await _group_proxy.set_blocked_for_groups(ntp, groups, block);
+  model::revision_id revision_id) {
+    auto res = co_await _group_proxy.set_blocked_for_groups(
+      ntp, groups, block, revision_id);
     if (res.has_value()) {
         co_return res.value();
     }

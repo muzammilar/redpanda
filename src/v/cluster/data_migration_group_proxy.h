@@ -33,7 +33,8 @@ public:
     virtual ss::future<result<model::offset>> set_blocked_for_groups(
       const model::ntp& co_ntp,
       const chunked_vector<kafka::group_id>&,
-      bool to_block)
+      bool to_block,
+      model::revision_id revision_id)
       = 0;
 
     virtual ss::future<std::error_code> delete_groups(

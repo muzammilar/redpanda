@@ -37,6 +37,7 @@
 #include "model/metadata.h"
 #include "raft/fwd.h"
 #include "raft/notification.h"
+#include "ssx/mutex.h"
 #include "ssx/semaphore.h"
 
 #include <seastar/core/abort_source.hh>
@@ -192,13 +193,10 @@ public:
 
     ss::future<> reload_groups();
 
-    /*
-     * May misbehave if called concurrently for intersecting sets of groups.
-     */
     ss::future<result<model::offset>> set_blocked_for_groups(
       const model::ntp& co_ntp,
       const chunked_vector<kafka::group_id>&,
-      bool to_block);
+      group_block_info req);
 
     using group_offsets_snapshot_result = result<
       std::vector<cluster::group_offsets_snapshot>,
@@ -257,7 +255,8 @@ private:
         ss::lw_shared_ptr<cluster::partition> partition;
         ss::lw_shared_ptr<ss::rwlock> catchup_lock;
         model::term_id term{-1};
-        chunked_hash_set<kafka::group_id> blocked_groups;
+        group_block_info_map group_blocks;
+        ssx::mutex block_lock{"k/group-mgr::block-lock"};
 
         explicit attached_partition(ss::lw_shared_ptr<cluster::partition> p);
         ~attached_partition() noexcept;

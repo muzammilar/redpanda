@@ -15,6 +15,7 @@
 #include "kafka/server/group.h"
 #include "kafka/server/group_metadata.h"
 #include "kafka/server/logger.h"
+#include "model/fundamental.h"
 #include "model/record.h"
 #include "model/record_batch_types.h"
 
@@ -58,6 +59,9 @@ T parse_tx_batch(const model::record_batch& batch, int8_t version) {
 
 } // namespace detail
 
+using group_block_info_map
+  = chunked_hash_map<kafka::group_id, group_block_info>;
+
 template<class T>
 concept GroupDataParserBase = requires(T base, model::record_batch b) {
     { base.handle_raft_data(std::move(b)) } -> std::same_as<ss::future<>>;
@@ -83,12 +87,12 @@ concept GroupDataParserBase = requires(T base, model::record_batch b) {
         base.handle_version_fence(features::feature_table::version_fence{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_group_block(
-          kafka::group_block{std::move(b.copy_records()[0])})
+        base.handle_group_block(kafka::group_block{{}, {}})
     } -> std::same_as<void>;
+    { base.group_blocks() } -> std::same_as<group_block_info_map&>;
     {
-        std::as_const(base).is_group_blocked(kafka::group_id{})
-    } -> std::same_as<bool>;
+        std::as_const(base).group_blocks()
+    } -> std::same_as<const group_block_info_map&>;
 };
 
 template<class Base>
@@ -144,8 +148,9 @@ protected:
 
     bool is_group_blocked_verbose(
       kafka::group_id group_id, std::string_view skipped_msg) const {
-        if (unlikely(
-              static_cast<const Base*>(this)->is_group_blocked(group_id))) {
+        const auto& bim = static_cast<const Base*>(this)->group_blocks();
+        auto it = bim.find(group_id);
+        if (unlikely(it != bim.end() && it->second.is_blocked)) {
             vlog(
               cg_klog.error,
               "[group: {}] skipping {}, group is blocked",
@@ -155,6 +160,46 @@ protected:
         }
         return false;
     }
+
+    void do_handle_group_block(kafka::group_block gb) {
+        auto& bim = static_cast<Base*>(this)->group_blocks();
+        auto it = bim.find(gb.group_id);
+        if (it == bim.end()) {
+            bim.emplace(gb.group_id, gb.info);
+            return;
+        }
+        if (gb.info.revision_id == model::revision_id{}) [[unlikely]] {
+            vlog(
+              cg_klog.debug,
+              "applying a legacy group block {} over {} unconditionally",
+              gb,
+              it->second);
+            it->second = gb.info;
+            return;
+        }
+        if (it->second.revision_id > gb.info.revision_id) [[unlikely]] {
+            vlog(
+              cg_klog.warn,
+              "ignoring stale group block {}, as it already has newer block "
+              "info {} ",
+              gb,
+              it->second);
+            return;
+        }
+        if (
+          it->second.revision_id == gb.info.revision_id
+          && it->second.is_blocked != gb.info.is_blocked) [[unlikely]] {
+            vlog(
+              cg_klog.error,
+              "ignoring invalid group block {} substituting existing {} ",
+              gb,
+              it->second);
+            return;
+        }
+        it->second = gb.info;
+    }
+
+    using base_t = group_data_parser;
 
 private:
     ss::future<> parse_fence(model::record_batch b) {
@@ -258,10 +303,10 @@ private:
         return static_cast<Base*>(this)->handle_version_fence(fence);
     }
     ss::future<> handle_group_block(model::record_batch b) {
-        co_await model::for_each_record(b, [this](model::record& r) {
-            static_cast<Base*>(this)->handle_group_block(
-              kafka::group_block{std::move(r)});
-        });
+        co_await b.for_each_record_async(
+          [that = static_cast<Base*>(this)](model::record r) {
+              return that->handle_group_block(group_block{std::move(r)});
+          });
     }
 };
 } // namespace kafka

@@ -691,7 +691,7 @@ ss::future<> group_manager::reload_groups() {
 ss::future<result<model::offset>> group_manager::set_blocked_for_groups(
   const model::ntp& co_ntp,
   const chunked_vector<kafka::group_id>& group_ids,
-  bool to_block) {
+  group_block_info req) {
     if (!_feature_table.local().is_active(
           features::feature::consumer_groups_migrations)) {
         vlog(
@@ -716,25 +716,74 @@ ss::future<result<model::offset>> group_manager::set_blocked_for_groups(
           "can't set blocked: coordinator_load_in_progress");
         co_return cluster::tx::errc::coordinator_load_in_progress;
     }
+    auto block_lock_holder = co_await p->block_lock.get_units();
 
-    const auto affected_gids
-      = group_ids
-        | std::views::filter([&p, to_block](const kafka::group_id& group_id) {
-              return to_block != p->blocked_groups.contains(group_id);
-          })
-        | std::ranges::to<chunked_vector<kafka::group_id>>();
+    using per_block_info = struct {
+        kafka::group_id gid;
+        std::optional<model::revision_id> previous_revision;
+    };
+    chunked_vector<per_block_info> affected_gids;
+    affected_gids.reserve(group_ids.size());
+    size_t newly_blocked = 0;
 
-    // in case we return early with an exception or another error
-    auto revert_blocking = ss::defer([p, &affected_gids, to_block] {
-        if (to_block) {
-            for (const auto& gid : affected_gids) {
-                p->blocked_groups.erase(gid);
+    for (const auto& group_id : group_ids) {
+        auto it = p->group_blocks.find(group_id);
+        if (it == p->group_blocks.end()) {
+            if (req.is_blocked || req.revision_id == model::revision_id{}) {
+                // first time blocking for revision,
+                // or a legacy revisionless unblock request
+                affected_gids.push_back({group_id, std::nullopt});
+                ++newly_blocked;
+            } else {
+                vlog(
+                  cg_klog.warn,
+                  "set blocked request for group {} block info to {} failed - "
+                  "no existing block info",
+                  group_id,
+                  req);
+                co_return cluster::errc::invalid_data_migration_state;
             }
+        } else if (
+          it->second.revision_id < req.revision_id
+          || req.revision_id == model::revision_id{}) {
+            // new request came in the right order, or a legacy revisionless one
+            affected_gids.push_back({group_id, it->second.revision_id});
+        } else if (it->second == req) {
+            // no-op, already in desired state
+            continue;
+        } else {
+            vlog(
+              cg_klog.warn,
+              "set blocked request for group {} block info from {} to {} "
+              "failed due to revision conflict",
+              group_id,
+              req,
+              it->second);
+            co_return cluster::errc::invalid_data_migration_state;
         }
-    });
-    if (to_block) {
+    }
+
+    // prepare revert action to unblock groups if replication fails
+    // in case we return early with an exception or another error
+    auto revert_blocking
+      = req.is_blocked ? std::make_optional(ss::defer([p, &affected_gids] {
+            for (const auto& r : affected_gids) {
+                if (r.previous_revision) {
+                    p->group_blocks[r.gid] = {
+                      .is_blocked = false, .revision_id = *r.previous_revision};
+                } else {
+                    p->group_blocks.erase(r.gid);
+                }
+            }
+        }))
+                       : std::nullopt;
+    if (req.is_blocked) {
         // block early to avoid racing with new transactions
-        p->blocked_groups.insert(affected_gids.begin(), affected_gids.end());
+        p->group_blocks.reserve(newly_blocked);
+        for (const auto& r : affected_gids) {
+            p->group_blocks[r.gid] = {
+              .is_blocked = true, .revision_id = req.revision_id};
+        }
 
         auto last_error = cluster::tx::errc::none;
         co_await ss::max_concurrent_for_each(
@@ -760,7 +809,7 @@ ss::future<result<model::offset>> group_manager::set_blocked_for_groups(
     storage::record_batch_builder builder(
       model::record_batch_type::group_block, model::offset{0});
     for (const auto& group_id : group_ids) {
-        group_block{group_id, to_block}.add_to_batch_builder(builder);
+        group_block{group_id, req}.add_to_batch_builder(builder);
     }
 
     auto result = co_await p->partition->raft()->replicate(
@@ -771,14 +820,14 @@ ss::future<result<model::offset>> group_manager::set_blocked_for_groups(
         co_return result.error();
     }
 
-    // unblock only when replicated
-    if (!to_block) {
-        for (const auto& gid : affected_gids) {
-            p->blocked_groups.erase(gid);
+    if (req.is_blocked) {
+        revert_blocking->cancel();
+    } else {
+        // unblock only when replicated
+        for (const auto& r : affected_gids) {
+            p->group_blocks[r.gid] = req;
         }
     }
-
-    revert_blocking.cancel();
     co_return result.value().last_offset;
 }
 
@@ -1168,7 +1217,7 @@ ss::future<> group_manager::recover_partition(
           return do_recover_group(
             term, p, std::move(pair.first), std::move(pair.second));
       });
-    p->blocked_groups = std::move(ctx.blocked_groups);
+    p->group_blocks = std::move(ctx.group_blocks);
 }
 
 ss::future<> group_manager::do_recover_group(
@@ -2027,8 +2076,17 @@ error_code group_manager::validate_group_status(
 
     if (const auto it = _partitions.find(ntp); it != _partitions.end()) {
         auto& p = it->second;
-        if (unlikely(!allow_blocked && p->blocked_groups.contains(group))) {
-            return error_code::invalid_group_id;
+        if (!allow_blocked) {
+            auto it = p->group_blocks.find(group);
+            if (it != p->group_blocks.end() && it->second.is_blocked)
+              [[unlikely]] {
+                vlog(
+                  cg_klog.debug,
+                  "Group name {} is blocked, cannot perform operation {}",
+                  group,
+                  api);
+                return error_code::invalid_group_id;
+            }
         }
 
         if (!p->partition->is_leader()) {
