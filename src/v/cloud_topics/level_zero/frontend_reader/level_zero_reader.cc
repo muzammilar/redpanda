@@ -287,135 +287,131 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
       std::to_underlying(_current));
 
     // Cherry-pick enough L0 meta batches to materialize.
-        chunked_vector<cloud_topics::extent_meta> to_materialize;
-        auto unhydrated_it = _unhydrated.begin();
-        size_t materialize_bytes = 0;
-        for (; unhydrated_it != _unhydrated.end(); ++unhydrated_it) {
-            size_t hydrated_batch_size = ss::visit(
-              unhydrated_it->data,
-              [](const local_log_batch::payload& payload) {
-                  return payload.size_bytes();
-              },
-              [](const cloud_topics::extent_meta& meta) {
-                  return meta.byte_range_size();
-              });
-            if (is_over_limit(hydrated_batch_size)) {
-                // If the next meta batch exceeds the max bytes limit, we stop
-                // materializing. The only exception is if we didn't collect any
-                // batches yet, in which case we still materialize the next
-                // batch. This could happen if the first meta batch is larger
-                // than the max bytes limit (oversized batch or too small
-                // limit). In this case we don't want to stall the reader
-                // completely.
-                vlog(
-                  _log.trace,
-                  "Materialize batches overshot at {} bytes, config: {}, last "
-                  "hydrated batch size: {}",
-                  materialize_bytes,
-                  _config,
-                  hydrated_batch_size);
-                break;
-            }
-            _bytes_consumed += hydrated_batch_size;
-            if (
-              auto* meta = std::get_if<cloud_topics::extent_meta>(
-                &unhydrated_it->data)) {
-                materialize_bytes += meta->byte_range_size;
-                to_materialize.push_back(*meta);
-                vlog(
-                  _log.trace,
-                  "Materialize {} bytes total...",
-                  materialize_bytes);
-            }
+    chunked_vector<cloud_topics::extent_meta> to_materialize;
+    auto unhydrated_it = _unhydrated.begin();
+    size_t materialize_bytes = 0;
+    for (; unhydrated_it != _unhydrated.end(); ++unhydrated_it) {
+        size_t hydrated_batch_size = ss::visit(
+          unhydrated_it->data,
+          [](const local_log_batch::payload& payload) {
+              return payload.size_bytes();
+          },
+          [](const cloud_topics::extent_meta& meta) {
+              return meta.byte_range_size();
+          });
+        if (is_over_limit(hydrated_batch_size)) {
+            // If the next meta batch exceeds the max bytes limit, we stop
+            // materializing. The only exception is if we didn't collect any
+            // batches yet, in which case we still materialize the next
+            // batch. This could happen if the first meta batch is larger
+            // than the max bytes limit (oversized batch or too small
+            // limit). In this case we don't want to stall the reader
+            // completely.
+            vlog(
+              _log.trace,
+              "Materialize batches overshot at {} bytes, config: {}, last "
+              "hydrated batch size: {}",
+              materialize_bytes,
+              _config,
+              hydrated_batch_size);
+            break;
         }
-        size_t materialize_count = to_materialize.size();
-        vlog(
-          _log.trace,
-          "Invoking 'materialize' for {}: {} bytes, {} batches to materialize",
-          _ctp->ntp(),
-          materialize_bytes,
-          materialize_count);
-        // Ask data layer to bring data from the cloud storage.
-        auto mat_res = co_await _ct_api->materialize(
-          _ctp->ntp(),
-          materialize_bytes,
-          std::move(to_materialize),
-          deadline,
-          _config.abort_source);
-        if (!mat_res.has_value()) {
-            if (mat_res.error() == errc::shutting_down) {
-                vlog(_log.debug, "Materialize aborted due to shutdown");
-                _current = state::end_of_stream_state;
-                throw ss::abort_requested_exception();
-            }
-            if (mat_res.error() == errc::timeout) {
-                vlog(_log.debug, "Materialize aborted due to timeout");
-                _current = state::end_of_stream_state;
-                co_return;
-            }
-            throw std::runtime_error(
-              fmt::format(
-                "Failed to materialize batches from the cloud storage: {}",
-                mat_res.error().message()));
+        _bytes_consumed += hydrated_batch_size;
+        if (
+          auto* meta = std::get_if<cloud_topics::extent_meta>(
+            &unhydrated_it->data)) {
+            materialize_bytes += meta->byte_range_size;
+            to_materialize.push_back(*meta);
+            vlog(
+              _log.trace, "Materialize {} bytes total...", materialize_bytes);
         }
-        auto batches = std::move(mat_res.value());
-        if (batches.size() != materialize_count) {
-            throw std::runtime_error(
-              fmt::format(
-                "Materialized unexpected number of batches: {}, expected: {}",
-                batches.size(),
-                materialize_count));
+    }
+    size_t materialize_count = to_materialize.size();
+    vlog(
+      _log.trace,
+      "Invoking 'materialize' for {}: {} bytes, {} batches to materialize",
+      _ctp->ntp(),
+      materialize_bytes,
+      materialize_count);
+    // Ask data layer to bring data from the cloud storage.
+    auto mat_res = co_await _ct_api->materialize(
+      _ctp->ntp(),
+      materialize_bytes,
+      std::move(to_materialize),
+      deadline,
+      _config.abort_source);
+    if (!mat_res.has_value()) {
+        if (mat_res.error() == errc::shutting_down) {
+            vlog(_log.debug, "Materialize aborted due to shutdown");
+            _current = state::end_of_stream_state;
+            throw ss::abort_requested_exception();
         }
-        // Merge our selected subset of unhydrated batches with the materialized
-        // batches, preserving control batches from the local log.
-        auto batches_it = batches.begin();
-        chunked_circular_buffer<model::record_batch> hydrated;
-        auto range_to_materialize = std::ranges::subrange(
-          _unhydrated.begin(), unhydrated_it);
-        for (local_log_batch& local_batch : range_to_materialize) {
-            if (_config.abort_source.has_value()) {
-                _config.abort_source.value().get().check();
-            }
-            auto& local_batch_header = local_batch.header;
-            model::record_batch batch = ss::visit(
-              local_batch.data,
-              [this, &local_batch_header, &batches_it](
-                const cloud_topics::extent_meta&) {
-                  model::record_batch batch = apply_placeholder_to_batch(
-                    local_batch_header, std::move(*batches_it));
-                  ++batches_it;
-                  // Propagate materialized batches to the record batch cache
-                  if (cache_enabled()) {
-                      vlog(
-                        _log.trace,
-                        "Putting batch for {} to cache: {}, term: {}",
-                        _ctp->ntp(),
-                        batch.base_offset(),
-                        batch.term());
-                      _ct_api->cache_put(_ctp->ntp(), batch);
-                  }
-                  return batch;
-              },
-              [&local_batch_header](local_log_batch::payload& payload) {
-                  return model::record_batch(
-                    local_batch_header,
-                    std::move(payload),
-                    model::record_batch::tag_ctor_ng{});
-              });
-            hydrated.push_back(std::move(batch));
-            co_await ss::coroutine::maybe_yield();
+        if (mat_res.error() == errc::timeout) {
+            vlog(_log.debug, "Materialize aborted due to timeout");
+            _current = state::end_of_stream_state;
+            co_return;
         }
-        vassert(
-          batches_it == batches.end(),
-          "All materialized batches should be used");
-        _unhydrated.erase(
-          range_to_materialize.begin(), range_to_materialize.end());
-        _hydrated = std::move(hydrated);
-        // Materialize batches from the L0 meta batches.
-        vlog(
-          _log.debug,
-          "Materialized {} batches from the L0 meta batches",
-          _hydrated.size());
+        throw std::runtime_error(
+          fmt::format(
+            "Failed to materialize batches from the cloud storage: {}",
+            mat_res.error().message()));
+    }
+    auto batches = std::move(mat_res.value());
+    if (batches.size() != materialize_count) {
+        throw std::runtime_error(
+          fmt::format(
+            "Materialized unexpected number of batches: {}, expected: {}",
+            batches.size(),
+            materialize_count));
+    }
+    // Merge our selected subset of unhydrated batches with the materialized
+    // batches, preserving control batches from the local log.
+    auto batches_it = batches.begin();
+    chunked_circular_buffer<model::record_batch> hydrated;
+    auto range_to_materialize = std::ranges::subrange(
+      _unhydrated.begin(), unhydrated_it);
+    for (local_log_batch& local_batch : range_to_materialize) {
+        if (_config.abort_source.has_value()) {
+            _config.abort_source.value().get().check();
+        }
+        auto& local_batch_header = local_batch.header;
+        model::record_batch batch = ss::visit(
+          local_batch.data,
+          [this, &local_batch_header, &batches_it](
+            const cloud_topics::extent_meta&) {
+              model::record_batch batch = apply_placeholder_to_batch(
+                local_batch_header, std::move(*batches_it));
+              ++batches_it;
+              // Propagate materialized batches to the record batch cache
+              if (cache_enabled()) {
+                  vlog(
+                    _log.trace,
+                    "Putting batch for {} to cache: {}, term: {}",
+                    _ctp->ntp(),
+                    batch.base_offset(),
+                    batch.term());
+                  _ct_api->cache_put(_ctp->ntp(), batch);
+              }
+              return batch;
+          },
+          [&local_batch_header](local_log_batch::payload& payload) {
+              return model::record_batch(
+                local_batch_header,
+                std::move(payload),
+                model::record_batch::tag_ctor_ng{});
+          });
+        hydrated.push_back(std::move(batch));
+        co_await ss::coroutine::maybe_yield();
+    }
+    vassert(
+      batches_it == batches.end(), "All materialized batches should be used");
+    _unhydrated.erase(range_to_materialize.begin(), range_to_materialize.end());
+    _hydrated = std::move(hydrated);
+    // Materialize batches from the L0 meta batches.
+    vlog(
+      _log.debug,
+      "Materialized {} batches from the L0 meta batches",
+      _hydrated.size());
 
     _current = _hydrated.empty() ? state::end_of_stream_state
                                  : state::materialized_state;
