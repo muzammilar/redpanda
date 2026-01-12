@@ -35,7 +35,7 @@ constexpr std::string_view schema_key_sv{
 const auto expected_schema_key = schema_key{
   .seq{model::offset{42}},
   .node{model::node_id{2}},
-  .sub{subject{"my-kafka-value"}},
+  .sub{context_subject{"my-kafka-value"}},
   .version{schema_version{1}},
   .magic{topic_key_magic{1}}};
 
@@ -276,6 +276,110 @@ TEST(StorageTest, SerdeMetadata) {
         EXPECT_TRUE(val.schema.def().meta().has_value());
         EXPECT_TRUE(val.schema.def().meta()->properties.has_value());
         EXPECT_EQ(val.schema.def().meta()->properties->size(), 2);
+    }
+}
+
+TEST(StorageTest, SerdeContextSubject) {
+    // Test schema_key with context_subject (qualified format)
+    {
+        constexpr std::string_view schema_key_ctx_sv{
+          R"({
+  "keytype": "SCHEMA",
+  "subject": ":.my-context:my-kafka-value",
+  "version": 1,
+  "magic": 1,
+  "seq": 42,
+  "node": 2
+})"};
+        const auto expected_schema_key_ctx = schema_key{
+          .seq{model::offset{42}},
+          .node{model::node_id{2}},
+          .sub{context{".my-context"}, subject{"my-kafka-value"}},
+          .version{schema_version{1}},
+          .magic{topic_key_magic{1}}};
+
+        auto key = ppj::impl::rjson_parse(
+          schema_key_ctx_sv.data(), schema_key_handler<>{});
+        EXPECT_EQ(expected_schema_key_ctx, key);
+
+        auto str = ppj::rjson_serialize_str(expected_schema_key_ctx);
+        EXPECT_EQ(str, ::json::minify(schema_key_ctx_sv));
+    }
+
+    // Test schema_value with context_subject and reference with context_subject
+    {
+        constexpr std::string_view schema_value_ctx_sv{
+          R"({
+  "subject": ":.my-context:my-kafka-value",
+  "version": 1,
+  "id": 1,
+  "references": [
+    {"name": "ref-name", "subject": ":.ref-context:ref-subject", "version": 2}
+  ],
+  "schema": "{\"type\":\"string\"}",
+  "deleted": false
+})"};
+        const auto expected_schema_value_ctx = schema_value{
+          .schema{
+            context_subject{context{".my-context"}, subject{"my-kafka-value"}},
+            schema_definition{
+              R"({"type":"string"})",
+              schema_type::avro,
+              {{{"ref-name"},
+                context_subject{
+                  context{".ref-context"}, subject{"ref-subject"}},
+                schema_version{2}}},
+              {}}},
+          .version{schema_version{1}},
+          .id{schema_id{1}},
+          .deleted = is_deleted::no};
+
+        auto val = ppj::impl::rjson_parse(
+          schema_value_ctx_sv.data(), schema_value_handler{});
+        EXPECT_EQ(expected_schema_value_ctx, val);
+
+        auto str = ppj::rjson_serialize_str(expected_schema_value_ctx);
+        EXPECT_EQ(str, ::json::minify(schema_value_ctx_sv));
+    }
+
+    // Test delete_subject_key with context_subject
+    {
+        constexpr std::string_view delete_key_ctx_sv{
+          R"({
+  "keytype": "DELETE_SUBJECT",
+  "subject": ":.del-context:my-kafka-value",
+  "magic": 0,
+  "seq": 42,
+  "node": 2
+})"};
+        const auto expected_delete_key_ctx = delete_subject_key{
+          .seq{model::offset{42}},
+          .node{model::node_id{2}},
+          .sub{context{".del-context"}, subject{"my-kafka-value"}}};
+
+        auto key = ppj::impl::rjson_parse(
+          delete_key_ctx_sv.data(), delete_subject_key_handler<>{});
+        EXPECT_EQ(expected_delete_key_ctx, key);
+
+        auto str = ppj::rjson_serialize_str(expected_delete_key_ctx);
+        EXPECT_EQ(str, ::json::minify(delete_key_ctx_sv));
+    }
+
+    // Test delete_subject_value with context_subject
+    {
+        constexpr std::string_view delete_value_ctx_sv{
+          R"({
+  "subject": ":.del-context:my-kafka-value"
+})"};
+        const auto expected_delete_value_ctx = delete_subject_value{
+          .sub{context{".del-context"}, subject{"my-kafka-value"}}};
+
+        auto val = ppj::impl::rjson_parse(
+          delete_value_ctx_sv.data(), delete_subject_value_handler<>{});
+        EXPECT_EQ(expected_delete_value_ctx, val);
+
+        auto str = ppj::rjson_serialize_str(expected_delete_value_ctx);
+        EXPECT_EQ(str, ::json::minify(delete_value_ctx_sv));
     }
 }
 
