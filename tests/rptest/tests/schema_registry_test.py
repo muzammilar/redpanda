@@ -1749,6 +1749,13 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         self.assert_equal(result.status_code, requests.codes.ok)
         self.assert_equal(result.json(), [1])
 
+        # Get specific version in context
+        result = self.sr_client.get_subjects_subject_versions_version(
+            subject=ctx_subject, version=1
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["version"], 1)
+
         # Delete subject in context
         result = self.sr_client.delete_subject(subject=ctx_subject)
         self.assert_equal(result.status_code, requests.codes.ok)
