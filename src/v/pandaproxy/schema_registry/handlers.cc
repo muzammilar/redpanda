@@ -794,7 +794,8 @@ ss::future<ctx_server<service>::reply_t>
 get_subject_versions_version_referenced_by(
   ctx_server<service>::request_t rq, ctx_server<service>::reply_t rp) {
     parse_accept_header(rq, rp);
-    auto sub = parse::request_param<subject>(*rq.req, "subject");
+    auto ctx_sub = context_subject::from_string(
+      parse::request_param<ss::sstring>(*rq.req, "subject"));
     auto ver = parse::request_param<ss::sstring>(*rq.req, "version");
 
     co_await rq.service().writer().read_sync();
@@ -802,7 +803,7 @@ get_subject_versions_version_referenced_by(
     auto version = parse_schema_version(ver).value();
 
     auto references = ppj::rjson_serialize_iobuf(to_non_context_schema_ids(
-      co_await rq.service().schema_store().referenced_by(sub, version)));
+      co_await rq.service().schema_store().referenced_by(ctx_sub, version)));
 
     log_response(*rq.req, references);
     rp.rep->write_body("json", ppj::as_body_writer(std::move(references)));
