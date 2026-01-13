@@ -1749,6 +1749,11 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         self.assert_equal(result.status_code, requests.codes.ok)
         self.assert_equal(result.json(), [1])
 
+        # Delete subject in context
+        result = self.sr_client.delete_subject(subject=ctx_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), [1])
+
     @cluster(num_nodes=1)
     def test_context_isolation(self):
         """Verify contexts are isolated: independent IDs, no cross-context lookups."""

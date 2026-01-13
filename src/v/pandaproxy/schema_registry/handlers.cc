@@ -810,7 +810,8 @@ get_subject_versions_version_referenced_by(
 ss::future<server::reply_t>
 delete_subject(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
-    auto sub{parse::request_param<subject>(*rq.req, "subject")};
+    auto ctx_sub = context_subject::from_string(
+      parse::request_param<ss::sstring>(*rq.req, "subject"));
     auto permanent{
       parse::query_param<std::optional<permanent_delete>>(*rq.req, "permanent")
         .value_or(permanent_delete::no)};
@@ -822,8 +823,8 @@ delete_subject(server::request_t rq, server::reply_t rp) {
     auto versions
       = permanent
           ? co_await rq.service().writer().delete_subject_permanent(
-              sub, std::nullopt)
-          : co_await rq.service().writer().delete_subject_impermanent(sub);
+              ctx_sub, std::nullopt)
+          : co_await rq.service().writer().delete_subject_impermanent(ctx_sub);
 
     auto resp = ppj::rjson_serialize_iobuf(std::move(versions));
     log_response(*rq.req, resp);
