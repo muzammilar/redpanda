@@ -42,7 +42,8 @@ public:
 
     ss::future<std::error_code> delete_groups(
       const model::ntp& co_ntp,
-      const chunked_vector<kafka::group_id>& groups) override;
+      const chunked_vector<kafka::group_id>& groups,
+      model::revision_id revision_id) override;
 
     ss::future<bool>
     assure_topic_exists(model::timeout_clock::time_point deadline) override;

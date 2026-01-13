@@ -185,8 +185,10 @@ public:
     using partition_producers = partition_response;
     partition_response describe_partition_producers(const model::ntp&);
 
-    ss::future<std::error_code>
-    empty_and_delete_groups(const model::ntp&, const chunked_vector<group_id>&);
+    ss::future<std::error_code> empty_and_delete_groups(
+      const model::ntp&,
+      const chunked_vector<group_id>&,
+      model::revision_id revision_id);
 
     ss::future<chunked_vector<deletable_group_result>> delete_groups(
       chunked_vector<std::pair<model::ntp, group_id>>,

@@ -1963,20 +1963,76 @@ group_manager::describe_partition_producers(const model::ntp& ntp) {
 }
 
 ss::future<std::error_code> group_manager::empty_and_delete_groups(
-  const model::ntp& ntp, const chunked_vector<group_id>& groups) {
-    co_await ssx::async_for_each(groups, [this, &ntp](const group_id& group) {
-        auto g = get_group(group);
-        if (!g) {
-            vlog(cg_klog.warn, "Group {} not found on ntp {}", group, ntp);
-            return;
+  const model::ntp& co_ntp,
+  const chunked_vector<group_id>& groups,
+  model::revision_id revision_id) {
+    if (!_feature_table.local().is_active(
+          features::feature::consumer_groups_migrations)) {
+        vlog(
+          cg_klog.warn,
+          "delete request for {} failed - consumer groups migrations "
+          "feature is not active",
+          co_ntp);
+        co_return cluster::errc::feature_disabled;
+    }
+    auto p = get_attached_partition(co_ntp);
+    if (!p) {
+        vlog(
+          cg_klog.warn,
+          "delete request for {} failed - attached partition not found",
+          co_ntp);
+        co_return cluster::errc::partition_not_exists;
+    }
+    auto maybe_holder = p->catchup_lock->try_hold_read_lock();
+    if (!maybe_holder) {
+        vlog(
+          cluster::txlog.trace,
+          "can't set blocked: coordinator_load_in_progress");
+        co_return cluster::tx::errc::coordinator_load_in_progress;
+    }
+    auto block_lock_holder = co_await p->block_lock.get_units();
+
+    // make sure all groups are blocked, and they have been blocked by a
+    // revision id in the past
+    for (const auto& group : groups) {
+        auto it = p->group_blocks.find(group);
+        if (it == p->group_blocks.end() || !it->second.is_blocked) {
+            vlog(
+              cg_klog.warn,
+              "Group {} not blocked on ntp {}, cannot delete",
+              group,
+              co_ntp);
+            co_return cluster::errc::invalid_configuration_update;
         }
-        g->remove_full_members();
-    });
+        if (
+          revision_id != model::revision_id{}
+          && revision_id <= it->second.revision_id) {
+            vlog(
+              cg_klog.warn,
+              "Group {} revision is {}, cannot delete with revision id {} on "
+              "ntp {}",
+              group,
+              it->second.revision_id,
+              revision_id,
+              co_ntp);
+            co_return cluster::errc::invalid_configuration_update;
+        }
+    }
+
+    co_await ssx::async_for_each(
+      groups, [this, &co_ntp](const group_id& group) {
+          auto g = get_group(group);
+          if (!g) {
+              vlog(cg_klog.warn, "Group {} not found on ntp {}", group, co_ntp);
+              return;
+          }
+          g->remove_full_members();
+      });
 
     chunked_vector<std::pair<model::ntp, group_id>> groups_with_ntps{
       std::from_range,
-      groups | std::views::transform([&ntp](const group_id& group_id) {
-          return std::make_pair(ntp, group_id);
+      groups | std::views::transform([&co_ntp](const group_id& group_id) {
+          return std::make_pair(co_ntp, group_id);
       })};
     auto delete_results = co_await delete_groups(
       std::move(groups_with_ntps), true);

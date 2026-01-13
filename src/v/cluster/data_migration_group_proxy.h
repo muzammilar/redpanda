@@ -38,7 +38,9 @@ public:
       = 0;
 
     virtual ss::future<std::error_code> delete_groups(
-      const model::ntp& co_ntp, const chunked_vector<kafka::group_id>& groups)
+      const model::ntp& co_ntp,
+      const chunked_vector<kafka::group_id>& groups,
+      model::revision_id revision_id)
       = 0;
 
     virtual ss::future<bool>

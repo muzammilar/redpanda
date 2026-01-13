@@ -44,8 +44,10 @@ data_migration_group_proxy_impl::set_blocked_for_groups(
 };
 
 ss::future<std::error_code> data_migration_group_proxy_impl::delete_groups(
-  const model::ntp& co_ntp, const chunked_vector<kafka::group_id>& groups) {
-    return _group_manager.empty_and_delete_groups(co_ntp, groups);
+  const model::ntp& co_ntp,
+  const chunked_vector<kafka::group_id>& groups,
+  model::revision_id revision_id) {
+    return _group_manager.empty_and_delete_groups(co_ntp, groups, revision_id);
 }
 
 ss::future<bool> data_migration_group_proxy_impl::assure_topic_exists(
