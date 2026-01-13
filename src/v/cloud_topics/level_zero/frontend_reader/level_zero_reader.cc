@@ -58,6 +58,18 @@ level_zero_log_reader_impl::do_load_slice(
 ss::future<model::record_batch_reader::storage_t>
 level_zero_log_reader_impl::read_some(
   model::timeout_clock::time_point deadline) {
+    if (_next_offset > _config.max_offset) {
+        vlog(
+          _log.debug,
+          "reached end of stream, start offset: {}, max offset: {}, "
+          "next offset: {}",
+          _config.start_offset,
+          _config.max_offset,
+          _next_offset);
+        set_end_of_stream();
+        co_return chunked_circular_buffer<model::record_batch>{};
+    }
+
     if (is_over_limit(0)) {
         set_end_of_stream();
         co_return chunked_circular_buffer<model::record_batch>{};
@@ -133,19 +145,6 @@ level_zero_log_reader_impl::maybe_read_batches_from_cache() {
         _bytes_consumed += batch_size;
         _next_offset = model::offset_cast(
           model::next_offset(ret.back().last_offset()));
-    }
-
-    // TODO: should this be moved into read_some? should we have a
-    // is_end_of_stream check in read_some? see L1 reader...
-    if (_next_offset > _config.max_offset) {
-        vlog(
-          _log.debug,
-          "reached end of stream, start offset: {}, max offset: {}, "
-          "next offset: {}",
-          _config.start_offset,
-          _config.max_offset,
-          _next_offset);
-        set_end_of_stream();
     }
 
     return ret;
