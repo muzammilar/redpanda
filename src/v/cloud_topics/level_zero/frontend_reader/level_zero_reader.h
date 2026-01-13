@@ -114,9 +114,8 @@ private:
     ss::future<
       chunked_circular_buffer<level_zero_log_reader_impl::local_log_batch>>
     fetch_metadata(model::timeout_clock::time_point deadline) const;
-    ss::future<> materialize_batches(model::timeout_clock::time_point deadline);
-    void consume_materialized_batches(
-      chunked_circular_buffer<model::record_batch>* dest);
+    ss::future<chunked_circular_buffer<model::record_batch>>
+    materialize_batches(model::timeout_clock::time_point deadline);
     // Return data from the record batch cache.
     // This method could change state of the reader to end_of_stream_state
     // when it reaches committed offset.
@@ -135,10 +134,6 @@ private:
     // All batches in _unhydrated come after the _hydrated batches (in offset
     // ordering).
     chunked_circular_buffer<local_log_batch> _unhydrated;
-    // Data that has been hydrated from L0 and is ready to be returned.
-    //
-    // The data stored in this buffer is ascending order by offset.
-    chunked_circular_buffer<model::record_batch> _hydrated;
 
     cloud_topic_log_reader_config _config;
     kafka::offset _next_offset;

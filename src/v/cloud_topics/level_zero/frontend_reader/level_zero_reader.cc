@@ -50,7 +50,6 @@ level_zero_log_reader_impl::do_load_slice(
     } catch (...) {
         vlog(
           _log.error, "Reader caught exception: {}", std::current_exception());
-        _hydrated.clear();
         _unhydrated.clear();
         _current = state::end_of_stream_state;
         throw;
@@ -89,19 +88,17 @@ level_zero_log_reader_impl::read_some(
             vlog(_log.trace, "Materialize batches called while EOS");
             break;
         }
-        if (_hydrated.size() > 0) {
-            _current = state::materialized_state;
-            vlog(
-              _log.trace,
-              "Materialize batches call redundant, already materialized");
-            break;
-        }
         if (_unhydrated.empty()) {
             _current = state::end_of_stream_state;
             vlog(_log.trace, "Materialize batches without unhydrated batches");
             break;
         }
-        co_await materialize_batches(deadline);
+        res = co_await materialize_batches(deadline);
+        if (res.empty()) {
+            _current = state::end_of_stream_state;
+        } else {
+            _current = state::materialized_state;
+        }
         [[fallthrough]];
     case state::materialized_state:
     case state::end_of_stream_state:
@@ -117,7 +114,16 @@ level_zero_log_reader_impl::read_some(
         _current = state::end_of_stream_state;
         throw std::runtime_error("Invalid reader state (ready/empty)");
     case state::materialized_state:
-        consume_materialized_batches(&res);
+        vlog(
+          _log.debug,
+          "consuming {} materialized batches, cached {} extents",
+          res.size(),
+          _unhydrated.size());
+        vassert(!res.empty(), "expected non-empty hydrated set");
+        _next_offset = model::offset_cast(
+          model::next_offset(res.back().last_offset()));
+        _current = _unhydrated.empty() ? state::empty_state
+                                       : state::ready_state;
         [[fallthrough]];
     case state::end_of_stream_state:
         break;
@@ -279,7 +285,8 @@ level_zero_log_reader_impl::fetch_metadata(
     co_return ret;
 }
 
-ss::future<> level_zero_log_reader_impl::materialize_batches(
+ss::future<chunked_circular_buffer<model::record_batch>>
+level_zero_log_reader_impl::materialize_batches(
   model::timeout_clock::time_point deadline) {
     vassert(
       _current == state::ready_state || _current == state::materialized_state,
@@ -349,7 +356,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
         if (mat_res.error() == errc::timeout) {
             vlog(_log.debug, "Materialize aborted due to timeout");
             _current = state::end_of_stream_state;
-            co_return;
+            throw ss::timed_out_error();
         }
         throw std::runtime_error(
           fmt::format(
@@ -406,15 +413,11 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
     vassert(
       batches_it == batches.end(), "All materialized batches should be used");
     _unhydrated.erase(range_to_materialize.begin(), range_to_materialize.end());
-    _hydrated = std::move(hydrated);
-    // Materialize batches from the L0 meta batches.
     vlog(
       _log.debug,
       "Materialized {} batches from the L0 meta batches",
-      _hydrated.size());
-
-    _current = _hydrated.empty() ? state::end_of_stream_state
-                                 : state::materialized_state;
+      hydrated.size());
+    co_return hydrated;
 }
 
 bool level_zero_log_reader_impl::cache_enabled() const {
@@ -428,19 +431,6 @@ bool level_zero_log_reader_impl::cache_enabled() const {
         return false;
     }
     return true;
-}
-
-void level_zero_log_reader_impl::consume_materialized_batches(
-  chunked_circular_buffer<model::record_batch>* dest) {
-    vlog(
-      _log.debug,
-      "consuming {} materialized batches, cached {} extents",
-      _hydrated.size(),
-      _unhydrated.size());
-    *dest = std::exchange(_hydrated, {});
-    _next_offset = model::offset_cast(
-      model::next_offset(dest->back().last_offset()));
-    _current = _unhydrated.empty() ? state::empty_state : state::ready_state;
 }
 
 void level_zero_log_reader_impl::print(std::ostream& o) {
