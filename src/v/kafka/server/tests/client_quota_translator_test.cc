@@ -19,6 +19,8 @@
 #include <boost/test/test_tools.hpp>
 #include <boost/test/unit_test.hpp>
 
+#include <optional>
+#include <ranges>
 #include <variant>
 
 using namespace kafka;
@@ -211,7 +213,7 @@ SEASTAR_THREAD_TEST_CASE(quota_translator_priority_order) {
                          const std::optional<uint64_t> expected_value,
                          const client_quota_rule expected_rule) {
         auto [k, value] = f.tr.find_quota(
-          {.q_type = q_type, .client_id = "franz-go"});
+          {.q_type = q_type, .user = "alice", .client_id = "franz-go"});
         CHECK_VARIANT_EQ(expected_key, k);
         BOOST_CHECK_EQUAL(expected_value, value.limit);
         BOOST_CHECK_EQUAL(expected_rule, value.rule);
@@ -243,6 +245,14 @@ SEASTAR_THREAD_TEST_CASE(quota_translator_priority_order) {
     // priority level X and Y = {1, 2, 3} for produce/fetch/partition mutation
     // quotas respectively to check that their values are independent.
 
+    // 0. First: no client quotas
+    check_quotas(
+      k_not_applicable{},
+      {.produce_limit = std::nullopt,
+       .fetch_limit = std::nullopt,
+       .partition_mutation_limit = std::nullopt},
+      client_quota_rule::not_applicable);
+
     // 1. Next: default client quota
     {
         auto ekey = entity_key{entity_key::client_id_default_match{}};
@@ -259,7 +269,7 @@ SEASTAR_THREAD_TEST_CASE(quota_translator_priority_order) {
       {.produce_limit = 11, .fetch_limit = 12, .partition_mutation_limit = 13},
       client_quota_rule::kafka_client_default);
 
-    // 2. Next: client id prefix quota store
+    // 2. Next: client id prefix quota
     {
         auto ekey = entity_key{entity_key::client_id_prefix_match{"franz-go"}};
         auto evalues = entity_value{
@@ -275,7 +285,7 @@ SEASTAR_THREAD_TEST_CASE(quota_translator_priority_order) {
       {.produce_limit = 21, .fetch_limit = 22, .partition_mutation_limit = 23},
       client_quota_rule::kafka_client_prefix);
 
-    // 3. Finally: client id exact match quota store
+    // 3. Next: client id exact match quota
     {
         auto ekey = entity_key{entity_key::client_id_match{"franz-go"}};
         auto evalues = entity_value{
@@ -290,6 +300,150 @@ SEASTAR_THREAD_TEST_CASE(quota_translator_priority_order) {
       k_client_id{"franz-go"},
       {.produce_limit = 31, .fetch_limit = 32, .partition_mutation_limit = 33},
       client_quota_rule::kafka_client_id);
+
+    // 4. Next: user default match quota
+    {
+        auto ekey = entity_key{entity_key::user_default_match{}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 41,
+          .consumer_byte_rate = 42,
+          .controller_mutation_rate = 43,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      k_user{"alice"},
+      {.produce_limit = 41, .fetch_limit = 42, .partition_mutation_limit = 43},
+      client_quota_rule::kafka_user_default);
+
+    // 5. Next: user default client id default match quota
+    {
+        auto ekey = entity_key{
+          entity_key::user_default_match{},
+          entity_key::client_id_default_match{}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 51,
+          .consumer_byte_rate = 52,
+          .controller_mutation_rate = 53,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      std::make_pair(k_user{"alice"}, k_client_id{"franz-go"}),
+      {.produce_limit = 51, .fetch_limit = 52, .partition_mutation_limit = 53},
+      client_quota_rule::kafka_user_default_client_default);
+
+    // 6. Next: user default client id prefix match quota
+    {
+        auto ekey = entity_key{
+          entity_key::user_default_match{},
+          entity_key::client_id_prefix_match{"franz-go"}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 61,
+          .consumer_byte_rate = 62,
+          .controller_mutation_rate = 63,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      std::make_pair(k_user{"alice"}, k_group_name{"franz-go"}),
+      {.produce_limit = 61, .fetch_limit = 62, .partition_mutation_limit = 63},
+      client_quota_rule::kafka_user_default_client_prefix);
+
+    // 7. Next: user default client id exact match quota
+    {
+        auto ekey = entity_key{
+          entity_key::user_default_match{},
+          entity_key::client_id_match{"franz-go"}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 71,
+          .consumer_byte_rate = 72,
+          .controller_mutation_rate = 73,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      std::make_pair(k_user{"alice"}, k_client_id{"franz-go"}),
+      {.produce_limit = 71, .fetch_limit = 72, .partition_mutation_limit = 73},
+      client_quota_rule::kafka_user_default_client_id);
+
+    // 8. Next: user exact match quota
+    {
+        auto ekey = entity_key{entity_key::user_match{"alice"}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 81,
+          .consumer_byte_rate = 82,
+          .controller_mutation_rate = 83,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      k_user{"alice"},
+      {.produce_limit = 81, .fetch_limit = 82, .partition_mutation_limit = 83},
+      client_quota_rule::kafka_user);
+
+    // 9. Next: user exact client id default match quota
+    {
+        auto ekey = entity_key{
+          entity_key::user_match{"alice"},
+          entity_key::client_id_default_match{}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 91,
+          .consumer_byte_rate = 92,
+          .controller_mutation_rate = 93,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      std::make_pair(k_user{"alice"}, k_client_id{"franz-go"}),
+      {.produce_limit = 91, .fetch_limit = 92, .partition_mutation_limit = 93},
+      client_quota_rule::kafka_user_client_default);
+
+    // 10. Next: user exact client id prefix match quota
+    {
+        auto ekey = entity_key{
+          entity_key::user_match{"alice"},
+          entity_key::client_id_prefix_match{"franz-go"}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 101,
+          .consumer_byte_rate = 102,
+          .controller_mutation_rate = 103,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      std::make_pair(k_user{"alice"}, k_group_name{"franz-go"}),
+      {.produce_limit = 101,
+       .fetch_limit = 102,
+       .partition_mutation_limit = 103},
+      client_quota_rule::kafka_user_client_prefix);
+
+    // 11. Next: user exact client id exact match quota
+    {
+        auto ekey = entity_key{
+          entity_key::user_match{"alice"},
+          entity_key::client_id_match{"franz-go"}};
+        auto evalues = entity_value{
+          .producer_byte_rate = 111,
+          .consumer_byte_rate = 112,
+          .controller_mutation_rate = 113,
+        };
+        f.quota_store.local().set_quota(ekey, evalues);
+    }
+
+    check_quotas(
+      std::make_pair(k_user{"alice"}, k_client_id{"franz-go"}),
+      {.produce_limit = 111,
+       .fetch_limit = 112,
+       .partition_mutation_limit = 113},
+      client_quota_rule::kafka_user_client_id);
 }
 
 SEASTAR_THREAD_TEST_CASE(quota_translator_watch_test) {
