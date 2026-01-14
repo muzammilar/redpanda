@@ -38,7 +38,30 @@ ctp_stm_state::estimate_min_epoch() const noexcept {
 
 std::optional<cluster_epoch>
 ctp_stm_state::get_previous_epoch() const noexcept {
-    return std::max(_previous_epoch, _previous_seen_epoch);
+    return _previous_epoch;
+}
+
+bool ctp_stm_state::epoch_in_window(cluster_epoch epoch) const noexcept {
+    // NOTE: the window should move forward with _max_seen_epoch.
+    // If _max_seen_epoch is greater than _max_applied_epoch then
+    // the window should be [_previous_seen_epoch, _max_seen_epoch].
+    // The window reflects in-flight requests. Write fence is required
+    // to move it forward.
+    auto end = _max_seen_epoch.value_or(
+      _max_applied_epoch.value_or(cluster_epoch::min()));
+    auto begin = _previous_seen_epoch.value_or(_previous_epoch.value_or(end));
+    return epoch >= begin && epoch <= end;
+}
+
+std::optional<cluster_epoch>
+ctp_stm_state::estimate_inactive_epoch() const noexcept {
+    // NOTE: the inactive epoch shouldn't be estimated using the transient
+    // state (_previous_seen_epoch, _max_seen_epoch). It should only take
+    // into account committed state and ignore state that reflects in-flight
+    // requests.
+    auto estimate = estimate_min_epoch().transform(prev_cluster_epoch);
+    auto prev = _previous_epoch.transform(prev_cluster_epoch);
+    return std::min(estimate, prev); // returning nullopt here is safe
 }
 
 void ctp_stm_state::advance_epoch(cluster_epoch epoch, model::offset offset) {

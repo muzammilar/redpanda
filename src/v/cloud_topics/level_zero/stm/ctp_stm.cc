@@ -201,9 +201,7 @@ ss::future<bool> ctp_stm::sync_in_term(
 }
 
 std::optional<cluster_epoch> ctp_stm::estimate_inactive_epoch() const noexcept {
-    auto estimate = _state.estimate_min_epoch().transform(prev_cluster_epoch);
-    auto prev = _state.get_previous_epoch().transform(prev_cluster_epoch);
-    return std::min(estimate, prev); // returning nullopt here is safe
+    return _state.estimate_inactive_epoch();
 }
 
 ss::future<std::optional<cluster_epoch>> ctp_stm::get_inactive_epoch() {

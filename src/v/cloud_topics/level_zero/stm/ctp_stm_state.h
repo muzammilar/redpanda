@@ -86,13 +86,11 @@ public:
     /// Note that this value is not necessary equal to estimate_min_epoch.
     std::optional<cluster_epoch> get_previous_epoch() const noexcept;
 
-    bool epoch_in_window(cluster_epoch epoch) const noexcept {
-        auto end = _max_seen_epoch.value_or(
-          _max_applied_epoch.value_or(cluster_epoch::min()));
-        auto begin = _previous_seen_epoch.value_or(
-          _previous_epoch.value_or(end));
-        return epoch >= begin && epoch <= end;
-    }
+    /// Return true if the epoch can be replicated
+    bool epoch_in_window(cluster_epoch epoch) const noexcept;
+
+    /// Estimate inactive epoch
+    std::optional<cluster_epoch> estimate_inactive_epoch() const noexcept;
 
     /// Advance LRO and it's translated log offset counterpart.
     void advance_last_reconciled_offset(

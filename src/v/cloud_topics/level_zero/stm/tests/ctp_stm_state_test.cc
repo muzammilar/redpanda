@@ -167,11 +167,7 @@ TEST(ctp_stm_state_test, sliding_window_issue) {
 
     auto estimate_inactive_epoch =
       [&state] -> std::optional<ct::cluster_epoch> {
-        auto estimate = state.estimate_min_epoch().transform(
-          ct::prev_cluster_epoch);
-        auto prev = state.get_previous_epoch().transform(
-          ct::prev_cluster_epoch);
-        return std::min(estimate, prev);
+        return state.estimate_inactive_epoch();
     };
 
     auto apply_replicated = [&state, &hwm](ct::cluster_epoch epoch) {
@@ -226,7 +222,7 @@ TEST(ctp_stm_state_test, sliding_window_issue) {
     EXPECT_TRUE(state.epoch_in_window(3_epoch));
 
     // Still not safe to GC, we accept stuff at epoch 0
-    EXPECT_EQ(estimate_inactive_epoch(), ct::cluster_epoch::min());
+    EXPECT_EQ(estimate_inactive_epoch(), std::nullopt);
 
     apply_replicated(5_epoch);
 
