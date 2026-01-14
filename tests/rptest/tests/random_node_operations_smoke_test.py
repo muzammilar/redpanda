@@ -700,6 +700,9 @@ class RandomNodeOperationsBase(PreallocNodesTest):
                     "redpanda.cloud_topic.enabled": "true",
                 },
             )
+            self.maybe_enable_iceberg_for_topic(
+                cloud_topics_delete_consumer.topic, with_iceberg
+            )
             cloud_topics_delete_consumer.start(clean=False)
 
             rpk.create_topic(
@@ -713,6 +716,9 @@ class RandomNodeOperationsBase(PreallocNodesTest):
                     "redpanda.remote.write": "false",
                     "redpanda.cloud_topic.enabled": "true",
                 },
+            )
+            self.maybe_enable_iceberg_for_topic(
+                cloud_topics_compact_consumer.topic, with_iceberg
             )
             cloud_topics_compact_consumer.start(clean=False)
 
