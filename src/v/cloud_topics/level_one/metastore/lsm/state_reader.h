@@ -29,12 +29,17 @@ public:
         ss::sstring key;
         extent_row_value val;
     };
+
+    enum class direction { forward, backward };
+
     class extent_key_range {
     public:
-        extent_key_range(ss::sstring base, ss::sstring last, lsm::iterator it)
+        extent_key_range(
+          ss::sstring base, ss::sstring last, lsm::iterator it, direction dir)
           : _base_key(std::move(base))
           , _last_key(std::move(last))
-          , _iter(std::move(it)) {}
+          , _iter(std::move(it))
+          , _direction(dir) {}
 
         // Returns extent_rows matching exactly between _base_key and
         // _last_key, or generates an error if it can't.
@@ -54,6 +59,7 @@ public:
 
         // Snapshot of the database.
         lsm::iterator _iter;
+        direction _direction;
     };
 
     explicit state_reader(lsm::snapshot snap)

@@ -61,22 +61,27 @@ bool is_at_extent(
 
 ss::sstring state_reader::extent_key_range::to_string() {
     return fmt::format(
-      "extent_key_range: [{}, {}], iter: {}",
+      "extent_key_range: [{}, {}], {} iter: {}",
       _base_key,
       _last_key,
+      _direction == direction::forward ? "forward" : "backward",
       _iter.valid() ? _iter.key() : "{invalid iterator}");
 }
 
 ss::coroutine::experimental::generator<
   std::expected<state_reader::extent_row, state_reader::errc>>
 state_reader::extent_key_range::get_rows() {
-    auto fut = co_await ss::coroutine::as_future(_iter.seek(_base_key));
+    const bool forward = _direction == direction::forward;
+    const auto& start_key = forward ? _base_key : _last_key;
+    const auto& end_key = forward ? _last_key : _base_key;
+
+    auto fut = co_await ss::coroutine::as_future(_iter.seek(start_key));
     if (fut.failed()) {
         auto ex = fut.get_exception();
         co_yield std::unexpected(to_errc(ex));
         co_return;
     }
-    if (!_iter.valid() || _iter.key() != _base_key) {
+    if (!_iter.valid() || _iter.key() != start_key) {
         vlog(cd_log.error, "Expected base key: {}", to_string());
         co_yield std::unexpected(errc::corruption);
         co_return;
@@ -89,15 +94,19 @@ state_reader::extent_key_range::get_rows() {
               .key = ss::sstring(_iter.key()),
               .val = val,
             };
-            if (_iter.key() == _last_key) {
+            if (_iter.key() == end_key) {
                 co_return;
             }
-            if (_iter.key() > _last_key) {
+            if (forward ? (_iter.key() > end_key) : (_iter.key() < end_key)) {
                 vlog(cd_log.error, "Unexpected key past last: {}", to_string());
                 co_yield std::unexpected(errc::corruption);
                 co_return;
             }
-            co_await _iter.next();
+            if (forward) {
+                co_await _iter.next();
+            } else {
+                co_await _iter.prev();
+            }
         } catch (...) {
             ex = std::current_exception();
         }
@@ -330,7 +339,10 @@ state_reader::get_extent_range(
         co_return std::unexpected(to_errc(std::current_exception()));
     }
     co_return extent_key_range(
-      std::move(base_key), std::move(last_key), std::move(iter));
+      std::move(base_key),
+      std::move(last_key),
+      std::move(iter),
+      direction::forward);
 }
 
 template<typename KeyT, typename ValT, typename... KeyEncodeArgs>
