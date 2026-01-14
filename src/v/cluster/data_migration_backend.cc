@@ -1545,96 +1545,97 @@ ss::future<check_ntp_states_reply>
 backend::check_ntp_states_locally(check_ntp_states_request&& req) {
     vlog(dm_log.debug, "processing node request {}", req);
     check_ntp_states_reply reply;
-    for (const auto& ntp_req : req.sought_states) {
-        vlog(
-          dm_log.trace,
-          "received an RPC to promote ntp {} to state {} for migration {}",
-          ntp_req.ntp,
-          ntp_req.state,
-          ntp_req.migration);
-        // due to async notification processing we may get fresher state
-        // than we have in rwstate; this is fine
-        const auto maybe_migration = _table.get_migration(ntp_req.migration);
-        if (!maybe_migration) {
-            // migration either not yet there or gone, and we cannot tell
-            // for sure => no reply
-            vlog(
-              dm_log.trace,
-              "migration {} not found, ignoring",
-              ntp_req.migration);
-            continue;
-        }
+    co_await ssx::async_for_each(
+      req.sought_states, [this, &reply](const auto& ntp_req) {
+          vlog(
+            dm_log.trace,
+            "received an RPC to promote ntp {} to state {} for migration {}",
+            ntp_req.ntp,
+            ntp_req.state,
+            ntp_req.migration);
+          // due to async notification processing we may get fresher state
+          // than we have in rwstate; this is fine
+          const auto maybe_migration = _table.get_migration(ntp_req.migration);
+          if (!maybe_migration) {
+              // migration either not yet there or gone, and we cannot tell
+              // for sure => no reply
+              vlog(
+                dm_log.trace,
+                "migration {} not found, ignoring",
+                ntp_req.migration);
+              return;
+          }
 
-        const auto& metadata = maybe_migration->get();
-        if (metadata.state >= ntp_req.state) {
-            vlog(
-              dm_log.trace,
-              "migration {} already in state {}, no partition work needed",
-              ntp_req.migration,
-              metadata.state);
-            // report progress migration-wise, whether or not made by us
-            reply.actual_states.push_back(
-              {.ntp = ntp_req.ntp,
-               .migration = metadata.id,
-               .state = metadata.state});
-            continue;
-        }
+          const auto& metadata = maybe_migration->get();
+          if (metadata.state >= ntp_req.state) {
+              vlog(
+                dm_log.trace,
+                "migration {} already in state {}, no partition work needed",
+                ntp_req.migration,
+                metadata.state);
+              // report progress migration-wise, whether or not made by us
+              reply.actual_states.push_back(
+                {.ntp = ntp_req.ntp,
+                 .migration = metadata.id,
+                 .state = metadata.state});
+              return;
+          }
 
-        model::topic_namespace_view ntp_view{ntp_req.ntp};
-        auto& rwstate
-          = *_local_work_states[ntp_view][ntp_req.ntp.tp.partition]
-               .try_emplace(
-                 ntp_req.migration,
-                 ntp_req.state,
-                 std::nullopt,
-                 migrated_replica_status::waiting_for_controller_update)
-               .first;
+          model::topic_namespace_view ntp_view{ntp_req.ntp};
+          auto& rwstate
+            = *_local_work_states[ntp_view][ntp_req.ntp.tp.partition]
+                 .try_emplace(
+                   ntp_req.migration,
+                   ntp_req.state,
+                   std::nullopt,
+                   migrated_replica_status::waiting_for_controller_update)
+                 .first;
 
-        if (ntp_req.state > rwstate.second.sought_state) {
-            // RPC request indicates that partition work has already progressed
-            // to a later state. Stop current work and wait for the controller
-            // update.
-            if (rwstate.second.shard) {
-                stop_partition_work(ntp_req.ntp, rwstate);
-            }
-            rwstate.second = {
-              ntp_req.state,
-              std::nullopt,
-              migrated_replica_status::waiting_for_controller_update};
-        } else if (ntp_req.state < rwstate.second.sought_state) {
-            vlog(
-              dm_log.warn,
-              "migration_id={} got RPC to move ntp {} to state {}, but current "
-              "replica work state is {}, ignoring",
-              ntp_req.migration,
-              ntp_req.ntp,
-              ntp_req.state,
-              rwstate.second);
-            continue;
-        }
+          if (ntp_req.state > rwstate.second.sought_state) {
+              // RPC request indicates that partition work has already
+              // progressed to a later state. Stop current work and wait for
+              // the controller update.
+              if (rwstate.second.shard) {
+                  stop_partition_work(ntp_req.ntp, rwstate);
+              }
+              rwstate.second = {
+                ntp_req.state,
+                std::nullopt,
+                migrated_replica_status::waiting_for_controller_update};
+          } else if (ntp_req.state < rwstate.second.sought_state) {
+              vlog(
+                dm_log.warn,
+                "migration_id={} got RPC to move ntp {} to state {}, but "
+                "current replica work state is {}, ignoring",
+                ntp_req.migration,
+                ntp_req.ntp,
+                ntp_req.state,
+                rwstate.second);
+              return;
+          }
 
-        switch (rwstate.second.status) {
-        case migrated_replica_status::waiting_for_controller_update:
-            break;
-        case migrated_replica_status::waiting_for_rpc:
-            // raft0 and RPC agree => time to do it!
-            rwstate.second.status = migrated_replica_status::can_run;
-            [[fallthrough]];
-        case migrated_replica_status::can_run: {
-            auto new_shard = _shard_table.shard_for(ntp_req.ntp);
-            update_partition_shard(ntp_req.ntp, rwstate, new_shard);
-            break;
-        }
-        case migrated_replica_status::done:
-            reply.actual_states.push_back(
-              {.ntp = ntp_req.ntp,
-               .migration = metadata.id,
-               .state = ntp_req.state});
-        }
-    }
+          switch (rwstate.second.status) {
+          case migrated_replica_status::waiting_for_controller_update:
+              break;
+          case migrated_replica_status::waiting_for_rpc:
+              // raft0 and RPC agree => time to do it!
+              rwstate.second.status = migrated_replica_status::can_run;
+              [[fallthrough]];
+          case migrated_replica_status::can_run: {
+              auto new_shard = _shard_table.shard_for(ntp_req.ntp);
+              update_partition_shard(ntp_req.ntp, rwstate, new_shard);
+              break;
+          }
+          case migrated_replica_status::done:
+              reply.actual_states.push_back(
+                {.ntp = ntp_req.ntp,
+                 .migration = metadata.id,
+                 .state = ntp_req.state});
+          }
+      });
 
     vlog(dm_log.debug, "node request reply: {}", reply);
-    return ssx::now(std::move(reply));
+    co_return reply;
 }
 
 void backend::update_partition_shard(
