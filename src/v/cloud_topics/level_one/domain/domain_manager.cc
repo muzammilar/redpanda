@@ -642,8 +642,9 @@ ss::future<> domain_manager::gc_loop() {
 
     // TODO: make configurable.
     garbage_collector gc(stm_.get(), object_io_);
+    auto ntp = stm_->raft()->log()->config().ntp();
     while (!as_.abort_requested()) {
-        vlog(cd_log.debug, "Running garbage collection now...");
+        vlog(cd_log.debug, "{} - Running garbage collection now...", ntp);
         auto gc_res = co_await gc.remove_unreferenced_objects(&as_);
         if (!gc_res.has_value()) {
             vlog(cd_log.warn, "Garbage collection failed: {}", gc_res.error());
@@ -651,7 +652,8 @@ ss::future<> domain_manager::gc_loop() {
         auto sleep_interval = gc_interval_();
         vlog(
           cd_log.debug,
-          "Re-running garbage collection in {}...",
+          "{} - Re-running garbage collection in {}...",
+          ntp,
           sleep_interval);
         try {
             co_await sem_.wait(
@@ -670,7 +672,8 @@ ss::future<> domain_manager::gc_loop() {
               eptr);
         }
     }
-    vlog(cd_log.debug, "Garbage collection loop stopped...");
+
+    vlog(cd_log.debug, "{} - Garbage collection loop stopped...", ntp);
 }
 
 } // namespace cloud_topics::l1
