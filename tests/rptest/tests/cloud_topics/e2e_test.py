@@ -110,7 +110,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
                 config=config,
             )
 
-    def wait_until_reconciled(self, topic: str, partition: int, transactions: bool):
+    def wait_until_reconciled(self, topic: str, partition: int):
         def get_offsets():
             last_record: int | None = None
             output = self.rpk.consume(
@@ -149,14 +149,10 @@ class EndToEndCloudTopicsBase(EndToEndTest):
             retry_on_exc=True,
         )
 
-    def wait_until_all_reconciled(
-        self, topics: Iterable[TopicSpec] | None = None, transactions: bool = False
-    ):
+    def wait_until_all_reconciled(self, topics: Iterable[TopicSpec] | None = None):
         for topic in topics or self.topics:
             for partition in range(topic.partition_count):
-                self.wait_until_reconciled(
-                    topic=topic.name, partition=partition, transactions=transactions
-                )
+                self.wait_until_reconciled(topic=topic.name, partition=partition)
 
 
 class EndToEndCloudTopicsTest(EndToEndCloudTopicsBase):
@@ -275,7 +271,7 @@ class EndToEndCloudTopicsTxTest(EndToEndCloudTopicsBase):
         assert cstatus.validator.valid_reads == committed_messages
         assert cstatus.validator.invalid_reads == 0
         assert cstatus.validator.out_of_scope_invalid_reads == 0
-        self.wait_until_all_reconciled(self.topics, transactions=True)
+        self.wait_until_all_reconciled(self.topics)
 
 
 class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
