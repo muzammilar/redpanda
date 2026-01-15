@@ -118,6 +118,8 @@ private:
     ss::lw_shared_ptr<const cloud_roles::apply_credentials> _apply_credentials;
 };
 
+class gcs_client;
+
 /// S3 REST-API client
 class s3_client : public client {
 public:
@@ -257,9 +259,29 @@ private:
     ss::future<bool> self_configure_test(const plain_bucket_name& bucket);
 
 private:
+    friend class gcs_client;
     request_creator _requestor;
     http::client _client;
     ss::shared_ptr<client_probe> _probe;
+};
+
+class gcs_client : public s3_client {
+public:
+    gcs_client(
+      ss::weak_ptr<client_pool> pool_ptr,
+      const s3_configuration& conf,
+      const net::base_transport::configuration& transport_conf,
+      ss::shared_ptr<client_probe> probe,
+      ss::lw_shared_ptr<const cloud_roles::apply_credentials>
+        apply_credentials);
+    gcs_client(
+      ss::weak_ptr<client_pool> pool_ptr,
+      const s3_configuration& conf,
+      const net::base_transport::configuration& transport_conf,
+      ss::shared_ptr<client_probe> probe,
+      const ss::abort_source& as,
+      ss::lw_shared_ptr<const cloud_roles::apply_credentials>
+        apply_credentials);
 };
 
 std::variant<client::delete_objects_result, rest_error_response>

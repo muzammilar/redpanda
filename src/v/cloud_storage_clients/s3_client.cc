@@ -1238,4 +1238,33 @@ auto s3_client::delete_objects(
     co_return co_await send_request(
       do_delete_objects(bucket, keys, timeout), bucket, dummy);
 }
+
+gcs_client::gcs_client(
+  ss::weak_ptr<client_pool> pool_ptr,
+  const s3_configuration& conf,
+  const net::base_transport::configuration& transport_conf,
+  ss::shared_ptr<client_probe> probe,
+  ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
+  : s3_client(
+      std::move(pool_ptr),
+      conf,
+      transport_conf,
+      std::move(probe),
+      std::move(apply_credentials)) {}
+
+gcs_client::gcs_client(
+  ss::weak_ptr<client_pool> pool_ptr,
+  const s3_configuration& conf,
+  const net::base_transport::configuration& transport_conf,
+  ss::shared_ptr<client_probe> probe,
+  const ss::abort_source& as,
+  ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
+  : s3_client(
+      std::move(pool_ptr),
+      conf,
+      transport_conf,
+      std::move(probe),
+      as,
+      std::move(apply_credentials)) {}
+
 } // namespace cloud_storage_clients
