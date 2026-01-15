@@ -537,8 +537,9 @@ TEST_F(StateUpdateTest, TestAddObjectsWithCorrections) {
     verify_extent_missing(tidp0, kafka::offset(50));
     verify_extent_exists(tidp0, kafka::offset(0), kafka::offset(99));
 
-    // The misaligned object should be in the metastore as empty.
-    verify_object_exists(new_oid, 0, 0);
+    // The misaligned object should be in the metastore with all data marked
+    // as removed.
+    verify_object_exists(new_oid, 1024, 1024);
 }
 
 TEST_F(StateUpdateTest, TestReplaceObjectsBasic) {

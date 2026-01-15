@@ -22,9 +22,6 @@ namespace {
 
 // Checks the input new objects and ensures that they don't already exist in
 // the state. Collects the input extents and objects into the input maps.
-//
-// NOTE: the returned total_data_size fields are not populated and must be
-// populated after determining whether to accept the extents.
 ss::future<std::expected<void, db_update_error>> validate_new_objects_missing(
   const chunked_vector<new_object>& new_objects,
   state_reader& state,
@@ -40,11 +37,11 @@ ss::future<std::expected<void, db_update_error>> validate_new_objects_missing(
             co_return std::unexpected(
               db_update_error{fmt::format("Object {} already exists", o.oid)});
         }
-        o.collect_extents_by_tidp(&out_extents);
+        auto data_size = o.collect_extents_by_tidp(&out_extents);
         out_objects.emplace(
           o.oid,
           object_entry{
-            .total_data_size = 0,
+            .total_data_size = data_size,
             .removed_data_size = 0,
             .footer_pos = o.footer_pos,
             .object_size = o.object_size,
@@ -261,14 +258,15 @@ add_objects_db_update::build_rows(
         if (extents.begin()->base_offset != expected_next) {
             // If the start of the new extents for this partition aren't
             // aligned, allow the operation to succeed, but the expectation is
-            // when applying, we'll "drop" these extents.
+            // when applying, we'll "drop" these extents. Account for them as
+            // removed data.
+            for (const auto& extent : extents) {
+                new_objects_by_oid[extent.oid].removed_data_size += extent.len;
+            }
             corrected_next_offsets[tidp] = expected_next;
             continue;
         }
-        // Now that we know we'll accept this partition's extents, account for
-        // their size.
         for (const auto& extent : extents) {
-            new_objects_by_oid[extent.oid].total_data_size += extent.len;
             verified_extents[tidp].push_back(extent);
         }
         verified_meta_vals[tidp] = metadata_row_value{
@@ -481,13 +479,6 @@ replace_objects_db_update::build_rows(
       new_objects, state, new_extents_by_tp, new_objects_map);
     if (!new_extents_res.has_value()) {
         co_return std::unexpected(new_extents_res.error());
-    }
-    // Count up the total data size of all new extents, with the expectation
-    // that we're going to accept all of them (or return an error).
-    for (const auto& [tidp, extents] : new_extents_by_tp) {
-        for (const auto& extent : extents) {
-            new_objects_map[extent.oid].total_data_size += extent.len;
-        }
     }
 
     // Calculate contiguous intervals and validate that they align with

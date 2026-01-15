@@ -86,10 +86,13 @@ void remove_extents_below_start_offset_for_tp(
 
 } // namespace
 
-void new_object::collect_extents_by_tidp(sorted_extents_by_tidp_t* ret) const {
+size_t
+new_object::collect_extents_by_tidp(sorted_extents_by_tidp_t* ret) const {
+    size_t total_data_size = 0;
     for (const auto& [tid, p_extents] : extent_metas) {
         for (const auto& [p, extent_meta] : p_extents) {
             auto& ret_extents = (*ret)[model::topic_id_partition(tid, p)];
+            total_data_size += extent_meta.len;
             ret_extents.insert(
               extent{
                 .base_offset = extent_meta.base_offset,
@@ -101,6 +104,7 @@ void new_object::collect_extents_by_tidp(sorted_extents_by_tidp_t* ret) const {
               });
         }
     }
+    return total_data_size;
 }
 
 std::expected<add_objects_update, stm_update_error> add_objects_update::build(
