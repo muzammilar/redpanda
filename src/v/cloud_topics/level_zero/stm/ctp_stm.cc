@@ -332,7 +332,8 @@ void ctp_stm::apply_placeholder(const model::record_batch& batch) {
     // than the computed state.
     vassert(
       id.epoch >= _state.get_previous_epoch().value_or(cluster_epoch::min()),
-      "Observed a non-monotonic epoch sequence {} < {}",
+      "[{}] Observed a non-monotonic epoch sequence {} < {}",
+      ntp(),
       id.epoch,
       _state.get_previous_epoch());
     _state.advance_epoch(id.epoch, batch.header().base_offset);
