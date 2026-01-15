@@ -106,6 +106,11 @@ public:
       std::optional<kafka::offset> min_offset,
       std::optional<kafka::offset> max_offset);
 
+    // Returns the term containing the given offset, i.e. the term with the
+    // start_offset <= the given offset, or  nullopt if no such term exists.
+    ss::future<std::expected<std::optional<term_start>, errc>>
+    get_term_le(const model::topic_id_partition&, kafka::offset);
+
 private:
     ss::future<
       std::expected<std::optional<std::pair<ss::sstring, ss::sstring>>, errc>>

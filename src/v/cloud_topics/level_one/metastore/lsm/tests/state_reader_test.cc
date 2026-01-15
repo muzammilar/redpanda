@@ -754,3 +754,52 @@ TEST_F(StateReaderTestFixture, TestGetExtentsBackward) {
         EXPECT_FALSE(res.value().has_value());
     }
 }
+
+namespace {
+
+void verify_term_of(
+  state_reader& reader,
+  const model::topic_id_partition& tidp,
+  kafka::offset o,
+  std::optional<model::term_id> expected_term) {
+    SCOPED_TRACE(fmt::format("tidp={}, o={}", tidp, o));
+    auto res = reader.get_term_le(tidp, o).get();
+    ASSERT_TRUE(res.has_value());
+    if (expected_term.has_value()) {
+        ASSERT_TRUE(res.value().has_value());
+        EXPECT_EQ(res.value()->term_id, expected_term.value());
+    } else {
+        EXPECT_FALSE(res.value().has_value());
+    }
+}
+
+} // namespace
+
+TEST_F(StateReaderTestFixture, TestGetTermLe) {
+    auto tidp = make_tidp(0);
+    write_term_start(tidp, model::term_id(1), kafka::offset(10));
+    write_term_start(tidp, model::term_id(3), kafka::offset(100));
+    write_term_start(tidp, model::term_id(7), kafka::offset(250));
+
+    auto reader = make_reader();
+
+    // Offsets below which we have term start return nullopt.
+    verify_term_of(reader, tidp, kafka::offset(0), std::nullopt);
+    verify_term_of(reader, tidp, kafka::offset(9), std::nullopt);
+
+    // Offsets before term 3 should be in term 1.
+    verify_term_of(reader, tidp, kafka::offset(10), model::term_id(1));
+    verify_term_of(reader, tidp, kafka::offset(99), model::term_id(1));
+
+    // Offsets before term 7 should be in term 3.
+    verify_term_of(reader, tidp, kafka::offset(100), model::term_id(3));
+    verify_term_of(reader, tidp, kafka::offset(249), model::term_id(3));
+
+    // Offsets at or after term 7 should be in term 7.
+    verify_term_of(reader, tidp, kafka::offset(250), model::term_id(7));
+    verify_term_of(reader, tidp, kafka::offset(1000), model::term_id(7));
+
+    // Missing partition should return nullopt.
+    auto missing_tidp = make_tidp(1);
+    verify_term_of(reader, missing_tidp, kafka::offset(100), std::nullopt);
+}

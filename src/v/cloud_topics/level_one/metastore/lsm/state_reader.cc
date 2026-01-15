@@ -487,6 +487,63 @@ state_reader::get_inclusive_extents_backward(
       direction::backward);
 }
 
+namespace {
+
+bool is_at_term(
+  lsm::iterator& iter,
+  const model::topic_id_partition& tidp,
+  term_row_key* out = nullptr) {
+    if (!iter.valid()) {
+        return false;
+    }
+    auto key = term_row_key::decode(iter.key());
+    if (!key.has_value() || key->tidp != tidp) {
+        return false;
+    }
+    if (out) {
+        *out = key.value();
+    }
+    return true;
+}
+
+} // namespace
+
+ss::future<std::expected<std::optional<term_start>, state_reader::errc>>
+state_reader::get_term_le(
+  const model::topic_id_partition& tidp, kafka::offset offset) {
+    try {
+        auto iter = co_await snap_.create_iterator();
+
+        // Seek to the first term of the next partition and iterate backwards.
+        co_await iter.seek(
+          term_row_key::encode(next_partition(tidp), model::term_id(0)));
+        if (!iter.valid()) {
+            co_await iter.seek_to_last();
+        } else {
+            co_await iter.prev();
+        }
+
+        // Iterate backwards through terms, find first with start_offset <=
+        // offset.
+        while (is_at_term(iter, tidp)) {
+            auto val = serde::from_iobuf<term_row_value>(iter.value());
+            if (val.term_start_offset <= offset) {
+                auto key = term_row_key::decode(iter.key());
+                co_return term_start{
+                  .term_id = key->term,
+                  .start_offset = val.term_start_offset,
+                };
+            }
+            co_await iter.prev();
+        }
+
+        // No term found with start_offset <= offset.
+        co_return std::nullopt;
+    } catch (...) {
+        co_return std::unexpected(to_errc(std::current_exception()));
+    }
+}
+
 template<typename KeyT, typename ValT, typename... KeyEncodeArgs>
 ss::future<std::expected<std::optional<ValT>, state_reader::errc>>
 state_reader::get_val(KeyEncodeArgs... args) {
