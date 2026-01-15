@@ -402,6 +402,43 @@ void validate_extent_range(
     EXPECT_EQ(rows.back()->val.last_offset(), last);
 }
 
+void verify_inclusive_extents(
+  state_reader& reader,
+  const model::topic_id_partition& tidp,
+  std::optional<int64_t> min_offset,
+  std::optional<int64_t> max_offset,
+  std::vector<int64_t> expected_base_offsets) {
+    SCOPED_TRACE(
+      fmt::format(
+        "min={}, max={}", min_offset.value_or(-1), max_offset.value_or(-1)));
+
+    std::optional<kafka::offset> min_opt = min_offset
+                                             ? std::make_optional(
+                                                 kafka::offset(*min_offset))
+                                             : std::nullopt;
+    std::optional<kafka::offset> max_opt = max_offset
+                                             ? std::make_optional(
+                                                 kafka::offset(*max_offset))
+                                             : std::nullopt;
+
+    auto res = reader.get_inclusive_extents(tidp, min_opt, max_opt).get();
+    ASSERT_TRUE(res.has_value());
+
+    if (expected_base_offsets.empty()) {
+        EXPECT_FALSE(res.value().has_value());
+        return;
+    }
+
+    ASSERT_TRUE(res.value().has_value());
+    auto rows = res.value()->materialize_rows().get();
+    ASSERT_EQ(rows.size(), expected_base_offsets.size());
+    for (size_t i = 0; i < expected_base_offsets.size(); ++i) {
+        auto key = extent_row_key::decode(rows[i]->key);
+        ASSERT_TRUE(key.has_value());
+        EXPECT_EQ(key->base_offset, kafka::offset(expected_base_offsets[i]));
+    }
+}
+
 } // namespace
 
 TEST_F(StateReaderTestFixture, TestGetExtentRangeSurroundedPartitions) {
@@ -503,4 +540,217 @@ TEST_F(StateReaderTestFixture, TestGetExtentRange) {
     validate_extent_range(reader, tidp1, 200, 200, 0);
     validate_extent_range(reader, tidp1, 200, 300, 0);
     validate_extent_range(reader, tidp1, 300, 300, 0);
+}
+
+TEST_F(StateReaderTestFixture, TestGetExtentsForward) {
+    auto tidp = make_tidp(0);
+    auto oid = make_oid();
+
+    // Create 3 extents: [100-199], [200-299], [300-399]
+    write_extent(
+      tidp,
+      kafka::offset(100),
+      kafka::offset(199),
+      model::timestamp(1000),
+      0,
+      1024,
+      oid);
+    write_extent(
+      tidp,
+      kafka::offset(200),
+      kafka::offset(299),
+      model::timestamp(2000),
+      1024,
+      1024,
+      oid);
+    write_extent(
+      tidp,
+      kafka::offset(300),
+      kafka::offset(399),
+      model::timestamp(3000),
+      2048,
+      1024,
+      oid);
+
+    auto reader = make_reader();
+
+    // Exact matches.
+    verify_inclusive_extents(reader, tidp, 100, 399, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 200, 399, {200, 300});
+    verify_inclusive_extents(reader, tidp, 100, 299, {100, 200});
+    verify_inclusive_extents(reader, tidp, 100, 199, {100});
+    verify_inclusive_extents(reader, tidp, 200, 299, {200});
+    verify_inclusive_extents(reader, tidp, 300, 399, {300});
+
+    // Imprecise boundaries.
+    verify_inclusive_extents(reader, tidp, 150, 350, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 99, 399, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 100, 400, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 99, 400, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 0, 1000, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 99, 199, {100});
+    verify_inclusive_extents(reader, tidp, 300, 400, {300});
+    verify_inclusive_extents(reader, tidp, 0, 99, {});
+    verify_inclusive_extents(reader, tidp, 400, 500, {});
+
+    // Null boundaries.
+    verify_inclusive_extents(reader, tidp, std::nullopt, 99, {});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 100, {100});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 199, {100});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 200, {100, 200});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 299, {100, 200});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 300, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 399, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 400, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 99, std::nullopt, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 100, std::nullopt, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 199, std::nullopt, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 200, std::nullopt, {200, 300});
+    verify_inclusive_extents(reader, tidp, 299, std::nullopt, {200, 300});
+    verify_inclusive_extents(reader, tidp, 300, std::nullopt, {300});
+    verify_inclusive_extents(reader, tidp, 399, std::nullopt, {300});
+    verify_inclusive_extents(reader, tidp, 400, std::nullopt, {});
+
+    // Both bounds special cases
+    verify_inclusive_extents(
+      reader, tidp, std::nullopt, std::nullopt, {100, 200, 300});
+    verify_inclusive_extents(reader, tidp, 199, 200, {100, 200});
+    verify_inclusive_extents(reader, tidp, 200, 200, {200});
+    verify_inclusive_extents(reader, tidp, 300, 100, {});
+}
+
+TEST_F(StateReaderTestFixture, TestGetExtentsSizeOne) {
+    auto tidp = make_tidp(0);
+    auto oid = make_oid();
+
+    // Create 3 extents with size 1: [100-100], [101-101], [102-102]
+    write_extent(
+      tidp,
+      kafka::offset(100),
+      kafka::offset(100),
+      model::timestamp(1000),
+      0,
+      1024,
+      oid);
+    write_extent(
+      tidp,
+      kafka::offset(101),
+      kafka::offset(101),
+      model::timestamp(2000),
+      1024,
+      1024,
+      oid);
+    write_extent(
+      tidp,
+      kafka::offset(102),
+      kafka::offset(102),
+      model::timestamp(3000),
+      2048,
+      1024,
+      oid);
+
+    auto reader = make_reader();
+
+    // Exact matches.
+    verify_inclusive_extents(reader, tidp, 100, 102, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, 101, 102, {101, 102});
+    verify_inclusive_extents(reader, tidp, 100, 101, {100, 101});
+    verify_inclusive_extents(reader, tidp, 100, 100, {100});
+    verify_inclusive_extents(reader, tidp, 101, 101, {101});
+    verify_inclusive_extents(reader, tidp, 102, 102, {102});
+
+    // Imprecise boundaries.
+    verify_inclusive_extents(reader, tidp, 99, 102, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, 100, 103, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, 99, 103, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, 0, 1000, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, 99, 100, {100});
+    verify_inclusive_extents(reader, tidp, 102, 103, {102});
+    verify_inclusive_extents(reader, tidp, 99, 99, {});
+    verify_inclusive_extents(reader, tidp, 103, 103, {});
+
+    // Null boundaries.
+    verify_inclusive_extents(reader, tidp, std::nullopt, 99, {});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 100, {100});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 101, {100, 101});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 102, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, std::nullopt, 103, {100, 101, 102});
+    verify_inclusive_extents(
+      reader, tidp, std::nullopt, std::nullopt, {100, 101, 102});
+    verify_inclusive_extents(reader, tidp, 101, std::nullopt, {101, 102});
+    verify_inclusive_extents(reader, tidp, 102, std::nullopt, {102});
+    verify_inclusive_extents(reader, tidp, 103, std::nullopt, {});
+    verify_inclusive_extents(reader, tidp, 103, std::nullopt, {});
+}
+
+TEST_F(StateReaderTestFixture, TestGetExtentsBackward) {
+    auto tidp = make_tidp(0);
+    auto oid = make_oid();
+
+    // Create 3 extents: [100-199], [200-299], [300-399]
+    write_extent(
+      tidp,
+      kafka::offset(100),
+      kafka::offset(199),
+      model::timestamp(1000),
+      0,
+      1024,
+      oid);
+    write_extent(
+      tidp,
+      kafka::offset(200),
+      kafka::offset(299),
+      model::timestamp(2000),
+      1024,
+      1024,
+      oid);
+    write_extent(
+      tidp,
+      kafka::offset(300),
+      kafka::offset(399),
+      model::timestamp(3000),
+      2048,
+      1024,
+      oid);
+
+    auto reader = make_reader();
+
+    // Query range [150, 350] should return all 3 extents in reverse order
+    {
+        auto res = reader
+                     .get_inclusive_extents_backward(
+                       tidp, kafka::offset(150), kafka::offset(350))
+                     .get();
+        ASSERT_TRUE(res.has_value());
+        ASSERT_TRUE(res.value().has_value());
+        auto rows = res.value()->materialize_rows().get();
+        ASSERT_EQ(rows.size(), 3);
+        // Backward order: highest base_offset first
+        EXPECT_EQ(rows[0]->val.last_offset, kafka::offset(399));
+        EXPECT_EQ(rows[1]->val.last_offset, kafka::offset(299));
+        EXPECT_EQ(rows[2]->val.last_offset, kafka::offset(199));
+    }
+
+    // Query range [200, 299] should return only middle extent
+    {
+        auto res = reader
+                     .get_inclusive_extents_backward(
+                       tidp, kafka::offset(200), kafka::offset(299))
+                     .get();
+        ASSERT_TRUE(res.has_value());
+        ASSERT_TRUE(res.value().has_value());
+        auto rows = res.value()->materialize_rows().get();
+        ASSERT_EQ(rows.size(), 1);
+        EXPECT_EQ(rows[0]->val.last_offset, kafka::offset(299));
+    }
+
+    // Query range [0, 99] should return no extents (before all data)
+    {
+        auto res = reader
+                     .get_inclusive_extents_backward(
+                       tidp, kafka::offset(0), kafka::offset(99))
+                     .get();
+        ASSERT_TRUE(res.has_value());
+        EXPECT_FALSE(res.value().has_value());
+    }
 }

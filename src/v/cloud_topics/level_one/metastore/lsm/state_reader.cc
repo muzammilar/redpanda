@@ -345,6 +345,148 @@ state_reader::get_extent_range(
       direction::forward);
 }
 
+ss::future<std::expected<
+  std::optional<std::pair<ss::sstring, ss::sstring>>,
+  state_reader::errc>>
+state_reader::find_inclusive_extent_keys(
+  const model::topic_id_partition& tidp,
+  std::optional<kafka::offset> min_offset,
+  std::optional<kafka::offset> max_offset) {
+    ss::sstring base_key;
+    ss::sstring last_key;
+    try {
+        auto iter = co_await snap_.create_iterator();
+        if (min_offset.has_value()) {
+            // Find the first extent where last_offset >= min_offset.
+            // Seek to min_offset+1, then prev to find extent that may contain
+            // min_offset.
+            auto seek_key = extent_row_key::encode(
+              tidp, kafka::next_offset(min_offset.value()));
+            co_await iter.seek(seek_key);
+            if (iter.valid()) {
+                co_await iter.prev();
+                if (!is_at_extent(iter, tidp)) {
+                    // If there were no extents below the seek_key result, seek
+                    // back to that key in case it's an extent -- if it is, its
+                    // last_offset will be >= min_offset.
+                    co_await iter.seek(seek_key);
+                }
+            } else {
+                co_await iter.seek_to_last();
+            }
+
+            if (!is_at_extent(iter, tidp)) {
+                co_return std::nullopt;
+            }
+
+            // Validate extent's last_offset >= min_offset.
+            auto val = serde::from_iobuf<extent_row_value>(iter.value());
+            if (val.last_offset < min_offset.value()) {
+                co_await iter.next();
+                if (!is_at_extent(iter, tidp)) {
+                    co_return std::nullopt;
+                }
+            }
+        } else {
+            // No lower bound, start from first extent.
+            co_await iter.seek(extent_row_key::encode(tidp, kafka::offset(0)));
+            if (!is_at_extent(iter, tidp)) {
+                co_return std::nullopt;
+            }
+        }
+        base_key = ss::sstring(iter.key());
+
+        if (max_offset.has_value()) {
+            // Find the last extent whose base_offset <= max_offset.
+            // Seek to max_offset+1, then prev to find extent with base <= max.
+            auto seek_key = extent_row_key::encode(
+              tidp, kafka::next_offset(max_offset.value()));
+            co_await iter.seek(seek_key);
+            if (iter.valid()) {
+                co_await iter.prev();
+            } else {
+                co_await iter.seek_to_last();
+            }
+
+            if (!is_at_extent(iter, tidp)) {
+                co_return std::nullopt;
+            }
+        } else {
+            // No upper bound, end at last extent in this partition. Seek to
+            // next partition, then prev.
+            co_await iter.seek(
+              extent_row_key::encode(next_partition(tidp), kafka::offset(0)));
+            if (iter.valid()) {
+                co_await iter.prev();
+            } else {
+                co_await iter.seek_to_last();
+            }
+            if (!is_at_extent(iter, tidp)) {
+                co_return std::nullopt;
+            }
+        }
+        last_key = ss::sstring(iter.key());
+
+        // Sanity check: base_key <= last_key.
+        if (base_key > last_key) {
+            co_return std::nullopt;
+        }
+    } catch (...) {
+        co_return std::unexpected(to_errc(std::current_exception()));
+    }
+
+    co_return std::make_optional(
+      std::make_pair(std::move(base_key), std::move(last_key)));
+}
+
+ss::future<std::expected<
+  std::optional<state_reader::extent_key_range>,
+  state_reader::errc>>
+state_reader::get_inclusive_extents(
+  const model::topic_id_partition& tidp,
+  std::optional<kafka::offset> min_offset,
+  std::optional<kafka::offset> max_offset) {
+    auto keys_res = co_await find_inclusive_extent_keys(
+      tidp, min_offset, max_offset);
+    if (!keys_res.has_value()) {
+        co_return std::unexpected(keys_res.error());
+    }
+    if (!keys_res.value().has_value()) {
+        co_return std::nullopt;
+    }
+
+    auto iter = co_await snap_.create_iterator();
+    co_return extent_key_range(
+      std::move(keys_res.value()->first),
+      std::move(keys_res.value()->second),
+      std::move(iter),
+      direction::forward);
+}
+
+ss::future<std::expected<
+  std::optional<state_reader::extent_key_range>,
+  state_reader::errc>>
+state_reader::get_inclusive_extents_backward(
+  const model::topic_id_partition& tidp,
+  std::optional<kafka::offset> min_offset,
+  std::optional<kafka::offset> max_offset) {
+    auto keys_res = co_await find_inclusive_extent_keys(
+      tidp, min_offset, max_offset);
+    if (!keys_res.has_value()) {
+        co_return std::unexpected(keys_res.error());
+    }
+    if (!keys_res.value().has_value()) {
+        co_return std::nullopt;
+    }
+
+    auto iter = co_await snap_.create_iterator();
+    co_return extent_key_range(
+      std::move(keys_res.value()->first),
+      std::move(keys_res.value()->second),
+      std::move(iter),
+      direction::backward);
+}
+
 template<typename KeyT, typename ValT, typename... KeyEncodeArgs>
 ss::future<std::expected<std::optional<ValT>, state_reader::errc>>
 state_reader::get_val(KeyEncodeArgs... args) {

@@ -92,7 +92,28 @@ public:
     get_extent_range(
       const model::topic_id_partition&, kafka::offset base, kafka::offset last);
 
+    // Returns an iterator for all extents that overlap with the inclusive
+    // range [min_offset, max_offset]. Returns nullopt if there are no extents
+    // in the given bounds.
+    ss::future<std::expected<std::optional<extent_key_range>, errc>>
+    get_inclusive_extents(
+      const model::topic_id_partition&,
+      std::optional<kafka::offset> min_offset,
+      std::optional<kafka::offset> max_offset);
+    ss::future<std::expected<std::optional<extent_key_range>, errc>>
+    get_inclusive_extents_backward(
+      const model::topic_id_partition&,
+      std::optional<kafka::offset> min_offset,
+      std::optional<kafka::offset> max_offset);
+
 private:
+    ss::future<
+      std::expected<std::optional<std::pair<ss::sstring, ss::sstring>>, errc>>
+    find_inclusive_extent_keys(
+      const model::topic_id_partition&,
+      std::optional<kafka::offset> min_offset,
+      std::optional<kafka::offset> max_offset);
+
     template<typename KeyT, typename ValT, typename... KeyEncodeArgs>
     ss::future<std::expected<std::optional<ValT>, errc>>
     get_val(KeyEncodeArgs...);
