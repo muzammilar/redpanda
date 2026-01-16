@@ -219,7 +219,8 @@ ss::future<> compaction_worker::compact_log(log_compaction_meta* log) {
       expected_compaction_epoch,
       start_offset,
       _io,
-      _committer);
+      _committer,
+      config::shard_local_cfg().cloud_topics_compaction_max_object_size.bind());
     auto reducer = compaction::sliding_window_reducer(
       std::move(src), std::move(sink));
 
