@@ -200,8 +200,6 @@ void run_authz(
     }
 
     auto role1_principal = role::to_principal(role1_name.value()());
-    acl_principal mem1_principal{
-      principal_type::user, ss::sstring(mem1.name())};
 
     const model::topic topic1("topic1");
     acl_host host1("192.168.1.1");
