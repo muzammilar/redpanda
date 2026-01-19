@@ -35,6 +35,7 @@ redpanda_cc_library(
     hdrs = [
         "handlers/configs/config_response_utils.h",
         "handlers/configs/config_utils.h",
+        "handlers/configs/storage_mode_properties.h",
         "handlers/topics/topic_utils.h",
         "handlers/topics/types.h",
         "handlers/topics/validators.h",
