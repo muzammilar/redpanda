@@ -10,6 +10,8 @@
 
 #include "client_quota_serde.h"
 
+#include "serde/rw/envelope.h"
+#include "serde/rw/sstring.h" // IWYU pragma: keep
 #include "utils/to_string.h"
 
 #include <fmt/format.h>
@@ -38,6 +40,11 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const entity_key::part& part) {
+    fmt::print(os, "{}", part.part);
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const entity_key::part_t& part) {
     fmt::print(os, "{}", part.part);
     return os;
 }
@@ -87,6 +94,20 @@ bool operator==(
     case entity_value_diff::operation::remove:
         return lhs.type == rhs.type;
     }
+}
+
+void tag_invoke(
+  serde::tag_t<serde::read_tag>,
+  iobuf_parser& in,
+  entity_key::part_t& p,
+  const std::size_t bytes_left_limit) {
+    using serde::read_nested;
+    p = entity_key::part_t{read_nested<entity_key::part>(in, bytes_left_limit)};
+}
+
+void tag_invoke(
+  serde::tag_t<serde::write_tag>, iobuf& out, const entity_key::part_t& part) {
+    serde::write(out, entity_key::part{part});
 }
 
 } // namespace cluster::client_quota

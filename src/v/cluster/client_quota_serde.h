@@ -130,11 +130,11 @@ public:
 
         auto serde_fields() { return std::tie(part); }
 
-        serde::variant<
+        using variant = serde::variant<
           client_id_default_match,
           client_id_match,
-          client_id_prefix_match>
-          part;
+          client_id_prefix_match>;
+        variant part;
     };
 
     using client_id_default_match = constructor<part::client_id_default_match>;
@@ -143,7 +143,7 @@ public:
 
     template<typename... T>
     explicit entity_key(T&&... t)
-      : parts{{.part{std::forward<T>(t)}}...} {}
+      : parts{part_t{std::forward<T>(t)}...} {}
 
     auto serde_fields() { return std::tie(parts); }
 
@@ -155,8 +155,36 @@ public:
         return AbslHashValue(std::move(h), e.parts);
     }
 
-    absl::flat_hash_set<part> parts;
+    struct part_t : public part {
+        using part::part;
+
+        using base = struct part;
+
+        explicit part_t(const struct part& p)
+          : base{p} {}
+        explicit part_t(struct part&& p)
+          : base{std::move(p)} {}
+
+        template<typename T>
+        explicit part_t(T&& t)
+        requires std::constructible_from<part::variant, T>
+          : base{.part = std::forward<T>(t)} {}
+
+        friend bool operator==(const part_t&, const part_t&) = default;
+        friend std::ostream& operator<<(std::ostream&, const part_t&);
+    };
+
+    absl::flat_hash_set<part_t> parts;
 };
+
+void tag_invoke(
+  serde::tag_t<serde::read_tag>,
+  iobuf_parser& in,
+  entity_key::part_t& t,
+  const std::size_t bytes_left_limit);
+
+void tag_invoke(
+  serde::tag_t<serde::write_tag>, iobuf& out, const entity_key::part_t& t);
 
 /// entity_value describes the quotas applicable to an entity_key
 struct entity_value
