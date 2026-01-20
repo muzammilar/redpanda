@@ -74,12 +74,13 @@ namespace {
 std::vector<std::string_view>
 get_enterprise_features(const cluster::topic_configuration& cfg) {
     std::vector<std::string_view> features;
-    const auto si_disabled = model::shadow_indexing_mode::disabled;
+    static const auto si_disabled = model::shadow_indexing_mode::disabled;
     // Only enforce tiered storage topic config sanctions when cloud storage is
     // enabled for the cluster
     if (config::shard_local_cfg().cloud_storage_enabled.is_restricted()) {
         if (
-          cfg.properties.shadow_indexing.value_or(si_disabled) != si_disabled) {
+          (cfg.properties.shadow_indexing.value_or(si_disabled) != si_disabled)
+          || (cfg.properties.storage_mode == model::redpanda_storage_mode::tiered)) {
             features.emplace_back("tiered storage");
         }
         if (cfg.is_recovery_enabled()) {
@@ -134,13 +135,20 @@ std::vector<std::string_view> get_enterprise_features(
       properties, {update.tp_ns, update.properties});
 
     std::vector<std::string_view> features;
-    const auto si_disabled = model::shadow_indexing_mode::disabled;
+    static const auto si_disabled = model::shadow_indexing_mode::disabled;
+    static const auto tiered = model::redpanda_storage_mode::tiered;
     // Only enforce tiered storage topic config sanctions when cloud storage is
     // enabled for the cluster
     if (config::shard_local_cfg().cloud_storage_enabled.is_restricted()) {
+        // Check if tiered storage is being enabled (wasn't before, is now)
+        auto old_si_mode = properties.shadow_indexing.value_or(si_disabled);
+        auto new_si_mode = updated_properties.shadow_indexing.value_or(
+          si_disabled);
+        auto old_storage_mode = properties.storage_mode;
+        auto new_storage_mode = updated_properties.storage_mode;
         if (
-          (properties.shadow_indexing.value_or(si_disabled)
-           < updated_properties.shadow_indexing.value_or(si_disabled))
+          old_si_mode < new_si_mode
+          || (old_storage_mode != tiered && new_storage_mode == tiered)
           || (properties.remote_delete < updated_properties.remote_delete)) {
             features.emplace_back("tiered storage");
         }

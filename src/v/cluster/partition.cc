@@ -849,9 +849,7 @@ ss::future<> partition::update_configuration(topic_properties properties) {
     bool cloud_storage_changed = false;
 
     bool old_archival = old_ntp_config.is_archival_enabled();
-    bool new_archival = new_ntp_config.shadow_indexing_mode
-                        && model::is_archival_enabled(
-                          new_ntp_config.shadow_indexing_mode.value());
+    bool new_archival = properties.is_archival_enabled();
 
     auto old_retention_ms = old_ntp_config.has_overrides()
                               ? old_ntp_config.get_overrides().retention_time

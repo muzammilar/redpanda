@@ -148,20 +148,14 @@ bool maybe_append_update(
           topic_config.tp_ns,
           update.properties.remote_read,
           config_value,
-          topic_config.properties.shadow_indexing.has_value()
-            ? ::model::is_fetch_enabled(
-                topic_config.properties.shadow_indexing.value())
-            : false);
+          topic_config.properties.is_remote_fetch_enabled());
     }
     if (config_name == kafka::topic_property_remote_write) {
         return parse_and_set(
           topic_config.tp_ns,
           update.properties.remote_write,
           config_value,
-          topic_config.properties.shadow_indexing.has_value()
-            ? ::model::is_fetch_enabled(
-                topic_config.properties.shadow_indexing.value())
-            : false);
+          topic_config.properties.is_archival_enabled());
     }
     if (config_name == kafka::topic_property_remote_delete) {
         return parse_and_set(
