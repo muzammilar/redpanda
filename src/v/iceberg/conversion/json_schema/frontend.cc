@@ -134,7 +134,7 @@ public:
       , default_dialect_(default_dialect) {}
 
 public:
-    auto recurse_guard() {
+    [[nodiscard]] auto recurse_guard() {
         constexpr static size_t max_depth{32};
         if (depth_ >= max_depth) {
             throw std::runtime_error("Schema depth limit exceeded");
