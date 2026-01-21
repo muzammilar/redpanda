@@ -284,6 +284,16 @@ private:
     double evaluate_internal(const reassignment& r) override;
 
 private:
+    static double do_evaluate_unordered(
+      const reassignment& r,
+      const absl::flat_hash_map<model::node_id, model::rack_id>& node_to_rack,
+      const leaders_preference& preference);
+
+    static double do_evaluate_ordered(
+      const reassignment& r,
+      const absl::flat_hash_map<model::node_id, model::rack_id>& node_to_rack,
+      const leaders_preference& preference);
+
     std::reference_wrapper<const group_id_to_topic_id> _group2topic;
     preference_index _preference_idx;
 };
