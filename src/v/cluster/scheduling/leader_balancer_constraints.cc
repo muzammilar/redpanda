@@ -243,14 +243,14 @@ double pinning_constraint::evaluate_internal(const reassignment& r) {
     auto from_it = _preference_idx.node2rack.find(r.from.node_id);
     if (
       from_it != _preference_idx.node2rack.end()
-      && preference->racks.contains(from_it->second)) {
+      && std::ranges::contains(preference->racks, from_it->second)) {
         diff -= 1;
     }
 
     auto to_it = _preference_idx.node2rack.find(r.to.node_id);
     if (
       to_it != _preference_idx.node2rack.end()
-      && preference->racks.contains(to_it->second)) {
+      && std::ranges::contains(preference->racks, to_it->second)) {
         diff += 1;
     }
 
