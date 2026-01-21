@@ -10,6 +10,7 @@
 #include "cloud_topics/level_one/domain/db_domain_manager.h"
 
 #include "cloud_topics/level_one/common/object_id.h"
+#include "cloud_topics/level_one/metastore/lsm/keys.h"
 #include "cloud_topics/level_one/metastore/lsm/state_reader.h"
 #include "cloud_topics/level_one/metastore/lsm/state_update.h"
 #include "cloud_topics/level_one/metastore/rpc_types.h"
@@ -358,8 +359,56 @@ db_domain_manager::get_compaction_infos(rpc::get_compaction_infos_request req) {
 
 ss::future<rpc::get_extent_metadata_reply>
 db_domain_manager::get_extent_metadata(rpc::get_extent_metadata_request req) {
+    auto gl_res = co_await gate_and_open_reads();
+    if (!gl_res.has_value()) {
+        co_return rpc::get_extent_metadata_reply{.ec = gl_res.error()};
+    }
+    auto reader = state_reader(db_->db().create_snapshot());
+
+    // Get extents either forwards or backwards based on request order.
+    auto extents_res = [&]() {
+        switch (req.o) {
+        case rpc::get_extent_metadata_request::order::forwards:
+            return reader.get_inclusive_extents(
+              req.tp, req.min_offset, req.max_offset);
+        case rpc::get_extent_metadata_request::order::backwards:
+            return reader.get_inclusive_extents_backward(
+              req.tp, req.min_offset, req.max_offset);
+        }
+    }();
+    auto extents_result = co_await std::move(extents_res);
+    if (!extents_result.has_value() || !extents_result->has_value()) {
+        co_return rpc::get_extent_metadata_reply{
+          .ec = rpc::errc::out_of_range,
+        };
+    }
+
+    chunked_vector<rpc::extent_metadata> extents;
+    auto gen = (*extents_result)->get_rows();
+    while (auto row_opt = co_await gen()) {
+        const auto& row = row_opt->get();
+        if (!row.has_value()) {
+            co_return rpc::get_extent_metadata_reply{
+              .ec = log_and_convert(
+                row.error(), "Error iterating through extents: "),
+            };
+        }
+        const auto& extent = row.value();
+        auto key = extent_row_key::decode(extent.key);
+        extents.push_back(
+          rpc::extent_metadata{
+            .base_offset = key->base_offset,
+            .last_offset = extent.val.last_offset,
+            .max_timestamp = extent.val.max_timestamp,
+          });
+        if (extents.size() >= req.max_num_extents) {
+            break;
+        }
+    }
+
     co_return rpc::get_extent_metadata_reply{
-      .ec = rpc::errc::concurrent_requests,
+      .ec = rpc::errc::ok,
+      .extents = std::move(extents),
     };
 }
 
