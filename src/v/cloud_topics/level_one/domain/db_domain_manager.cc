@@ -186,8 +186,46 @@ db_domain_manager::add_objects(rpc::add_objects_request req) {
 
 ss::future<rpc::replace_objects_reply>
 db_domain_manager::replace_objects(rpc::replace_objects_request req) {
+    chunked_hash_set<object_id> added_oids;
+    for (const auto& obj : req.new_objects) {
+        added_oids.emplace(obj.oid);
+    }
+    chunked_hash_map<
+      model::topic_id,
+      chunked_hash_map<model::partition_id, compaction_state_update>>
+      req_compaction_updates;
+    for (auto& [tp, update] : req.compaction_updates) {
+        const auto& t = tp.topic_id;
+        const auto& p = tp.partition;
+        req_compaction_updates[t][p] = std::move(update);
+    }
+    auto update = replace_objects_db_update{
+      .new_objects = std::move(req.new_objects),
+      .compaction_updates = std::move(req_compaction_updates),
+    };
+    auto gl_res = co_await gate_and_open_writes();
+    if (!gl_res.has_value()) {
+        co_return rpc::replace_objects_reply{
+          .ec = gl_res.error(),
+        };
+    }
+    auto reader = state_reader(db_->db().create_snapshot());
+    chunked_vector<write_batch_row> rows;
+    auto build_res = co_await update.build_rows(reader, rows);
+    if (!build_res.has_value()) {
+        co_return rpc::replace_objects_reply{
+          .ec = log_and_convert(
+            build_res.error(), "Rejecting request to replace objects: "),
+        };
+    }
+    auto apply_res = co_await write_rows(gl_res.value(), std::move(rows));
+    if (!apply_res.has_value()) {
+        co_return rpc::replace_objects_reply{
+          .ec = apply_res.error(),
+        };
+    }
     co_return rpc::replace_objects_reply{
-      .ec = rpc::errc::concurrent_requests,
+      .ec = rpc::errc::ok,
     };
 }
 
