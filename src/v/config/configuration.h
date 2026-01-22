@@ -368,6 +368,7 @@ struct configuration final : public config_store {
     deprecated_property node_management_operation_timeout_ms;
     property<uint32_t> kafka_request_max_bytes;
     property<uint32_t> kafka_batch_max_bytes;
+    enterprise<property<bool>> delete_topic_enable;
     property<std::vector<ss::sstring>> kafka_nodelete_topics;
     property<std::vector<ss::sstring>> kafka_noproduce_topics;
     property<std::optional<uint32_t>> kafka_topics_max;
