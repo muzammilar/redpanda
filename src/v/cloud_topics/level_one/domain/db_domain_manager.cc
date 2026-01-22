@@ -275,8 +275,79 @@ db_domain_manager::get_first_offset_ge(rpc::get_first_offset_ge_request req) {
 ss::future<rpc::get_first_timestamp_ge_reply>
 db_domain_manager::get_first_timestamp_ge(
   rpc::get_first_timestamp_ge_request req) {
+    auto gl_res = co_await gate_and_open_reads();
+    if (!gl_res.has_value()) {
+        co_return rpc::get_first_timestamp_ge_reply{.ec = gl_res.error()};
+    }
+    auto reader = state_reader(db_->db().create_snapshot());
+    auto extents_res = co_await reader.get_inclusive_extents(
+      req.tp, req.o, std::nullopt);
+    if (!extents_res.has_value()) {
+        co_return rpc::get_first_timestamp_ge_reply{
+          .ec = log_and_convert(
+            extents_res.error(),
+            fmt::format(
+              "Error getting extents for {} timestamp: {}, min_offset: {}: ",
+              req.tp,
+              req.ts,
+              req.o)),
+        };
+    }
+    if (!extents_res.value().has_value()) {
+        co_return rpc::get_first_timestamp_ge_reply{
+          .ec = rpc::errc::out_of_range,
+        };
+    }
+
+    // Find the first extent with max_timestamp >= ts.
+    auto gen = extents_res.value().value().get_rows();
+    while (auto row_opt = co_await gen()) {
+        const auto& row = row_opt->get();
+        if (!row.has_value()) {
+            co_return rpc::get_first_timestamp_ge_reply{
+              .ec = log_and_convert(
+                row.error(), "Error iterating through extents: "),
+            };
+        }
+        const auto& extent = row.value();
+        if (extent.val.max_timestamp >= req.ts) {
+            // Found a matching extent. Get the object info.
+            auto object_res = co_await reader.get_object(extent.val.oid);
+            if (!object_res.has_value()) {
+                co_return rpc::get_first_timestamp_ge_reply{
+                  .ec = log_and_convert(
+                    object_res.error(),
+                    fmt::format(
+                      "Error getting object {} for {} timestamp: {}, "
+                      "min_offset: {}: ",
+                      extent.val.oid,
+                      req.tp,
+                      req.ts,
+                      req.o)),
+                };
+            }
+            if (!object_res.value().has_value()) {
+                co_return rpc::get_first_timestamp_ge_reply{
+                  .ec = rpc::errc::out_of_range,
+                };
+            }
+            auto key = extent_row_key::decode(extent.key);
+            const auto& object = object_res.value().value();
+            co_return rpc::get_first_timestamp_ge_reply{
+              .ec = rpc::errc::ok,
+              .object = rpc::object_metadata{
+                .oid = extent.val.oid,
+                .footer_pos = object.footer_pos,
+                .object_size = object.object_size,
+                .first_offset = key->base_offset,
+                .last_offset = extent.val.last_offset,
+              },
+            };
+        }
+    }
+
     co_return rpc::get_first_timestamp_ge_reply{
-      .ec = rpc::errc::concurrent_requests,
+      .ec = rpc::errc::out_of_range,
     };
 }
 
