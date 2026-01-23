@@ -80,7 +80,11 @@ from rptest.context.gcp import GCPContext
 from rptest.services import redpanda_types, tls
 from rptest.services.admin import Admin
 from rptest.services.cloud_broker import CloudBroker
-from rptest.services.redpanda_cloud import CloudCluster, get_config_profile_name
+from rptest.services.redpanda_cloud import (
+    CloudCluster,
+    get_config_profile_name,
+    ThroughputTierInfo,
+)
 from rptest.services.redpanda_installer import (
     VERSION_RE as RI_VERSION_RE,
 )
@@ -2227,6 +2231,37 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         Returns none if product info for the tier is not found.
         """
         return self._cloud_cluster.get_tier()
+
+    def get_scaled_tier(self) -> ThroughputTierInfo | None:
+        """Get tier limits scaled for the actual number of nodes.
+
+        Returns tier info with limits adjusted proportionally based on
+        the ratio of actual nodes to the default tier node count.
+        Returns None if base tier info is not found.
+        """
+        tier = self.get_tier()
+        if tier is None:
+            return None
+
+        # Global limits
+        global_partition_limit = 112500
+
+        default_nodes = int(self.config_profile["nodes_count"])
+        actual_nodes = len(self.pods)
+
+        if actual_nodes == default_nodes:
+            return tier
+
+        scale_factor = actual_nodes / default_nodes
+
+        return ThroughputTierInfo(
+            max_ingress=int(tier.max_ingress * scale_factor),
+            max_egress=int(tier.max_egress * scale_factor),
+            max_connections_count=int(tier.max_connections_count * scale_factor),
+            max_partition_count=min(
+                int(tier.max_partition_count * scale_factor), global_partition_limit
+            ),
+        )
 
     def get_install_pack(self):
         install_pack_client = InstallPackClient(
