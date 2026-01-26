@@ -14,6 +14,7 @@
 #include "absl/container/btree_map.h"
 #include "base/outcome.h"
 #include "base/seastarx.h"
+#include "config/startup_config.h"
 #include "container/chunked_vector.h"
 #include "kafka/protocol/errors.h"
 #include "model/fundamental.h"
@@ -135,6 +136,10 @@ using subject = named_type<ss::sstring, struct subject_tag>;
 /// separation, and so on. By default, schemas are stored under the "." context.
 using context = named_type<ss::sstring, struct context_tag>;
 inline const context default_context{"."};
+
+/// Whether qualified subject parsing is enabled. Captured at SR startup.
+using enable_qualified_subjects
+  = config::startup_config<bool, struct enable_qualified_subjects_tag>;
 
 // A subject bound to a context
 struct context_subject {

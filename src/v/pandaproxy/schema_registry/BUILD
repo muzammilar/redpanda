@@ -56,6 +56,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
+        "//src/v/config:startup_config",
         "//src/v/json",
         "//src/v/kafka/protocol",
         "//src/v/utils:named_type",
@@ -246,6 +247,7 @@ redpanda_cc_library(
         ":rjson",
         ":subject_name_strategy",
         ":types",
+        "//src/v/config:startup_config",
         "//src/v/kafka/client",
     ],
 )
