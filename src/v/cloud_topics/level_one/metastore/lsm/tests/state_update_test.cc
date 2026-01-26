@@ -401,6 +401,45 @@ protected:
         apply_set_start_offset_update(update);
     }
 
+    void apply_remove_topics_update(remove_topics_db_update& update) {
+        auto reader = make_reader();
+        chunked_vector<write_batch_row> rows;
+        auto result = update.build_rows(reader, rows).get();
+        ASSERT_TRUE(result.has_value());
+
+        auto seqno = next_seqno();
+        auto wb = db_->create_write_batch();
+        for (const auto& row : rows) {
+            if (row.value.empty()) {
+                wb.remove(row.key, seqno);
+            } else {
+                wb.put(row.key, row.value.copy(), seqno);
+            }
+        }
+        db_->apply(std::move(wb)).get();
+    }
+
+    void remove_topics(chunked_vector<model::topic_id> topics) {
+        auto update = remove_topics_db_update{
+          .topics = std::move(topics),
+        };
+        apply_remove_topics_update(update);
+    }
+
+    void verify_metadata_missing(model::topic_id_partition tidp) {
+        auto reader = make_reader();
+        auto res = reader.get_metadata(tidp).get();
+        ASSERT_TRUE(res.has_value());
+        EXPECT_FALSE(res->has_value());
+    }
+
+    void verify_compaction_missing(model::topic_id_partition tidp) {
+        auto reader = make_reader();
+        auto res = reader.get_compaction_metadata(tidp).get();
+        ASSERT_TRUE(res.has_value());
+        EXPECT_FALSE(res->has_value());
+    }
+
     std::optional<lsm::database> db_;
 };
 
@@ -1064,4 +1103,153 @@ TEST_F(StateUpdateTest, TestSetStartOffsetTruncatesCompactionState) {
       tidp0,
       /*expected_cleaned_ranges=*/{{50, 80}},
       /*expected_tombstone_ranges=*/{{50, 80, 1000}});
+}
+
+TEST_F(StateUpdateTest, TestRemoveTopicsBasic) {
+    // Set up partition with extents.
+    auto oid1 = make_oid();
+    auto oid2 = make_oid();
+    add_objects(
+      {terms(tidp0, {{0, 1}})},
+      make_object(oid1, tp(tidp0, 0, 99).pos(0, 1023)),
+      make_object(oid2, tp(tidp0, 100, 199).pos(0, 1023)));
+
+    verify_metadata(tidp0, kafka::offset(0), kafka::offset(200));
+    verify_extent_exists(tidp0, kafka::offset(0), kafka::offset(99));
+    verify_extent_exists(tidp0, kafka::offset(100), kafka::offset(199));
+
+    // Remove the topic.
+    chunked_vector<model::topic_id> topics_to_remove;
+    topics_to_remove.push_back(tidp0.topic_id);
+    remove_topics(std::move(topics_to_remove));
+
+    // Verify metadata, extents, and terms are removed.
+    verify_metadata_missing(tidp0);
+    verify_extent_missing(tidp0, kafka::offset(0));
+    verify_extent_missing(tidp0, kafka::offset(100));
+    verify_compaction_missing(tidp0);
+
+    // Verify objects have updated removed_data_size.
+    verify_object_exists(oid1, 1024, /*removed_data_size=*/1024);
+    verify_object_exists(oid2, 1024, /*removed_data_size=*/1024);
+}
+
+TEST_F(StateUpdateTest, TestRemoveTopicsMultiplePartitions) {
+    // Set up two partitions for the same topic.
+    auto tidp1 = make_tidp(1);
+    auto oid1 = make_oid();
+    auto oid2 = make_oid();
+    add_objects(
+      {terms(tidp0, {{0, 1}})},
+      make_object(oid1, tp(tidp0, 0, 99).pos(0, 1023)));
+    add_objects(
+      {terms(tidp1, {{0, 1}})},
+      make_object(oid2, tp(tidp1, 0, 99).pos(0, 1023)));
+
+    verify_metadata(tidp0, kafka::offset(0), kafka::offset(100));
+    verify_metadata(tidp1, kafka::offset(0), kafka::offset(100));
+
+    // Remove the topic (should remove both partitions).
+    chunked_vector<model::topic_id> topics_to_remove;
+    topics_to_remove.push_back(tidp0.topic_id);
+    remove_topics(std::move(topics_to_remove));
+
+    // Both partitions should be removed.
+    verify_metadata_missing(tidp0);
+    verify_metadata_missing(tidp1);
+    verify_extent_missing(tidp0, kafka::offset(0));
+    verify_extent_missing(tidp1, kafka::offset(0));
+
+    // Both objects should have updated removed_data_size.
+    verify_object_exists(oid1, 1024, /*removed_data_size=*/1024);
+    verify_object_exists(oid2, 1024, /*removed_data_size=*/1024);
+}
+
+TEST_F(StateUpdateTest, TestRemoveTopicsWithCompaction) {
+    // Set up partition with compaction state.
+    auto oid = make_oid();
+    add_objects(
+      {terms(tidp0, {{0, 1}})},
+      make_object(oid, tp(tidp0, 0, 99).pos(0, 1023)));
+
+    // Add a cleaned range.
+    replace_objects(
+      {{compact_spec{
+        .tidp = tidp0,
+        .cleaned = {{0, 49, true}},
+      }}},
+      make_object(make_oid(), tp(tidp0, 0, 99).pos(0, 511)));
+
+    verify_compaction_state(
+      tidp0,
+      /*expected_cleaned_ranges=*/{{0, 49}},
+      /*expected_tombstone_ranges=*/{{0, 49, 1000}});
+
+    // Remove the topic.
+    chunked_vector<model::topic_id> topics_to_remove;
+    topics_to_remove.push_back(tidp0.topic_id);
+    remove_topics(std::move(topics_to_remove));
+
+    // Verify all state is removed.
+    verify_metadata_missing(tidp0);
+    verify_extent_missing(tidp0, kafka::offset(0));
+    verify_compaction_missing(tidp0);
+}
+
+TEST_F(StateUpdateTest, TestRemoveTopicsEmpty) {
+    // Removing empty topics list should be no-op.
+    chunked_vector<model::topic_id> topics_to_remove;
+    remove_topics(std::move(topics_to_remove));
+    // No crash, no side effects.
+}
+
+TEST_F(StateUpdateTest, TestRemoveTopicsNonExistent) {
+    // Set up a partition.
+    auto oid = make_oid();
+    add_objects(
+      {terms(tidp0, {{0, 1}})},
+      make_object(oid, tp(tidp0, 0, 99).pos(0, 1023)));
+
+    // Try to remove a different topic.
+    auto other_topic = model::topic_id(
+      uuid_t::from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+    chunked_vector<model::topic_id> topics_to_remove;
+    topics_to_remove.push_back(other_topic);
+    remove_topics(std::move(topics_to_remove));
+
+    // Original topic should still exist.
+    verify_metadata(tidp0, kafka::offset(0), kafka::offset(100));
+    verify_extent_exists(tidp0, kafka::offset(0), kafka::offset(99));
+    verify_object_exists(oid, 1024, /*removed_data_size=*/0);
+}
+
+TEST_F(StateUpdateTest, TestRemoveTopicsMultipleTopics) {
+    // Set up two different topics.
+    auto topic2 = model::topic_id(
+      uuid_t::from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+    auto tidp_t2 = model::topic_id_partition(topic2, model::partition_id(0));
+    auto oid1 = make_oid();
+    auto oid2 = make_oid();
+
+    add_objects(
+      {terms(tidp0, {{0, 1}})},
+      make_object(oid1, tp(tidp0, 0, 99).pos(0, 1023)));
+    add_objects(
+      {terms(tidp_t2, {{0, 1}})},
+      make_object(oid2, tp(tidp_t2, 0, 99).pos(0, 1023)));
+
+    verify_metadata(tidp0, kafka::offset(0), kafka::offset(100));
+    verify_metadata(tidp_t2, kafka::offset(0), kafka::offset(100));
+
+    // Remove both topics.
+    chunked_vector<model::topic_id> topics_to_remove;
+    topics_to_remove.push_back(tidp0.topic_id);
+    topics_to_remove.push_back(topic2);
+    remove_topics(std::move(topics_to_remove));
+
+    // Both should be removed.
+    verify_metadata_missing(tidp0);
+    verify_metadata_missing(tidp_t2);
+    verify_object_exists(oid1, 1024, /*removed_data_size=*/1024);
+    verify_object_exists(oid2, 1024, /*removed_data_size=*/1024);
 }

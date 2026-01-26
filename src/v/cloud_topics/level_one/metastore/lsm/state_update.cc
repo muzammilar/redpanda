@@ -911,4 +911,87 @@ set_start_offset_db_update::build_rows(
     co_return std::expected<void, db_update_error>{};
 }
 
+ss::future<std::expected<void, db_update_error>>
+remove_topics_db_update::build_rows(
+  state_reader& reader, chunked_vector<write_batch_row>& out) const {
+    if (topics.empty()) {
+        co_return std::expected<void, db_update_error>{};
+    }
+
+    // Track removed data sizes by object across all topics/partitions.
+    chunked_hash_map<object_id, size_t> removed_size_by_oid;
+
+    // TODO: this is embarassingly parallel.
+    for (const auto& tid : topics) {
+        // Get all partitions for this topic.
+        auto partitions_res = co_await reader.get_partitions_for_topic(tid);
+        if (!partitions_res.has_value()) {
+            co_return std::unexpected(wrap_read_err(
+              std::move(partitions_res.error()),
+              "Error getting partitions for topic {}",
+              tid));
+        }
+
+        for (const auto& pid : partitions_res.value()) {
+            model::topic_id_partition tidp(tid, pid);
+
+            // Collect all extents to be removed and track the removed sizes by
+            // object.
+            auto extents_res = co_await reader.get_inclusive_extents(
+              tidp, std::nullopt, std::nullopt);
+            if (extents_res.has_value() && extents_res->has_value()) {
+                auto extent_gen = (*extents_res)->get_rows();
+                while (auto row_res = co_await extent_gen()) {
+                    const auto& row = row_res->get();
+                    if (!row.has_value()) {
+                        break;
+                    }
+                    const auto& extent = *row;
+                    removed_size_by_oid[extent.val.oid] += extent.val.len;
+
+                    // Write tombstone for each extent row.
+                    out.emplace_back(
+                      write_batch_row{.key = extent.key, .value = iobuf{}});
+                }
+            }
+
+            // Get all term keys and write tombstones.
+            auto terms_res = co_await reader.get_term_keys(tidp, std::nullopt);
+            if (terms_res.has_value()) {
+                for (const auto& term_key : *terms_res) {
+                    out.emplace_back(
+                      write_batch_row{.key = term_key, .value = iobuf{}});
+                }
+            }
+
+            // Write tombstone for the partition's compaction row.
+            out.emplace_back(
+              write_batch_row{
+                .key = compaction_row_key::encode(tidp), .value = iobuf{}});
+
+            // Write tombstone for the partition's metadata row.
+            out.emplace_back(
+              write_batch_row{
+                .key = metadata_row_key::encode(tidp), .value = iobuf{}});
+        }
+    }
+
+    // Update object entries with removed_data_size.
+    auto updated_old_objects_res = co_await build_object_removal_entries(
+      reader, removed_size_by_oid);
+    if (!updated_old_objects_res.has_value()) {
+        co_return std::unexpected(updated_old_objects_res.error());
+    }
+    auto& updated_old_objects = updated_old_objects_res.value();
+    for (const auto& [oid, obj_entry] : updated_old_objects) {
+        out.emplace_back(
+          write_batch_row{
+            .key = object_row_key::encode(oid),
+            .value = serde::to_iobuf(object_row_value{.object = obj_entry}),
+          });
+    }
+
+    co_return std::expected<void, db_update_error>{};
+}
+
 } // namespace cloud_topics::l1

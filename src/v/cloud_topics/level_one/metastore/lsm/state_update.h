@@ -83,6 +83,13 @@ struct set_start_offset_db_update {
     kafka::offset new_start_offset;
 };
 
+struct remove_topics_db_update {
+    ss::future<std::expected<void, db_update_error>>
+    build_rows(state_reader&, chunked_vector<write_batch_row>&) const;
+
+    chunked_vector<model::topic_id> topics;
+};
+
 } // namespace cloud_topics::l1
 
 template<>
