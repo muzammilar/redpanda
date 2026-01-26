@@ -3784,6 +3784,15 @@ configuration::configuration()
        .visibility = visibility::user,
        .aliases = {"schema_registry_normalize_on_startup"}},
       false)
+  , schema_registry_enable_qualified_subjects(
+      *this,
+      "schema_registry_enable_qualified_subjects",
+      "Enable parsing of qualified subject syntax (:.context:subject). "
+      "When false, subjects are treated literally, as subjects in the default "
+      "context. When true, qualified syntax is parsed to extract context and "
+      "subject.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      false)
   , schema_registry_protobuf_renderer_v2(
       *this, "schema_registry_protobuf_renderer_v2")
   , pp_sr_smp_max_non_local_requests(
