@@ -725,9 +725,48 @@ db_domain_manager::set_start_offset(rpc::set_start_offset_request req) {
 }
 
 ss::future<rpc::remove_topics_reply>
-db_domain_manager::remove_topics(rpc::remove_topics_request) {
+db_domain_manager::remove_topics(rpc::remove_topics_request req) {
+    auto gl_res = co_await gate_and_open_writes();
+    if (!gl_res.has_value()) {
+        co_return rpc::remove_topics_reply{
+          .ec = gl_res.error(),
+          .not_removed = std::move(req.topics),
+        };
+    }
+
+    auto update = remove_topics_db_update{
+      .topics = std::move(req.topics),
+    };
+
+    auto reader = state_reader(db_->db().create_snapshot());
+    chunked_vector<write_batch_row> rows;
+    auto build_res = co_await update.build_rows(reader, rows);
+    if (!build_res.has_value()) {
+        co_return rpc::remove_topics_reply{
+          .ec = log_and_convert(
+            build_res.error(), "Rejecting request to remove topics: "),
+          .not_removed = std::move(update.topics),
+        };
+    }
+
+    if (rows.empty()) {
+        // No-op case: no topics to remove or topics don't exist.
+        co_return rpc::remove_topics_reply{
+          .ec = rpc::errc::ok,
+          .not_removed = {},
+        };
+    }
+
+    auto apply_res = co_await write_rows(gl_res.value(), std::move(rows));
+    if (!apply_res.has_value()) {
+        co_return rpc::remove_topics_reply{
+          .ec = apply_res.error(),
+          .not_removed = std::move(update.topics),
+        };
+    }
+
     co_return rpc::remove_topics_reply{
-      .ec = rpc::errc::concurrent_requests,
+      .ec = rpc::errc::ok,
       .not_removed = {},
     };
 }
