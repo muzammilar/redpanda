@@ -647,4 +647,48 @@ state_reader::get_term_keys(
     co_return keys;
 }
 
+namespace {
+
+bool is_at_metadata(
+  lsm::iterator& iter,
+  const model::topic_id& tid,
+  metadata_row_key* out = nullptr) {
+    if (!iter.valid()) {
+        return false;
+    }
+    auto key = metadata_row_key::decode(iter.key());
+    if (!key.has_value() || key->tidp.topic_id != tid) {
+        return false;
+    }
+    if (out) {
+        *out = key.value();
+    }
+    return true;
+}
+
+} // namespace
+
+ss::future<
+  std::expected<chunked_vector<model::partition_id>, state_reader::error>>
+state_reader::get_partitions_for_topic(const model::topic_id& tid) {
+    chunked_vector<model::partition_id> partitions;
+    try {
+        auto iter = co_await snap_.create_iterator();
+
+        // Seek to the first metadata row for this topic.
+        auto tidp = model::topic_id_partition(tid, model::partition_id(0));
+        co_await iter.seek(metadata_row_key::encode(tidp));
+
+        // Iterate through all metadata rows for this topic.
+        while (is_at_metadata(iter, tid)) {
+            auto key = metadata_row_key::decode(iter.key());
+            partitions.push_back(key->tidp.partition);
+            co_await iter.next();
+        }
+    } catch (...) {
+        co_return std::unexpected(to_error(std::current_exception()));
+    }
+    co_return partitions;
+}
+
 } // namespace cloud_topics::l1
