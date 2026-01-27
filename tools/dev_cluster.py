@@ -553,6 +553,12 @@ async def main() -> None:
         default=8092,
     )
     parser.add_argument(
+        "--port-offset",
+        type=int,
+        help="offset to add to all base ports (useful for running multiple clusters)",
+        default=0,
+    )
+    parser.add_argument(
         "--listen-address", type=str, help="listening address", default="127.0.0.1"
     )
     parser.add_argument(
@@ -616,6 +622,14 @@ async def main() -> None:
 
     if args.directory is None:
         args.directory = Path(os.environ.get("BUILD_WORKSPACE_DIRECTORY", ".")) / "data"
+
+    # Apply port offset to all base ports
+    if args.port_offset:
+        args.base_rpc_port += args.port_offset
+        args.base_kafka_port += args.port_offset
+        args.base_admin_port += args.port_offset
+        args.base_schema_registry_port += args.port_offset
+        args.base_pandaproxy_port += args.port_offset
 
     # Use the first 3 nodes as seed servers
     rpc_addresses = [
