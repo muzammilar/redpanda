@@ -12,6 +12,25 @@ redpanda_test_cc_library(
     ],
 )
 
+redpanda_test_cc_library(
+    name = "state_utils",
+    srcs = [
+        "state_utils.cc",
+    ],
+    hdrs = [
+        "state_utils.h",
+    ],
+    implementation_deps = [
+        "//src/v/cloud_topics/level_one/metastore/lsm:keys",
+        "//src/v/cloud_topics/level_one/metastore/lsm:values",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cloud_topics/level_one/metastore:state",
+        "//src/v/lsm",
+    ],
+)
+
 redpanda_cc_gtest(
     name = "simple_metastore_test",
     timeout = "short",
@@ -93,6 +112,7 @@ redpanda_cc_gtest(
         "state_update_test.cc",
     ],
     deps = [
+        ":state_utils",
         "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/cloud_topics/level_one/metastore:state",
         "//src/v/cloud_topics/level_one/metastore:state_update",
