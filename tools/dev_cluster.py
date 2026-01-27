@@ -441,10 +441,12 @@ class Redpanda:
         else:
             cores_args = ""
 
-        # If user did not specify memory, share 75% of memory equally between nodes
+        # If user did not specify memory, share 75% of memory equally between nodes, capped at 4GB
         if not has_arg("-m", "--memory"):
+            max_memory_per_node = 4 * 2**30  # 4GB
             memory_total = psutil.virtual_memory().total
             memory_per_node = (3 * (memory_total // 4)) // self.node_meta.cluster_size
+            memory_per_node = min(memory_per_node, max_memory_per_node)
             memory_args = f"-m {memory_per_node // (1024 * 1024)}M"
         else:
             memory_args = ""
