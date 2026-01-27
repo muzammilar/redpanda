@@ -569,8 +569,12 @@ db_domain_manager::do_get_compaction_info(
             total_size += extent.val.len;
             if (!cleaned_ranges.covers(base, last)) {
                 dirty_size += extent.val.len;
-                // Track earliest dirty timestamp.
-                if (!earliest_dirty_ts.has_value()) {
+                // Track earliest dirty timestamp. We cannot assume timestamps
+                // are monotonic with offsets, so we must find the minimum
+                // across all dirty extents.
+                if (
+                  !earliest_dirty_ts.has_value()
+                  || extent.val.max_timestamp < *earliest_dirty_ts) {
                     earliest_dirty_ts = extent.val.max_timestamp;
                 }
             }
