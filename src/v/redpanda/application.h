@@ -96,7 +96,8 @@ public:
       std::optional<YAML::Node> schema_reg_client_cfg = std::nullopt,
       std::optional<YAML::Node> audit_log_client_cfg = std::nullopt);
     void check_environment();
-    void wire_up_and_start(::stop_signal&, bool test_mode = false);
+    void wire_up_and_start(
+      ::stop_signal&, bool test_mode = false, bool use_lsm_metastore = false);
     void post_start_tasks();
 
     void init_crashtracker(::stop_signal& app_signal);
@@ -237,7 +238,8 @@ private:
 
     // Starts the services meant for Redpanda runtime. Must be called after
     // having constructed the subsystems via the corresponding `wire_up` calls.
-    void start_runtime_services(cluster::cluster_discovery&, ::stop_signal&);
+    void start_runtime_services(
+      cluster::cluster_discovery&, ::stop_signal&, bool use_lsm_metastore);
     void start_kafka(const model::node_id&, ::stop_signal&);
     void add_runtime_rpc_services(rpc::rpc_server&, bool start_raft_rpc_early);
 
