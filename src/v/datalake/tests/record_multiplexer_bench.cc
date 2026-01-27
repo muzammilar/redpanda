@@ -350,11 +350,11 @@ share_batches(chunked_vector<model::record_batch>& batches) {
 }
 
 struct counting_consumer {
-    size_t total_bytes = 0;
+    size_t total_records = 0;
     datalake::record_multiplexer mux;
     ss::abort_source& as;
     ss::future<ss::stop_iteration> operator()(model::record_batch&& batch) {
-        total_bytes += batch.size_bytes();
+        total_records += batch.record_count();
         return mux.do_multiplex(std::move(batch), kafka::offset{}, as);
     }
     ss::future<counting_consumer> end_of_stream() {
@@ -439,7 +439,7 @@ public:
           std::move(consumer), model::no_timeout);
         perf_tests::stop_measuring_time();
 
-        co_return res.total_bytes;
+        co_return res.total_records;
     }
 
 private:
