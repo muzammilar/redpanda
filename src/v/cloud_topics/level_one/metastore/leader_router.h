@@ -95,6 +95,12 @@ public:
     ss::future<rpc::get_extent_metadata_reply> get_extent_metadata(
       rpc::get_extent_metadata_request, local_only = local_only::no);
 
+    ss::future<rpc::flush_domain_reply>
+      flush_domain(rpc::flush_domain_request, local_only = local_only::no);
+
+    ss::future<rpc::restore_domain_reply>
+      restore_domain(rpc::restore_domain_request, local_only = local_only::no);
+
     std::optional<model::partition_id>
     metastore_partition(const model::topic_id_partition&) const;
 
@@ -187,6 +193,14 @@ private:
 
     ss::future<rpc::get_extent_metadata_reply> get_extent_metadata_locally(
       rpc::get_extent_metadata_request,
+      const model::ntp& metastore_ntp,
+      ss::shard_id);
+
+    ss::future<rpc::flush_domain_reply> flush_domain_locally(
+      rpc::flush_domain_request, const model::ntp& metastore_ntp, ss::shard_id);
+
+    ss::future<rpc::restore_domain_reply> restore_domain_locally(
+      rpc::restore_domain_request,
       const model::ntp& metastore_ntp,
       ss::shard_id);
 
