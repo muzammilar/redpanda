@@ -21,8 +21,8 @@ namespace security::oidc {
 namespace {
 std::optional<chunked_vector<std::string_view>>
 get_group_claim(const json::Pointer& p, const jwt& jwt) {
-    auto list_claim = jwt.claim<chunked_vector<std::string_view>>(p);
-    if (list_claim) {
+    if (auto list_claim = jwt.claim<chunked_vector<std::string_view>>(p);
+        list_claim) {
         vlog(
           seclog.trace,
           "Group claim found as string list: {}",
@@ -30,17 +30,19 @@ get_group_claim(const json::Pointer& p, const jwt& jwt) {
         return std::move(list_claim).value();
     }
 
-    auto string_claim = jwt.claim<std::string_view>(p);
-    if (!string_claim) {
-        return std::nullopt;
+    if (auto string_claim = jwt.claim<std::string_view>(p); string_claim) {
+        vlog(
+          seclog.trace,
+          "Group claim found as string: {}",
+          string_claim.value());
+
+        chunked_vector<std::string_view> string_claim_parsed;
+        boost::split(
+          string_claim_parsed, string_claim.value(), boost::is_any_of(","));
+        return string_claim_parsed;
     }
 
-    vlog(seclog.trace, "Group claim found as string: {}", string_claim.value());
-
-    chunked_vector<std::string_view> string_claim_parsed;
-    boost::split(
-      string_claim_parsed, string_claim.value(), boost::is_any_of(","));
-    return string_claim_parsed;
+    return std::nullopt;
 }
 
 acl_principal
