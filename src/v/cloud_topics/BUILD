@@ -227,3 +227,27 @@ redpanda_cc_library(
         "//src/v/utils:to_string",
     ],
 )
+
+redpanda_cc_library(
+    name = "topic_manifest_uploader",
+    srcs = [
+        "topic_manifest_uploader.cc",
+    ],
+    hdrs = [
+        "topic_manifest_uploader.h",
+    ],
+    deps = [
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage:topic_manifest_state",
+        "//src/v/cloud_storage:topic_path_provider",
+        "//src/v/cloud_storage_clients",
+        "//src/v/cluster:topic_configuration",
+        "//src/v/model",
+        "//src/v/serde",
+        "//src/v/ssx:future_util",
+        "//src/v/utils:detailed_error",
+        "//src/v/utils:retry_chain_node",
+        "@fmt",
+        "@seastar",
+    ],
+)
