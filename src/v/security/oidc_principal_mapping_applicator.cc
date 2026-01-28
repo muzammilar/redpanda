@@ -10,7 +10,10 @@
 
 #include "security/oidc_principal_mapping_applicator.h"
 
+#include "container/chunked_vector.h"
+#include "security/acl.h"
 #include "security/logger.h"
+#include "security/oidc_error.h"
 #include "security/oidc_principal_mapping.h"
 
 #include <boost/algorithm/string.hpp>
@@ -19,7 +22,7 @@
 namespace security::oidc {
 
 namespace {
-std::optional<chunked_vector<std::string_view>>
+std::expected<chunked_vector<std::string_view>, errc>
 get_group_claim(const json::Pointer& p, const jwt& jwt) {
     if (auto list_claim = jwt.claim<chunked_vector<std::string_view>>(p);
         list_claim) {
@@ -42,7 +45,7 @@ get_group_claim(const json::Pointer& p, const jwt& jwt) {
         return string_claim_parsed;
     }
 
-    return std::nullopt;
+    return std::unexpected(errc::group_claim_not_found);
 }
 
 acl_principal
@@ -77,19 +80,21 @@ result<acl_principal> principal_mapping_rule_apply(
     return {principal_type::user, std::move(principal).value()};
 }
 
-result<chunked_vector<acl_principal>>
+std::expected<chunked_vector<acl_principal>, errc>
 group_policy_apply(const group_claim_policy& policy, const jwt& jwt) {
     auto group_claim = get_group_claim(policy.group_pointer(), jwt);
-    if (!group_claim) {
-        return chunked_vector<acl_principal>{};
+    if (group_claim) {
+        return chunked_vector<acl_principal>(
+          std::from_range,
+          std::views::transform(
+            *group_claim,
+            [behavior = policy.nested_behavior()](std::string_view g) {
+                return apply_nested_group_policy(g, behavior);
+            }));
     }
-    return chunked_vector<acl_principal>(
-      std::from_range,
-      std::views::transform(
-        *group_claim,
-        [behavior = policy.nested_behavior()](std::string_view g) {
-            return apply_nested_group_policy(g, behavior);
-        }));
+
+    // Will do error checking here
+    return chunked_vector<acl_principal>{};
 }
 
 } // namespace security::oidc
