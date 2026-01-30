@@ -82,9 +82,11 @@ ss::future<> app::construct(
       &domain_supervisor);
 
     co_await construct_service(
-      replicated_metastore, ss::sharded_parameter([this] {
-          return std::ref(l1_metastore_router.local());
-      }));
+      replicated_metastore,
+      ss::sharded_parameter(
+        [this] { return std::ref(l1_metastore_router.local()); }),
+      ss::sharded_parameter([&remote] { return std::ref(remote->local()); }),
+      bucket);
 
     co_await construct_service(
       state,
