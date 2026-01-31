@@ -356,14 +356,17 @@ add_objects_db_update::build_rows(
             corrected_next_offsets[tidp] = expected_next;
             continue;
         }
+        size_t extent_size_sum = 0;
         for (const auto& extent : extents) {
             verified_extents[tidp].push_back(extent);
+            extent_size_sum += extent.len;
         }
         verified_meta_vals[tidp] = metadata_row_value{
           .start_offset = opt ? opt->start_offset : kafka::offset{0},
           .next_offset = kafka::next_offset(extents.rbegin()->last_offset),
           .compaction_epoch = opt ? opt->compaction_epoch
                                   : partition_state::compaction_epoch_t{0},
+          .size = (opt ? opt->size : 0) + extent_size_sum,
         };
     }
     // Now that we've validated the offsets of our extents, validate the terms
@@ -596,6 +599,8 @@ replace_objects_db_update::build_rows(
       extent_keys_to_delete;
     chunked_hash_map<model::topic_id_partition, kafka::offset>
       start_offsets_by_tp;
+    // Track size deltas per partition: positive for adds, negative for removes.
+    chunked_hash_map<model::topic_id_partition, size_t> removed_sizes_by_tp;
     for (const auto& [tidp, intervals] : contiguous_intervals_by_tp) {
         auto meta_res = co_await state.get_metadata(tidp);
         if (!meta_res.has_value()) {
@@ -610,16 +615,27 @@ replace_objects_db_update::build_rows(
               fmt::format("Partition {} not tracked by state", tidp)));
         }
         start_offsets_by_tp[tidp] = meta_res.value()->start_offset;
+        // Track removed sizes for this partition specifically.
+        chunked_hash_map<object_id, size_t> tidp_removed_sizes;
         auto exact_intervals_res = co_await collect_exact_intervals(
           tidp,
           intervals,
           meta_res.value()->start_offset,
           state,
           extent_keys_to_delete[tidp],
-          old_extent_sizes_by_oid);
+          tidp_removed_sizes);
         if (!exact_intervals_res.has_value()) {
             co_return std::unexpected(std::move(exact_intervals_res.error()));
         }
+        // Accumulate total removed size for this partition, and then fold the
+        // updates for this partition back into old_extent_sizes_by_oid which
+        // tracks per object instead of per partition.
+        size_t removed_for_tidp = 0;
+        for (const auto& [oid, sz] : tidp_removed_sizes) {
+            removed_for_tidp += sz;
+            old_extent_sizes_by_oid[oid] += sz;
+        }
+        removed_sizes_by_tp[tidp] = removed_for_tidp;
     }
 
     // Update existing object entries to indicate the removal of data from
@@ -674,11 +690,13 @@ replace_objects_db_update::build_rows(
 
     // Generate the rows.
     chunked_hash_set<ss::sstring> added_extent_keys;
+    chunked_hash_map<model::topic_id_partition, size_t> added_sizes_by_tp;
     for (const auto& [tidp, extents] : new_extents_by_tp) {
         auto start_it = start_offsets_by_tp.find(tidp);
         auto start_offset = start_it != start_offsets_by_tp.end()
                               ? start_it->second
                               : kafka::offset{0};
+        size_t added_for_tidp = 0;
         for (const auto& extent : extents) {
             // Skip extents fully below start_offset. These are stale
             // replacements for extents that have been truncated.
@@ -688,6 +706,7 @@ replace_objects_db_update::build_rows(
             }
             auto key = extent_row_key::encode(tidp, extent.base_offset);
             added_extent_keys.emplace(key);
+            added_for_tidp += extent.len;
             out.emplace_back(
               write_batch_row{
                 .key = extent_row_key::encode(tidp, extent.base_offset),
@@ -701,6 +720,7 @@ replace_objects_db_update::build_rows(
                   }),
               });
         }
+        added_sizes_by_tp[tidp] = added_for_tidp;
     }
     if (added_extent_keys.empty()) {
         // No extents, e.g. because all replacements are below the current
@@ -742,13 +762,89 @@ replace_objects_db_update::build_rows(
             .value = serde::to_iobuf(compaction_row_value{.state = comp_state}),
           });
     }
-    for (const auto& [tidp, meta] : updated_metadata) {
+
+    // helper to update size on meta row
+    auto apply_size_update = [&](const auto& tidp, auto& meta) {
+        size_t removed = 0;
+        if (auto removed_it = removed_sizes_by_tp.find(tidp);
+            removed_it != removed_sizes_by_tp.end()) {
+            removed = removed_it->second;
+        }
+
+        size_t added = 0;
+        if (auto added_it = added_sizes_by_tp.find(tidp);
+            added_it != added_sizes_by_tp.end()) {
+            added = added_it->second;
+        }
+
+        auto size_update = static_cast<ssize_t>(added)
+                           - static_cast<ssize_t>(removed);
+        if (size_update < 0) {
+            // clamp to 0 if we would underflow
+            auto new_size = static_cast<ssize_t>(meta.size) + size_update;
+            meta.size = static_cast<size_t>(std::max(ssize_t(0), new_size));
+        } else {
+            meta.size += size_update;
+        }
+    };
+
+    /*
+     * There are two sources of metadata row updates. The first are those
+     * in `updated_metadata` populated by compaction updates above. These just
+     * need to have their size updated as well.
+     *
+     * There are the partitions not in updated_metadata but which did have size
+     * updates, and for those we do a read-copy-update here.
+     */
+    for (auto& [tidp, meta] : updated_metadata) {
+        apply_size_update(tidp, meta);
         out.emplace_back(
           write_batch_row{
             .key = metadata_row_key::encode(tidp),
             .value = serde::to_iobuf(meta),
           });
     }
+
+    // Collect tidp not in updated_metadata that needs size update.
+    chunked_hash_set<model::topic_id_partition> needs_size_update;
+    for (const auto& [tidp, _] : added_sizes_by_tp) {
+        if (updated_metadata.contains(tidp)) {
+            // we already updated size above
+            continue;
+        }
+        needs_size_update.emplace(tidp);
+    }
+
+    for (const auto& [tidp, _] : removed_sizes_by_tp) {
+        if (updated_metadata.contains(tidp)) {
+            // we already updated size above
+            continue;
+        }
+        needs_size_update.emplace(tidp);
+    }
+
+    for (const auto& tidp : needs_size_update) {
+        auto meta_res = co_await state.get_metadata(tidp);
+        if (!meta_res.has_value()) {
+            co_return std::unexpected(wrap_read_err(
+              std::move(meta_res.error()),
+              "Error getting metadata for {}",
+              tidp));
+        }
+        if (!meta_res.value().has_value()) {
+            co_return std::unexpected(db_update_error(
+              invalid_update,
+              fmt::format("Partition {} not tracked by state", tidp)));
+        }
+        auto meta = meta_res.value().value();
+        apply_size_update(tidp, meta);
+        out.emplace_back(
+          write_batch_row{
+            .key = metadata_row_key::encode(tidp),
+            .value = serde::to_iobuf(meta),
+          });
+    }
+
     co_return std::expected<void, db_update_error>{};
 }
 
@@ -865,6 +961,7 @@ set_start_offset_db_update::build_rows(
     // Find extents below new_start_offset and collect for deletion.
     chunked_hash_map<object_id, size_t> removed_size_by_oid;
     chunked_vector<ss::sstring> extent_keys_to_delete;
+    size_t total_removed_size = 0;
 
     auto max_to_remove = kafka::prev_offset(new_start_offset);
     auto extents_res = co_await reader.get_inclusive_extents(
@@ -894,6 +991,7 @@ set_start_offset_db_update::build_rows(
             if (extent.val.last_offset < new_start_offset) {
                 removed_size_by_oid[extent.val.oid] += extent.val.len;
                 extent_keys_to_delete.push_back(extent.key);
+                total_removed_size += extent.val.len;
             }
         }
     }
@@ -957,7 +1055,7 @@ set_start_offset_db_update::build_rows(
         }
     }
 
-    // Finally, write updated partition metadata.
+    // Finally, write updated partition metadata with reduced size.
     out.emplace_back(
       write_batch_row{
         .key = metadata_row_key::encode(tp),
@@ -966,6 +1064,7 @@ set_start_offset_db_update::build_rows(
             .start_offset = new_start_offset,
             .next_offset = metadata.next_offset,
             .compaction_epoch = metadata.compaction_epoch,
+            .size = metadata.size - std::min(metadata.size, total_removed_size),
           }),
       });
 
