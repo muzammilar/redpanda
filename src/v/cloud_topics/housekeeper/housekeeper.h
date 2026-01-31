@@ -11,6 +11,7 @@
 #pragma once
 
 #include "cloud_topics/level_one/metastore/metastore.h"
+#include "cloud_topics/types.h"
 #include "config/property.h"
 #include "model/fundamental.h"
 
@@ -118,6 +119,8 @@ public:
     // Public for testing.
     ss::future<> do_housekeeping();
 
+    ss::future<> do_bump_epoch();
+
 private:
     ss::future<> do_loop();
     ss::future<kafka::offset> do_bytes_retention(size_t size);
@@ -134,6 +137,8 @@ private:
     config::binding<std::chrono::milliseconds> _loop_interval;
     ss::gate _gate;
     ss::abort_source _as;
+
+    std::optional<cloud_topics::cluster_epoch> _last_epoch;
 };
 
 } // namespace cloud_topics
