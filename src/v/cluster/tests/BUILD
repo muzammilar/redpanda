@@ -133,6 +133,7 @@ redpanda_test_cc_library(
     name = "leader_balancer_test_utils",
     hdrs = [
         "leader_balancer_constraints_utils.h",
+        "leader_balancer_simulation_utils.h",
         "leader_balancer_test_utils.h",
     ],
     deps = [
