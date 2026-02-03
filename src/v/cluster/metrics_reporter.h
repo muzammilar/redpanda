@@ -21,6 +21,8 @@
 #include "model/fundamental.h"
 #include "security/fwd.h"
 #include "storage/fwd.h"
+#include "utils/named_type.h"
+#include "utils/notification_list.h"
 #include "utils/prefix_logger.h"
 #include "utils/unresolved_address.h"
 
@@ -97,6 +99,10 @@ public:
         std::optional<ss::sstring> k8s_cluster_id;
     };
 
+    struct schema_registry_metrics {
+        uint32_t context_count{0};
+    };
+
     struct metrics_snapshot {
         ss::sstring cluster_uuid;
         ss::sstring storage_uuid;
@@ -136,6 +142,9 @@ public:
         bool schema_registry_shadowed{false};
 
         std::optional<kubernetes_metrics> kubernetes;
+
+        // Schema Registry metrics (nullopt when SR not configured)
+        std::optional<schema_registry_metrics> schema_registry;
     };
 
     /// Callback type for external subsystems to contribute metrics data.
@@ -230,4 +239,7 @@ void rjson_serialize(
 void rjson_serialize(
   json::Writer<json::StringBuffer>& w,
   const cluster::metrics_reporter::kubernetes_metrics& v);
+void rjson_serialize(
+  json::Writer<json::StringBuffer>& w,
+  const cluster::metrics_reporter::schema_registry_metrics& v);
 } // namespace json

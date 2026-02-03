@@ -794,6 +794,11 @@ void rjson_serialize(
     w.Key("schema_registry_shadowed");
     w.Bool(snapshot.schema_registry_shadowed);
 
+    if (snapshot.schema_registry.has_value()) {
+        w.Key("schema_registry");
+        rjson_serialize(w, snapshot.schema_registry.value());
+    }
+
     w.EndObject();
 }
 
@@ -864,6 +869,15 @@ void rjson_serialize(
     w.Key("kafka_advertised_listeners");
     rjson_serialize(w, nm.advertised_listeners);
 
+    w.EndObject();
+}
+
+void rjson_serialize(
+  json::Writer<json::StringBuffer>& w,
+  const cluster::metrics_reporter::schema_registry_metrics& sr) {
+    w.StartObject();
+    w.Key("context_count");
+    w.Uint(sr.context_count);
     w.EndObject();
 }
 } // namespace json
