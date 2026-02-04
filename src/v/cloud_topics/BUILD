@@ -272,6 +272,7 @@ redpanda_cc_library(
         ":logger",
         "//src/v/container:chunked_hash_map",
         "//src/v/model",
+        "//src/v/ssx:actor",
         "//src/v/ssx:work_queue",
         "@seastar",
     ],

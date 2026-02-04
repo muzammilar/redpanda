@@ -15,17 +15,16 @@
 #include "cloud_topics/logger.h"
 #include "cloud_topics/topic_manifest_uploader.h"
 #include "cluster/partition.h"
+#include "ssx/actor.h"
 #include "utils/retry_chain_node.h"
 
-#include <seastar/core/abort_source.hh>
-#include <seastar/core/condition-variable.hh>
 #include <seastar/core/coroutine.hh>
-#include <seastar/core/gate.hh>
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/core/sleep.hh>
 
 #include <chrono>
 #include <exception>
+#include <variant>
 
 namespace cloud_topics {
 
@@ -37,7 +36,8 @@ constexpr auto retry_backoff = std::chrono::seconds(5);
 
 // Loop managed by the manager, with the expectation that it is running on the
 // leader of partition 0.
-class topic_manifest_upload_manager::loop {
+class topic_manifest_upload_manager::loop
+  : public ssx::actor<std::monostate, 1, ssx::overflow_policy::drop_oldest> {
 public:
     loop(
       model::topic_id_partition tidp,
@@ -46,41 +46,30 @@ public:
       const cloud_storage_clients::bucket_name& bucket)
       : _tidp(tidp)
       , _partition(std::move(partition))
-      , _uploader(cd_log, bucket, remote) {}
+      , _uploader(cd_log, bucket, remote)
+      , _rtc(_as) {}
 
-    void start() {
-        ssx::spawn_with_gate(_gate, [this] { return run(); });
+    using ssx::actor<std::monostate, 1, ssx::overflow_policy::drop_oldest>::
+      start;
+    using ssx::actor<std::monostate, 1, ssx::overflow_policy::drop_oldest>::
+      stop;
+
+    void signal_upload_needed() { tell({}); }
+
+protected:
+    ss::future<> process(std::monostate) override {
+        co_await upload_until_success();
     }
 
-    ss::future<> stop() {
-        _as.request_abort();
-        _cv.broken();
-        return _gate.close();
-    }
-
-    void signal_upload_needed() {
-        _upload_pending = true;
-        _cv.signal();
+    void on_error(std::exception_ptr ex) noexcept override {
+        vlog(
+          cd_log.error,
+          "Unexpected error in topic manifest upload loop for {}: {}",
+          _tidp,
+          ex);
     }
 
 private:
-    ss::future<> run() {
-        while (!_as.abort_requested()) {
-            try {
-                co_await _cv.wait(
-                  [this] { return _upload_pending || _as.abort_requested(); });
-            } catch (const ss::broken_condition_variable&) {
-                co_return;
-            }
-
-            if (_as.abort_requested()) {
-                break;
-            }
-            _upload_pending = false;
-            co_await upload_until_success();
-        }
-    }
-
     ss::future<std::expected<void, topic_manifest_uploader::error>>
     upload_once() {
         auto topic_cfg_opt = _partition->get_topic_config();
@@ -143,12 +132,7 @@ private:
     model::topic_id_partition _tidp;
     ss::lw_shared_ptr<cluster::partition> _partition;
     topic_manifest_uploader _uploader;
-
-    ss::gate _gate;
-    ss::abort_source _as;
-    retry_chain_node _rtc{_as};
-    ss::condition_variable _cv;
-    bool _upload_pending{true};
+    retry_chain_node _rtc;
 };
 
 topic_manifest_upload_manager::topic_manifest_upload_manager(
@@ -192,7 +176,8 @@ ss::future<> topic_manifest_upload_manager::reset_or_signal_loop(
     }
     auto lp = std::make_unique<loop>(
       tidp, std::move(*partition), _remote.local(), _bucket);
-    lp->start();
+    co_await lp->start();
+    lp->signal_upload_needed();
     _loops.emplace(tidp, std::move(lp));
 }
 
