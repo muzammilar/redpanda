@@ -41,13 +41,13 @@ It uses extensively the thread-per-core model and asynchronous (coroutines, futu
 
 ### Core Build Steps
 
-- **Build all (Release Mode):**
+- **Build all (fastbuild):**
   ```bash
-  bazel build --config=release //...
+  bazel build //...
   ```
 - **Test all:**
   ```bash
-  bazel test --config=release //...
+  bazel test //...
   ```
 - **Lint (C++):**
   - Formatting and linting are enforced. Use:
@@ -60,13 +60,8 @@ It uses extensively the thread-per-core model and asynchronous (coroutines, futu
   ```bash
   bazel build //:rpk
   ```
-  _Requires Go toolchain._
 
-- **Alternative (Docker Toolchain):**
-  See `tools/docker/README.md`. Example:
-  ```bash
-  docker run --rm -ti -v $PWD:$PWD:Z -w $PWD vectorized/redpanda-toolchain ./build.sh
-  ```
+See `.bazelrc` for more details on build settings and config modes
 
 ### Validation and CI
 
