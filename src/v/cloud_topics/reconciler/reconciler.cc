@@ -64,18 +64,84 @@ reconciler<Clock>::reconciler(
   l1::io* l1_io, l1::metastore* metastore, ss::scheduling_group reconciler_sg)
   : _l1_io(l1_io)
   , _metastore(metastore)
-  , _scheduler(
-      config::shard_local_cfg().cloud_topics_reconciliation_min_interval.bind(),
-      config::shard_local_cfg().cloud_topics_reconciliation_max_interval.bind(),
-      config::shard_local_cfg()
-        .cloud_topics_reconciliation_target_fill_ratio.bind(),
-      config::shard_local_cfg()
-        .cloud_topics_reconciliation_speedup_blend.bind(),
-      config::shard_local_cfg()
-        .cloud_topics_reconciliation_slowdown_blend.bind(),
-      config::shard_local_cfg()
-        .cloud_topics_reconciliation_max_object_size.bind())
   , _reconciler_sg(reconciler_sg) {}
+
+template<class Clock>
+reconciler<Clock>::topic_scheduler_state::topic_scheduler_state(
+  config::binding<std::chrono::milliseconds> min_interval,
+  config::binding<std::chrono::milliseconds> max_interval,
+  config::binding<double> target_fill_ratio,
+  config::binding<double> speedup_blend,
+  config::binding<double> slowdown_blend,
+  config::binding<size_t> max_object_size)
+  : scheduler(
+      std::move(min_interval),
+      std::move(max_interval),
+      std::move(target_fill_ratio),
+      std::move(speedup_blend),
+      std::move(slowdown_blend),
+      std::move(max_object_size))
+  , last_reconciled(Clock::time_point::min()) {}
+
+template<class Clock>
+typename reconciler<Clock>::topic_scheduler_state&
+reconciler<Clock>::get_or_create_topic_scheduler(model::topic_id tid) {
+    auto it = _topic_schedulers.find(tid);
+    if (it != _topic_schedulers.end()) {
+        return it->second;
+    }
+
+    auto [inserted_it, _] = _topic_schedulers.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(tid),
+      std::forward_as_tuple(
+        config::shard_local_cfg()
+          .cloud_topics_reconciliation_min_interval.bind(),
+        config::shard_local_cfg()
+          .cloud_topics_reconciliation_max_interval.bind(),
+        config::shard_local_cfg()
+          .cloud_topics_reconciliation_target_fill_ratio.bind(),
+        config::shard_local_cfg()
+          .cloud_topics_reconciliation_speedup_blend.bind(),
+        config::shard_local_cfg()
+          .cloud_topics_reconciliation_slowdown_blend.bind(),
+        config::shard_local_cfg()
+          .cloud_topics_reconciliation_max_object_size.bind()));
+    return inserted_it->second;
+}
+
+template<class Clock>
+typename Clock::duration reconciler<Clock>::compute_next_wait() const {
+    auto default_wait = typename Clock::duration(
+      config::shard_local_cfg().cloud_topics_reconciliation_max_interval());
+
+    if (_topic_schedulers.empty()) {
+        if (_sources.empty()) {
+            return default_wait;
+        }
+        // We have sources but no schedulers yet - they'll be created in
+        // reconcile(). Return min_interval to create them promptly.
+        return typename Clock::duration(
+          config::shard_local_cfg().cloud_topics_reconciliation_min_interval());
+    }
+
+    auto now = Clock::now();
+    auto min_wait = Clock::duration::max();
+
+    for (const auto& [_, scheduler_state] : _topic_schedulers) {
+        auto next_due = scheduler_state.last_reconciled
+                        + scheduler_state.scheduler.current_interval();
+
+        if (next_due <= now) {
+            return Clock::duration::zero();
+        }
+
+        auto wait = next_due - now;
+        min_wait = std::min(min_wait, wait);
+    }
+
+    return std::min(min_wait, default_wait);
+}
 
 template<class Clock>
 ss::future<> reconciler<Clock>::start() {
@@ -113,12 +179,18 @@ void reconciler<Clock>::attach_source(ss::shared_ptr<source> src) {
       src->ntp(),
       src->topic_id_partition());
     _sources.emplace(src->ntp(), src);
+
+    auto& scheduler_state = get_or_create_topic_scheduler(
+      src->topic_id_partition().topic_id);
+    ++scheduler_state.partition_count;
 }
 
 template<class Clock>
 void reconciler<Clock>::detach(const model::ntp& ntp) {
     if (auto it = _sources.find(ntp); it != _sources.end()) {
         vlog(lg.debug, "Detaching partition {}", ntp);
+        auto topic_id = it->second->topic_id_partition().topic_id;
+
         /*
          * This upcall doesn't synchronize with the rest of the reconciler,
          * which means that once a reference to a source is held,
@@ -126,6 +198,14 @@ void reconciler<Clock>::detach(const model::ntp& ntp) {
          * _sources collection.
          */
         _sources.erase(it);
+
+        // Clean up topic scheduler if no partitions remain.
+        if (auto sched_it = _topic_schedulers.find(topic_id);
+            sched_it != _topic_schedulers.end()) {
+            if (--sched_it->second.partition_count == 0) {
+                _topic_schedulers.erase(sched_it);
+            }
+        }
     }
 }
 
@@ -140,8 +220,9 @@ ss::future<> reconciler<Clock>::reconciliation_loop() {
 
     auto deferred = ss::defer(
       [] { vlog(lg.debug, "Reconciliation loop exiting"); });
-    typename Clock::duration next_wait = _scheduler.current_interval();
     while (!_gate.is_closed()) {
+        auto next_wait = compute_next_wait();
+
         try {
             co_await ss::sleep_abortable<Clock>(next_wait, _as);
         } catch (const ss::sleep_aborted&) {
@@ -152,9 +233,6 @@ ss::future<> reconciler<Clock>::reconciliation_loop() {
         if (config::shard_local_cfg()
               .cloud_topics_disable_reconciliation_loop()) {
             vlog(lg.debug, "Reconciliation loop disabled, skipping iteration");
-            next_wait = typename Clock::duration(
-              config::shard_local_cfg()
-                .cloud_topics_reconciliation_max_interval());
             continue;
         }
 
@@ -219,7 +297,6 @@ ss::future<> reconciler<Clock>::reconciliation_loop() {
               "Recoverable error during reconciliation: {}",
               std::current_exception());
         }
-        next_wait = _scheduler.current_interval();
     }
 }
 
@@ -240,23 +317,52 @@ ss::future<> reconciler<Clock>::reconcile() {
         co_return;
     }
 
-    auto source_sets = partition_sources_into_sets(std::move(sources));
+    auto topics = partition_sources_by_topic(std::move(sources));
 
-    // Adapt scheduling interval based on max object size produced.
-    // Note that we slow down if there's nothing to reconcile or if all
-    // objects failed. This is a sort of retry with backoff mechanism.
-    size_t max_bytes_produced = 0;
-    for (auto& source_set : source_sets) {
-        auto bytes = co_await reconcile_source_set(std::move(source_set));
-        max_bytes_produced = std::max(max_bytes_produced, bytes);
+    // Filter to only topics that are due for reconciliation.
+    auto now = Clock::now();
+    chunked_vector<chunked_vector<ss::shared_ptr<source>>> due_topics;
+
+    for (auto& topic_sources : topics) {
+        vassert(!topic_sources.empty(), "Empty topic source set");
+        auto topic_id = topic_sources.front()->topic_id_partition().topic_id;
+        auto& scheduler_state = get_or_create_topic_scheduler(topic_id);
+        auto next_due = scheduler_state.last_reconciled
+                        + scheduler_state.scheduler.current_interval();
+
+        if (now >= next_due) {
+            due_topics.push_back(std::move(topic_sources));
+        }
     }
 
-    _scheduler.adapt(max_bytes_produced);
+    vlog(
+      lg.debug,
+      "Reconciling {} due topics of {} total",
+      due_topics.size(),
+      topics.size());
+
+    if (due_topics.empty()) {
+        co_return;
+    }
+
+    // Reconcile each due topic and update its scheduler.
+    for (auto& topic_sources : due_topics) {
+        auto topic_id = topic_sources.front()->topic_id_partition().topic_id;
+        auto bytes = co_await reconcile_source_set(std::move(topic_sources));
+
+        // Update the topic's scheduler state. Adapt based on max object size
+        // produced. Note that we slow down if there's nothing to reconcile or
+        // if all objects failed. This is a sort of retry with backoff
+        // mechanism.
+        auto& scheduler_state = get_or_create_topic_scheduler(topic_id);
+        scheduler_state.scheduler.adapt(bytes);
+        scheduler_state.last_reconciled = now;
+    }
 }
 
 template<class Clock>
 chunked_vector<chunked_vector<ss::shared_ptr<source>>>
-reconciler<Clock>::partition_sources_into_sets(
+reconciler<Clock>::partition_sources_by_topic(
   chunked_vector<ss::shared_ptr<source>> sources) {
     chunked_hash_map<model::topic_id, chunked_vector<ss::shared_ptr<source>>>
       topic_id_to_sources;
@@ -267,7 +373,7 @@ reconciler<Clock>::partition_sources_into_sets(
 
     vlog(
       lg.debug,
-      "Partitioned sources into {} sets by topic_id",
+      "Partitioned sources into {} topics",
       topic_id_to_sources.size());
 
     chunked_vector<chunked_vector<ss::shared_ptr<source>>> result;
