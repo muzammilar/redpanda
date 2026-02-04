@@ -11,7 +11,9 @@
 #include "redpanda/admin/services/internal/level_zero_gc.h"
 
 #include "base/vassert.h"
+#include "cloud_topics/frontend/frontend.h"
 #include "cloud_topics/level_zero/gc/level_zero_gc.h"
+#include "cloud_topics/state_accessors.h"
 #include "cluster/partition_leaders_table.h"
 #include "cluster/partition_manager.h"
 #include "cluster/shard_table.h"
@@ -191,5 +193,29 @@ level_zero_gc_service_impl::pause(
 
     co_return response;
 }
+
+namespace {
+
+std::unique_ptr<cloud_topics::frontend>
+make_ct_frontend(cluster::partition_manager& pm, const model::ntp& ntp) {
+    auto partition = pm.get(ntp);
+    if (partition == nullptr) {
+        throw serde::pb::rpc::not_found_exception(
+          ssx::sformat("TopicPartition {} not found", ntp.tp));
+    }
+    if (!partition->get_ntp_config().cloud_topic_enabled()) {
+        throw serde::pb::rpc::failed_precondition_exception(
+          ssx::sformat("TopicPartition {} is not a cloud topic", ntp.tp));
+    }
+    auto ct_state = partition->get_cloud_topics_state();
+    if (ct_state == nullptr || !ct_state->local_is_initialized()) {
+        throw serde::pb::rpc::failed_precondition_exception(
+          "Cloud topics subsystem is not initialized");
+    }
+    return std::make_unique<cloud_topics::frontend>(
+      partition, ct_state->local().get_data_plane());
+}
+
+} // namespace
 
 } // namespace admin
