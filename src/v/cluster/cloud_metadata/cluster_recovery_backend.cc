@@ -242,6 +242,9 @@ ss::future<cluster::errc> cluster_recovery_backend::do_action(
         }
         break;
     }
+    // TODO: implement
+    case recovery_stage::recovered_cloud_topics_metastore:
+    case recovery_stage::recovered_cloud_topic_data:
     case recovery_stage::recovered_remote_topic_data: {
         retry_chain_node topics_retry(&parent_retry);
         // TODO: batch this up.

@@ -1914,6 +1914,8 @@ enum class recovery_stage : int8_t {
     recovered_cluster_config = 3,
     recovered_users = 4,
     recovered_acls = 5,
+    recovered_cloud_topics_metastore = 11,
+    recovered_cloud_topic_data = 12,
     recovered_remote_topic_data = 6,
     recovered_topic_data = 7,
 
