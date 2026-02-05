@@ -375,22 +375,30 @@ ss::future<> partition_balancer_backend::do_tick() {
         co_return;
     }
 
+    // consume force refresh, return it on failure
     const bool force_refresh_this_tick
       = _cur_term->_force_health_report_refresh;
+    _cur_term->_force_health_report_refresh = false;
+
+    auto reset_force_refresh = ss::defer([this, force_refresh_this_tick] {
+        _cur_term->_force_health_report_refresh |= force_refresh_this_tick;
+    });
 
     auto health_report = co_await _health_monitor.get_cluster_health(
       cluster_report_filter{},
       force_refresh(force_refresh_this_tick),
       model::timeout_clock::now() + controller_stm_sync_timeout);
-    _cur_term->_force_health_report_refresh = false;
 
     if (!health_report) {
         vlog(
           clusterlog.info,
           "unable to get health report - {}",
           health_report.error().message());
+        // return whats been taken on failure
         co_return;
     }
+
+    reset_force_refresh.cancel();
 
     if (_raft0->term() != _cur_term->id) {
         vlog(clusterlog.debug, "lost leadership, exiting");
