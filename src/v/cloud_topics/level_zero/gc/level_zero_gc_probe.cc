@@ -45,6 +45,13 @@ void level_zero_gc_probe::setup_internal_metrics(bool disable) {
           sm::description("Total L0 objects scanned by garbage collection."),
           labels),
         sm::make_counter(
+          "objects_skipped_not_eligible_total",
+          [this] { return objects_skipped_not_eligible_; },
+          sm::description(
+            "L0 objects skipped because epoch exceeds max GC eligible "
+            "epoch."),
+          labels),
+        sm::make_counter(
           "list_errors_total",
           [this] { return list_errors_; },
           sm::description(

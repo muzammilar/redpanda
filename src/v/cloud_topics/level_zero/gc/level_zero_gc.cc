@@ -851,6 +851,7 @@ level_zero_gc::do_try_to_collect(std::optional<cluster_epoch>& max_gc_epoch) {
               "Ignoring object with non-collectible epoch: {} > {}",
               object.key,
               max_gc_epoch.value());
+            probe_.object_skipped_not_eligible();
             continue;
         }
 
