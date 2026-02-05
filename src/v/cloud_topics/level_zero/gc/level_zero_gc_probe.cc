@@ -58,6 +58,11 @@ void level_zero_gc_probe::setup_internal_metrics(bool disable) {
             "Difference between max GC eligible epoch and oldest epoch being "
             "deleted."),
           labels),
+        sm::make_gauge(
+          "max_deleted_epoch",
+          [this] { return max_deleted_epoch_.value_or(cluster_epoch{-1})(); },
+          sm::description("Maximum epoch deleted by L0 garbage collection."),
+          labels),
       });
 }
 
@@ -69,6 +74,7 @@ void level_zero_gc_probe::report_deletion_epoch(cluster_epoch epoch) {
         min_deletion_epoch_ = std::min(
           min_deletion_epoch_.value_or(epoch), epoch);
     }
+    max_deleted_epoch_ = std::max(max_deleted_epoch_.value_or(epoch), epoch);
 }
 
 cloud_topics::cluster_epoch::type level_zero_gc_probe::epoch_lag() const {

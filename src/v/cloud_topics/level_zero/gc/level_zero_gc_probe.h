@@ -45,6 +45,7 @@ private:
 
     std::optional<cluster_epoch> max_gc_eligible_epoch_;
     std::optional<cluster_epoch> min_deletion_epoch_;
+    std::optional<cluster_epoch> max_deleted_epoch_;
     bool reset_deletion_epoch_{true};
 
     metrics::internal_metric_groups _metrics;
