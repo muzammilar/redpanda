@@ -65,7 +65,7 @@ public:
       ss::sharded<rpc::connection_cache>*,
       cloud_storage_clients::bucket_name,
       ss::sharded<storage::api>*,
-      bool skip_flush_loop = true);
+      bool skip_flush_loop = false);
 
     ss::future<> start();
 
