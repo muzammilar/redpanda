@@ -34,7 +34,7 @@ void level_zero_gc_probe::setup_internal_metrics(bool disable) {
       prometheus_sanitize::metrics_name("cloud_topics_l0_gc"),
       {
         sm::make_counter(
-          "objects_deleted",
+          "objects_deleted_total",
           [this] { return objects_deleted_; },
           sm::description(
             "Number of L0 objects deleted by garbage collection."),
