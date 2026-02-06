@@ -200,6 +200,12 @@ struct context_subject {
     /// "subject" (which uses the default context)
     static context_subject from_string(std::string_view input);
 
+    /// Helper for testing to create a simple unqualified subject in the default
+    /// context
+    static context_subject unqualified(std::string_view input) {
+        return {default_context, subject{input}};
+    }
+
     /// Format as qualified subject ":.context:subject" or "subject" if in the
     /// default context
     ss::sstring to_string() const { return ssx::sformat("{}", *this); }
