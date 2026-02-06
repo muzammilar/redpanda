@@ -414,8 +414,9 @@ leader_router::leader_router(
 
 ss::future<> leader_router::stop() { return _gate.close(); }
 
-ss::future<bool> leader_router::ensure_topic_exists() {
-    return _domain_supervisor->maybe_create_metastore_topic();
+ss::future<bool>
+leader_router::ensure_topic_exists(std::optional<int> num_partitions) {
+    return _domain_supervisor->maybe_create_metastore_topic(num_partitions);
 }
 std::optional<cloud_storage::remote_label>
 leader_router::metastore_restore_label() const {

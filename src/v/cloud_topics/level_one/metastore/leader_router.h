@@ -110,7 +110,11 @@ public:
 
     std::optional<int> num_metastore_partitions() const;
 
-    ss::future<bool> ensure_topic_exists();
+    // Creates the topic (optionally with the given number of partitions, if
+    // provided). Does not validate that the actual number of partitions in
+    // the topic matches if it already exists.
+    ss::future<bool>
+    ensure_topic_exists(std::optional<int> num_partitions = std::nullopt);
 
     // Indicates the location in object storage that this metastore's manifest
     // will be stored.
