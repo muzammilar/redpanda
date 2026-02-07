@@ -208,8 +208,31 @@ For further details, consult:
 
 When writing or critiquing commit messages, follow these guidelines:
 
- - First line of the commit message should be a short summary (max 50 chars)
- - Remain lines should be wrapped at 72 chars
+**Format:**
+```
+area[/detail]: short description
 
+<optional body>
+```
+
+- Title: ≤72 chars
+- Body: wrapped at 72 chars
+
+**Check git history first** to match the style of the area you're changing:
+```bash
+git log --oneline --no-merges -- path/to/changed/files | head -20
+```
+
+**Goal:** Make the commit easy to review and provide context for future readers (via `git blame`/`git log`)
+
+**Rules:**
+- Title: imperative mood, lowercase after colon, no period
+- Keep bodies concise (1-2 lines typical, trivial changes need only a title)
+- Don't reference GitHub issues/PRs or Jira tickets
+- Use the body to help reviewers and future readers understand:
+  - The "why": motivation, design choices, preparation for future work
+  - The "what": new abstractions introduced, non-obvious changes
+  - Integration tests: briefly note what behaviors are covered
+- Don't restate what's obvious from the diff, but duplicating a doc comment is fine if it helps reviewers understand the change faster.
 
 _Results from code search may be incomplete. For more C++ details, see the [repository code search](https://github.com/redpanda-data/redpanda/search?q=c%2B%2B)._
