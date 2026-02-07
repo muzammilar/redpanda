@@ -178,6 +178,22 @@ for memory safety in coroutines, not self-reference.
 - Use snake_case for identifiers. Use CamelCase for concepts.
 - Use Doxygen comments with 3-slashes (///) for public APIs
 
+### Code comments
+
+- **Default to no comments** - clear code and good names are better
+- **Avoid comments that restate the code** - they become stale
+- **Prefer alternatives:**
+  - Better variable/function names
+  - Log lines (serve as documentation and debugging)
+- **Do add comments for:**
+  - Doc comments (`/// \brief`) on public types explaining purpose/usage
+  - Complex algorithms or non-obvious "gotchas"
+  - Test comments explaining input format or test intent
+  - Links to external resources (specs, docs, issues)
+  - Mapping internal types/concepts to external formats (e.g., wire protocols, APIs)
+  - ASCII diagrams for complex state machines or data flows
+- **Avoid obvious branching comments** - `if (x)` rarely needs `// when x is true`
+
 ### More C++-Specific References
 
 - [MODULE.bazel](https://github.com/redpanda-data/redpanda/blob/dev/MODULE.bazel)
