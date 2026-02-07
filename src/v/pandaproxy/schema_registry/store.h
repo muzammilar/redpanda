@@ -184,18 +184,26 @@ public:
       const std::optional<ss::sstring>& subject_prefix = std::nullopt) const {
         chunked_vector<context_subject> res;
         res.reserve(_subjects.size());
-        for (const auto& ctx_sub : _subjects) {
-            if (inc_del || !ctx_sub.second.deleted) {
-                auto has_version = std::ranges::any_of(
-                  ctx_sub.second.versions,
-                  [inc_del](const auto& v) { return inc_del || !v.deleted; });
-                if (
-                  has_version
-                  && ctx_sub.first.starts_with(subject_prefix.value_or(""))) {
-                    res.push_back(ctx_sub.first);
-                }
-            }
-        }
+
+        auto matching_subject_names
+          = _subjects | std::views::filter([inc_del](const auto& s) {
+                return inc_del || !s.second.deleted;
+            })
+            | std::views::filter([inc_del](const auto& s) {
+                  return std::ranges::any_of(
+                    s.second.versions,
+                    [inc_del](const auto& v) { return inc_del || !v.deleted; });
+              })
+            | std::views::filter([&](const auto& s) {
+                  if (!subject_prefix.has_value()) {
+                      return true;
+                  }
+                  return s.first.starts_with(subject_prefix.value());
+              })
+            | std::views::keys;
+
+        std::ranges::copy(matching_subject_names, std::back_inserter(res));
+
         return res;
     }
 
