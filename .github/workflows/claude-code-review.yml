@@ -22,7 +22,7 @@ jobs:
           allowed_bots: ""
           allowed_non_write_users: ""
           # NOTE: uncomment github_token to test changes in a PR before merge with bot `github-actions`; comment out before merge so bot will be `claude`
-          github_token: ${{ github.token }}
+          # github_token: ${{ github.token }}
           show_full_output: false
           track_progress: false
           use_commit_signing: true
