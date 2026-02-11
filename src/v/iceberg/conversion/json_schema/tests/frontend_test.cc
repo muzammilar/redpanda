@@ -238,6 +238,37 @@ TEST(frontend_test, duplicate_properties_def) {
         StrEq("Duplicate keyword: properties")));
 }
 
+TEST(frontend_test, banned_keywords) {
+    for (const auto& kw : {
+           "$dynamicRef",
+           "default",
+           "patternProperties",
+           "dependencies",
+           "if",
+           "then",
+           "else",
+           "allOf",
+           "anyOf",
+         }) {
+        SCOPED_TRACE(fmt::format("Testing banned keyword: {}", kw));
+        EXPECT_THAT(
+          [&]() {
+              frontend{}.compile(
+                parse_json(
+                  fmt::format(
+                    R"({{
+                    "$id": "https://example.com/root.json",
+                    "{}": {{ "type": "string" }}
+                  }})",
+                    kw)),
+                "https://example.com/irrelevant-base.json",
+                dialect::draft7);
+          },
+          ThrowsMessage<std::runtime_error>(
+            StrEq(fmt::format("The {} keyword is not allowed", kw))));
+    }
+}
+
 TEST(frontend_test, object_additional_properties) {
     frontend f;
     auto schema = f.compile(

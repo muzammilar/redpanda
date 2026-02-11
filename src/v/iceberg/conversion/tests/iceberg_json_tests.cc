@@ -890,37 +890,6 @@ TEST(JsonSchema, RefInfiniteRecursion) {
       result.error().what());
 }
 
-TEST(JsonSchema, BannedKeywords) {
-    for (const auto& keyword : {
-           "patternProperties",
-           "dependencies",
-           "allOf",
-           "anyOf",
-           "if",
-           "then",
-           "else",
-           "default",
-         }) {
-        SCOPED_TRACE(fmt::format("Testing banned keyword: {}", keyword));
-
-        constexpr std::string_view schema_template = R"({{
-          "$schema": "http://json-schema.org/draft-07/schema#",
-          "$id": "https://example.com/root.json",
-          "{}": {{ "type": "string" }}
-        }})";
-
-        auto schema = fmt::format(fmt::runtime(schema_template), keyword);
-        auto result = to_iceberg_type(schema);
-        ASSERT_TRUE(result.has_error());
-        ASSERT_STREQ(
-          fmt::format(
-            "Failed to convert JSON schema: The {} keyword is not allowed",
-            keyword)
-            .c_str(),
-          result.error().what());
-    }
-}
-
 TEST(JsonSchema, RequiresDraft7Schema) {
     // Test without $schema keyword
     constexpr std::string_view schema_without_schema = R"({
