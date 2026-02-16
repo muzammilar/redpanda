@@ -6649,6 +6649,40 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
             result_json["references"][1]["subject"], f":.{ctx}:{base2_subject}"
         )
 
+    @cluster(num_nodes=1)
+    def test_reregister_schema_returns_correct_context_definition(self):
+        """
+        Regression test for context-aware schema definition lookup.
+
+        When re-registering an existing schema, the response should contain
+        the schema definition from the correct context, not from the schema
+        with the same schema ID in the default context.
+        """
+        # Register schema A in .ctx1 - gets ID 1
+        ctx1_subject = ":.ctx1:test-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx1_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)
+
+        # Register different schema B in default context - also gets ID 1
+        default_subject = "test-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=default_subject, data=json.dumps({"schema": schema2_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)  # Same numeric ID, different context
+
+        # Re-register schema A in .ctx1 (should return existing)
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx1_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # The returned schema should be schema1_def (from .ctx1), NOT schema2_def
+        self.assert_equal(result.json()["schema"], schema1_def)
+
 
 class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
     """
