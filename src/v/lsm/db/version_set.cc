@@ -483,15 +483,16 @@ ss::future<> version::for_each_overlapping(
 fmt::iterator version::format_to(fmt::iterator it) const {
     // For example:
     //   --- level 1 ---
-    //   17:234['a' .. 'e']
-    //   20:31['a' .. 'e']
+    //   0-17:234['a' .. 'e']
+    //   3-20:31['a' .. 'e']
     for (size_t level = 0; level < _files.size(); ++level) {
         it = fmt::format_to(it, "--- level {} ---\n", level);
         for (const auto& file : _files[level]) {
             it = fmt::format_to(
               it,
-              "{}:{}['{}' .. '{}']\n",
-              file->handle,
+              "{}-{}:{}['{}' .. '{}']\n",
+              file->handle.epoch,
+              file->handle.id,
               file->file_size,
               file->smallest,
               file->largest);
@@ -911,6 +912,26 @@ bool compaction::should_stop_before(internal::key_view key) {
     } else {
         return false;
     }
+}
+
+fmt::iterator compaction::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
+      "level={} input_level_files={{{}}} "
+      "output_level_files={{{}}} grandparents={{{}}}",
+      _level,
+      fmt::join(
+        std::views::transform(
+          _inputs[0], [](const auto& file) { return file->handle; }),
+        ","),
+      fmt::join(
+        std::views::transform(
+          _inputs[1], [](const auto& file) { return file->handle; }),
+        ","),
+      fmt::join(
+        std::views::transform(
+          _grandparents, [](const auto& file) { return file->handle; }),
+        ","));
 }
 
 } // namespace lsm::db

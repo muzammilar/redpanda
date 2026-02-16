@@ -258,6 +258,8 @@ public:
     // before processing "internal_key".
     bool should_stop_before(internal::key_view key);
 
+    fmt::iterator format_to(fmt::iterator) const;
+
 private:
     friend class version;
     friend class version_set;
