@@ -2123,9 +2123,15 @@ ss::future<raft::stm_snapshot> rm_stm::do_take_local_snapshot(
     stm_snapshot.highest_producer_id = _highest_producer_id;
     // producers state (includes idempotent and transactional producers)
     for (const auto& [_, state] : _producers) {
-        auto snapshot = state->snapshot(start_kafka_offset);
-        if (!snapshot.finished_requests.empty()) {
-            stm_snapshot.producers.push_back(std::move(snapshot));
+        auto snap = state->snapshot();
+        // Discard finished requests below the local snapshot start offset,
+        // they are no longer relevant.
+        std::erase_if(
+          snap.finished_requests, [start_kafka_offset](const auto& req) {
+              return req.last_offset < start_kafka_offset;
+          });
+        if (!snap.finished_requests.empty()) {
+            stm_snapshot.producers.push_back(std::move(snap));
         }
     }
 

@@ -684,7 +684,7 @@ cluster::tx::tx_snapshot_v5 make_tx_snapshot_v5() {
       tests::random_producer_state, 50, ctx_logger);
     chunked_vector<cluster::tx::producer_state_snapshot_deprecated> snapshots;
     for (const auto& producer : producers) {
-        auto snapshot = producer->snapshot(kafka::offset{0});
+        auto snapshot = producer->snapshot();
         cluster::tx::producer_state_snapshot_deprecated old_snapshot;
         for (auto& req : snapshot.finished_requests) {
             old_snapshot.finished_requests.push_back(
