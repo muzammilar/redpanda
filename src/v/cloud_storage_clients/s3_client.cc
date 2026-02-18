@@ -1822,6 +1822,8 @@ ss::future<> s3_multipart_state::initialize_multipart() {
         _upload_id = response_tree.get<ss::sstring>(
           "InitiateMultipartUploadResult.UploadId");
 
+        _client->_probe->register_multipart_create();
+
         vlog(
           s3_log.debug,
           "Initialized S3 multipart upload with upload_id: {}",
@@ -1890,6 +1892,8 @@ ss::future<> s3_multipart_state::upload_part(size_t part_num, iobuf data) {
     // Drain response
     co_await http::drain(std::move(response_stream));
 
+    _client->_probe->register_multipart_upload();
+
     vlog(
       s3_log.debug, "Uploaded part {} with ETag: {}", part_num, _etags.back());
 }
@@ -1934,15 +1938,19 @@ ss::future<> s3_multipart_state::complete_multipart_upload() {
     // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html
     auto response_buf = co_await http::drain(std::move(response_stream));
     auto response_tree = util::iobuf_to_ptree(std::move(response_buf), s3_log);
-    if (auto error_code = response_tree.get_optional<ss::sstring>("Error.Code");
+    if (auto error_code = response_tree.get_optional<std::string>("Error.Code");
         error_code) {
-        auto error_msg = response_tree.get<ss::sstring>("Error.Message", "");
+        // Use std::string for ptree extraction since ss::sstring's stream
+        // extraction operator reads only until whitespace, which truncates
+        // multi-word error messages.
         throw rest_error_response(
           *error_code,
-          error_msg,
-          response_tree.get<ss::sstring>("Error.RequestId", ""),
-          response_tree.get<ss::sstring>("Error.Resource", ""));
+          response_tree.get<std::string>("Error.Message", ""),
+          response_tree.get<std::string>("Error.RequestId", ""),
+          response_tree.get<std::string>("Error.Resource", ""));
     }
+
+    _client->_probe->register_multipart_complete();
 
     vlog(s3_log.debug, "Completed multipart upload {}", _upload_id);
 }
@@ -1989,6 +1997,8 @@ ss::future<> s3_multipart_state::abort_multipart_upload() {
 
         // Drain response
         co_await http::drain(std::move(response_stream));
+
+        _client->_probe->register_multipart_abort();
 
         vlog(s3_log.debug, "Aborted multipart upload {}", _upload_id);
     } catch (const std::exception& ex) {

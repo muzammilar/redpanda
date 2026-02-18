@@ -774,6 +774,7 @@ ss::future<> abs_multipart_state::initialize_multipart() {
     // directly
     vlog(abs_log.debug, "ABS multipart upload initialized (no-op)");
     _initialized = true;
+    _client->_probe->register_multipart_create();
     co_return;
 }
 
@@ -818,6 +819,8 @@ ss::future<> abs_multipart_state::upload_part(size_t part_num, iobuf data) {
 
     co_await http::drain(std::move(response_stream));
 
+    _client->_probe->register_multipart_upload();
+
     _block_ids.push_back(block_id);
 }
 
@@ -852,11 +855,14 @@ ss::future<> abs_multipart_state::complete_multipart_upload() {
     }
 
     co_await http::drain(std::move(response_stream));
+
+    _client->_probe->register_multipart_complete();
 }
 
 ss::future<> abs_multipart_state::abort_multipart_upload() {
     // ABS uncommitted blocks expire after 7 days - no explicit abort needed
     vlog(abs_log.debug, "ABS multipart upload aborted (no-op)");
+    _client->_probe->register_multipart_abort();
     co_return;
 }
 
