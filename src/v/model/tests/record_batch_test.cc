@@ -143,6 +143,88 @@ TEST_F(RecordBatchTest, ParseRecordMetadataFullParse) {
     check_parse_record_metadata(true);
 }
 
+namespace {
+// Serialize a record and verify that the size_bytes prefix matches the actual
+// serialized body length.
+void check_serialization_size(const model::record& r) {
+    iobuf buf;
+    model::append_record_to_buffer(buf, r);
+
+    auto parser = iobuf_const_parser(buf);
+    auto [written_size, _] = parser.read_varlong();
+    auto body_size = static_cast<int64_t>(parser.bytes_left());
+
+    EXPECT_EQ(r.size_bytes(), written_size);
+    EXPECT_EQ(r.size_bytes(), body_size);
+}
+} // namespace
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithKeyAndValue) {
+    auto r = model::record(
+      model::record_attributes(0),
+      0,
+      0,
+      iobuf::from("key"),
+      iobuf::from("value"),
+      {});
+    check_serialization_size(r);
+}
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithNullKey) {
+    auto r = model::record(
+      model::record_attributes(0),
+      0,
+      0,
+      std::nullopt,
+      iobuf::from("value"),
+      {});
+    check_serialization_size(r);
+}
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithNullValue) {
+    auto r = model::record(
+      model::record_attributes(0), 0, 0, iobuf::from("key"), std::nullopt, {});
+    check_serialization_size(r);
+}
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithNullKeyAndValue) {
+    auto r = model::record(
+      model::record_attributes(0), 0, 0, std::nullopt, std::nullopt, {});
+    check_serialization_size(r);
+}
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithEmptyKey) {
+    auto r = model::record(
+      model::record_attributes(0), 0, 0, iobuf{}, iobuf::from("value"), {});
+    check_serialization_size(r);
+}
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithHeaders) {
+    std::vector<model::record_header> headers;
+    headers.emplace_back(3, iobuf::from("hdr"), 2, iobuf::from("hv"));
+    auto r = model::record(
+      model::record_attributes(0),
+      0,
+      0,
+      iobuf::from("key"),
+      iobuf::from("value"),
+      std::move(headers));
+    check_serialization_size(r);
+}
+
+TEST_F(RecordBatchTest, RecordSizeBytesWithNullHeaderValues) {
+    std::vector<model::record_header> headers;
+    headers.emplace_back(3, iobuf::from("hdr"), -1, iobuf{});
+    auto r = model::record(
+      model::record_attributes(0),
+      0,
+      0,
+      iobuf::from("key"),
+      iobuf::from("value"),
+      std::move(headers));
+    check_serialization_size(r);
+}
+
 class RecordBatchCompressionTest
   : public ::testing::TestWithParam<model::compression> {};
 
