@@ -141,6 +141,7 @@ public:
            pu = std::move(page_u),
            eo = std::move(eligible_objects)]() mutable {
               const auto num_eligible = eo.size();
+              probe_->delete_request();
               return storage_->delete_objects(&as_, std::move(eo))
                 .then([this, num_eligible](
                         std::expected<void, cloud_io::upload_result> res) {

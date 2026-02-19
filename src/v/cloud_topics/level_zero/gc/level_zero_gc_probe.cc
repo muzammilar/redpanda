@@ -64,6 +64,13 @@ void level_zero_gc_probe::setup_internal_metrics(bool disable) {
           sm::description("Number of completed L0 garbage collection rounds."),
           labels),
         sm::make_counter(
+          "delete_requests_total",
+          [this] { return delete_requests_; },
+          sm::description(
+            "Number of batch DELETE requests issued by L0 garbage "
+            "collection."),
+          labels),
+        sm::make_counter(
           "list_errors_total",
           [this] { return list_errors_; },
           sm::description(
