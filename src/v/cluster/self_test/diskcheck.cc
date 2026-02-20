@@ -19,6 +19,7 @@
 #include "utils/directory_walker.h"
 #include "utils/uuid.h"
 
+#include <seastar/core/future-util.hh>
 #include <seastar/core/seastar.hh>
 #include <seastar/core/smp.hh>
 #include <seastar/coroutine/switch_to.hh>
@@ -37,6 +38,15 @@ struct shard_benchmark_results {
     metrics write;
     std::optional<metrics> read;
 };
+
+metrics merge_metrics(std::vector<metrics> shard_metrics) {
+    auto merged = std::move(shard_metrics.front());
+    for (size_t i = 1; i < shard_metrics.size(); ++i) {
+        merged.merge_from(shard_metrics[i]);
+    }
+
+    return merged;
+}
 
 uint64_t get_next_pos(uint64_t pos, const diskcheck_opts& opts) {
     uint64_t next_pos = pos + opts.request_size;
@@ -261,17 +271,49 @@ ss::future<std::vector<self_test_result>> diskcheck::run(diskcheck_opts opts) {
 
 ss::future<std::vector<self_test_result>>
 diskcheck::run_configured_benchmarks(ss::sstring basename) {
-    co_await ss::coroutine::switch_to(_opts.sg);
-    auto shard_result = co_await run_shard_benchmark(
-      std::move(_opts), basename, _cancelled->local());
+    auto active_shards = std::min<std::uint32_t>(
+      _opts.parallelism, ss::smp::count);
+    auto parallelism_per_shard = _opts.parallelism / active_shards;
+    auto remainder = _opts.parallelism % active_shards;
+
+    std::vector<ss::future<shard_benchmark_results>> shard_futures;
+    for (size_t shard_index = 0; shard_index < active_shards; ++shard_index) {
+        auto shard_parallelism = parallelism_per_shard
+                                 + (shard_index < remainder ? 1 : 0);
+        auto local_opts = _opts;
+        local_opts.parallelism = shard_parallelism;
+        local_opts.data_size /= active_shards;
+        shard_futures.push_back(
+          ss::smp::submit_to(
+            shard_index,
+            [local_opts, basename, this](
+              this auto) -> ss::future<shard_benchmark_results> {
+                co_await ss::coroutine::switch_to(local_opts.sg);
+                co_return co_await run_shard_benchmark(
+                  std::move(local_opts), basename, _cancelled->local());
+            }));
+    }
+
+    auto per_shard_results = co_await ss::when_all_succeed(
+      shard_futures.begin(), shard_futures.end());
 
     std::vector<self_test_result> r;
     r.reserve(_opts.skip_read ? 1 : 2);
 
-    auto write_result = shard_result.write.to_st_result();
+    std::vector<metrics> write_shard_results;
+    write_shard_results.reserve(per_shard_results.size());
+    for (auto& shard_result : per_shard_results) {
+        write_shard_results.push_back(std::move(shard_result.write));
+    }
+
+    auto write_result
+      = merge_metrics(std::move(write_shard_results)).to_st_result();
     write_result.name = _opts.name;
     write_result.info = fmt::format(
-      "write run (iodepth: {}, dsync: {})", _opts.parallelism, _opts.dsync);
+      "write run (iodepth: {}, dsync: {}, shards: {})",
+      _opts.parallelism,
+      _opts.dsync,
+      active_shards);
     write_result.test_type = "disk";
     if (_cancelled->abort_requested()) {
         write_result.warning = "Run was manually cancelled";
@@ -279,12 +321,19 @@ diskcheck::run_configured_benchmarks(ss::sstring basename) {
     r.push_back(std::move(write_result));
 
     if (!_opts.skip_read) {
-        vassert(
-          shard_result.read.has_value(),
-          "Expected read benchmark results when skip_read is false");
-        auto read_result = shard_result.read.value().to_st_result();
+        std::vector<metrics> read_shard_results;
+        read_shard_results.reserve(per_shard_results.size());
+        for (auto& shard_result : per_shard_results) {
+            if (shard_result.read.has_value()) {
+                read_shard_results.push_back(
+                  std::move(shard_result.read.value()));
+            }
+        }
+
+        auto read_result
+          = merge_metrics(std::move(read_shard_results)).to_st_result();
         read_result.name = _opts.name;
-        read_result.info = "read run";
+        read_result.info = fmt::format("read run (shards: {})", active_shards);
         read_result.test_type = "disk";
         if (_cancelled->abort_requested()) {
             read_result.warning = "Run was manually cancelled";
