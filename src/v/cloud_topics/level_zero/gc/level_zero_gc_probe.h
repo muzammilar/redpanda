@@ -31,6 +31,7 @@ public:
     void delete_request() { delete_requests_++; }
     void list_error() { list_errors_++; }
     void delete_error() { delete_errors_++; }
+    void add_backpressure(double seconds) { backpressure_seconds_ += seconds; }
     void set_max_gc_eligible_epoch(cluster_epoch epoch) {
         max_gc_eligible_epoch_ = epoch;
     }
@@ -52,6 +53,7 @@ private:
     uint64_t delete_requests_{0};
     uint64_t list_errors_{0};
     uint64_t delete_errors_{0};
+    double backpressure_seconds_{0};
 
     std::optional<cluster_epoch> max_gc_eligible_epoch_;
     std::optional<cluster_epoch> min_deletion_epoch_;

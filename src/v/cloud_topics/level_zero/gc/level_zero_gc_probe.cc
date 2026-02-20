@@ -82,6 +82,13 @@ void level_zero_gc_probe::setup_internal_metrics(bool disable) {
           sm::description(
             "Number of DELETE errors during L0 garbage collection."),
           labels),
+        sm::make_counter(
+          "backpressure_seconds_total",
+          [this] { return backpressure_seconds_; },
+          sm::description(
+            "Cumulative time in seconds spent in backoff between L0 "
+            "garbage collection rounds."),
+          labels),
         sm::make_gauge(
           "epoch_lag",
           [this] { return epoch_lag(); },

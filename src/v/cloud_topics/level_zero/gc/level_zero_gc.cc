@@ -686,9 +686,15 @@ seastar::future<> level_zero_gc::worker() {
             asrc_ = {};
 
             if (backoff.count() > 0) {
+                auto t0 = ss::lowres_clock::now();
                 (co_await seastar::coroutine::as_future(
                    seastar::sleep_abortable(backoff, asrc_)))
                   .ignore_ready_future();
+                auto elapsed
+                  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    ss::lowres_clock::now() - t0);
+                probe_.add_backpressure(
+                  static_cast<double>(elapsed.count()) / 1000.0);
                 backoff = std::chrono::seconds{0};
             }
 
