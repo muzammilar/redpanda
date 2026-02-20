@@ -305,6 +305,172 @@ class AutoDecommissionTest_5(AutoDecommissionTestBase):
         self.verify()
 
     @cluster(num_nodes=7, log_allow_list=CHAOS_LOG_ALLOW_LIST)
+    def test_maintenance_mode_prevents_auto_decom(self):
+        """
+        A node in maintenance mode should NOT be auto-decommissioned,
+        even after the timeout expires.
+        """
+        autodecommission_timeout_s = 30
+
+        self._configure_auto_decommission(
+            autodecommission_timeout_s=autodecommission_timeout_s,
+        )
+        self._setup_test_environment(replication_factors=[3])
+
+        # Pick a random node and put it in maintenance mode before stopping it
+        node = random.choice(self.redpanda.nodes)
+        node_id = self.redpanda.node_id(node)
+        survivor = self._surviving_nodes(node_id)[0]
+
+        self.redpanda.logger.info(f"Putting node {node_id} into maintenance mode")
+        self.admin.maintenance_start(node)
+
+        self.redpanda.logger.info(f"Stopping node {node_id} (in maintenance mode)")
+        self.redpanda.stop_node(node=node)
+
+        # Wait well past the auto decom timeout
+        wait_time = autodecommission_timeout_s * 2
+        self.redpanda.logger.info(
+            f"Sleeping {wait_time}s (2x timeout) to verify node is NOT removed"
+        )
+        time.sleep(wait_time)
+
+        assert not self._check_node_is_removed(node_id, survivor), (
+            f"Node {node_id} in maintenance mode should NOT be auto-decommissioned"
+        )
+
+        self.verify()
+
+    @cluster(num_nodes=7, log_allow_list=CHAOS_LOG_ALLOW_LIST)
+    def test_node_recovery_before_timeout(self):
+        """
+        A node that comes back before the auto decommission timeout should
+        NOT be decommissioned. Validates that the last-seen tracking resets
+        when a node rejoins.
+        """
+        autodecommission_timeout_s = 60
+
+        self._configure_auto_decommission(
+            autodecommission_timeout_s=autodecommission_timeout_s,
+        )
+        self._setup_test_environment(replication_factors=[3])
+
+        # Stop a random node
+        node = random.choice(self.redpanda.nodes)
+        node_id = self.redpanda.node_id(node)
+        survivor = self._surviving_nodes(node_id)[0]
+
+        self.redpanda.logger.info(
+            f"Stopping node {node_id} to simulate temporary failure"
+        )
+        self.redpanda.stop_node(node=node)
+
+        # Sleep for half the timeout
+        half_timeout = autodecommission_timeout_s / 2
+        self.redpanda.logger.info(
+            f"Sleeping {half_timeout}s (half the timeout) before restarting"
+        )
+        time.sleep(half_timeout)
+
+        # Restart the stopped node before the timeout expires
+        self.redpanda.logger.info(f"Restarting node {node_id}")
+        self.redpanda.start_node(node, auto_assign_node_id=True)
+
+        # Sleep for the full original timeout past when the node was stopped.
+        # If last-seen tracking didn't reset, the node would be decommissioned.
+        remaining = autodecommission_timeout_s - half_timeout
+        self.redpanda.logger.info(
+            f"Sleeping {remaining}s (remainder of original timeout) to verify"
+            f" node is NOT removed"
+        )
+        time.sleep(remaining)
+
+        assert not self._check_node_is_removed(node_id, survivor), (
+            f"Node {node_id} should NOT be auto-decommissioned after recovery"
+        )
+
+        self.verify()
+
+    @cluster(num_nodes=7, log_allow_list=CHAOS_LOG_ALLOW_LIST)
+    def test_in_progress_decom_blocks_auto_decom(self):
+        """
+        Only one decommission should happen at a time. If a node is already
+        being decommissioned, a second dead node should not be
+        auto-decommissioned until the first completes.
+        """
+        autodecommission_timeout_s = 30
+
+        self._configure_auto_decommission(
+            autodecommission_timeout_s=autodecommission_timeout_s,
+        )
+        self._setup_test_environment(replication_factors=[3])
+
+        # Throttle recovery so manual decom stays in progress
+        self.redpanda.set_cluster_config(
+            {"raft_learner_recovery_rate": 1},
+        )
+
+        # node a, the node to manual decom
+        node_a = self.redpanda.nodes[0]
+        node_a_id = self.redpanda.node_id(node_a)
+
+        # Pick node B (different from A) and stop it for auto decom
+        node_b = self.redpanda.nodes[1]
+        node_b_id = self.redpanda.node_id(node_b)
+
+        survivor = [
+            n
+            for n in self.redpanda.nodes
+            if self.redpanda.node_id(n) not in (node_a_id, node_b_id)
+        ][0]
+
+        self.redpanda.logger.info(
+            f"Manually decommissioning node {node_a_id} (throttled recovery)"
+        )
+        self.admin.decommission_broker(node_a_id)
+
+        self.redpanda.logger.info(
+            f"Stopping node {node_b_id} to trigger auto decom candidacy"
+        )
+        self.redpanda.stop_node(node=node_b)
+
+        # Wait past the auto decom timeout with buffer
+        wait_time = autodecommission_timeout_s * 2
+        self.redpanda.logger.info(
+            f"Sleeping {wait_time}s — node B should NOT be removed while"
+            f" node A decom is in progress"
+        )
+        time.sleep(wait_time)
+
+        assert not self._check_node_is_removed(node_b_id, survivor), (
+            f"Node {node_b_id} should NOT be auto-decommissioned while"
+            f" node {node_a_id} decom is in progress"
+        )
+
+        # Restore recovery rate so node A's decommission completes
+        self.redpanda.logger.info(
+            "Restoring raft_learner_recovery_rate to unblock node A decom"
+        )
+        self.redpanda.set_cluster_config(
+            {"raft_learner_recovery_rate": 500 * (2**20)},
+            tolerate_stopped_nodes=True,
+        )
+
+        # Wait for node A removal
+        self.redpanda.logger.info(
+            f"Waiting for node {node_a_id} manual decom to complete"
+        )
+        self._wait_for_node_removal(node_a_id, survivor, autodecommission_timeout_s * 4)
+
+        # Now node B should be auto-decommissioned
+        self.redpanda.logger.info(
+            f"Waiting for node {node_b_id} to be auto-decommissioned"
+        )
+        self._wait_for_node_removal(node_b_id, survivor, autodecommission_timeout_s * 4)
+
+        self.verify()
+
+    @cluster(num_nodes=7, log_allow_list=CHAOS_LOG_ALLOW_LIST)
     def test_decom_timer_reset(self):
         """
         Auto decommission safety requires that the timer for auto decommission
