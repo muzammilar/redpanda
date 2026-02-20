@@ -8,6 +8,7 @@
 # by the Apache License, Version 2.0
 
 import json
+import uuid
 from typing import TypeAlias, cast
 
 
@@ -25,6 +26,7 @@ from connectrpc.errors import ConnectError
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.errors import TimeoutError
 from ducktape.tests.test import TestContext
+from rptest.archival.s3_client import S3Client
 from rptest.clients.rpk import RpkTool
 from rptest.clients.types import TopicSpec
 from rptest.services.cluster import cluster
@@ -1178,3 +1180,92 @@ class CloudTopicsL0GCEpochLagTest(CloudTopicsL0GCTestBase):
         self.logger.info(
             f"Fast-GC phase: epoch_lag={lag_final} (was {lag_while_slow} while slow)"
         )
+
+
+class CloudTopicsL0GCOrphanedObjectsTest(CloudTopicsL0GCTestBase):
+    """
+    Integration: Inject well-formed orphaned L0 objects into the bucket
+    and verify GC deletes them since their epoch is below the watermark.
+    """
+
+    NUM_ORPHANS = 10
+
+    def _make_l0_object_key(self, prefix: int, epoch: int) -> str:
+        """Build a well-formed L0 data object key."""
+        return f"level_zero/data/{prefix:03d}/{epoch:018d}/{uuid.uuid4()}"
+
+    def _inject_orphaned_objects(
+        self, count: int, prefix: int, epoch: int
+    ) -> list[str]:
+        bucket = self.si_settings.cloud_storage_bucket
+        client = self.redpanda.cloud_storage_client
+        keys: list[str] = []
+        for _ in range(count):
+            key = self._make_l0_object_key(prefix, epoch)
+            client.put_object(bucket, key, b"orphaned-l0-data")
+            keys.append(key)
+        return keys
+
+    @cluster(num_nodes=4)
+    @matrix(
+        cloud_storage_type=get_cloud_storage_type(applies_only_on=[CloudStorageType.S3])
+    )
+    def test_orphaned_objects_cleaned(self, cloud_storage_type: CloudStorageType):
+        """
+        Produce real data so GC establishes an epoch watermark, then
+        inject orphaned L0 objects with a very low epoch. Verify GC
+        deletes them.
+        """
+        topic = TopicSpec(partition_count=1, replication_factor=3)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        self.produce_some(topics=[topic.name], n=300)
+
+        # Wait for the GC watermark to be well above the epoch we'll
+        # use for fake objects (epoch=1), and for GC to be actively
+        # deleting.
+        self.logger.info("Waiting for GC watermark to advance past 10")
+        wait_until(
+            lambda: self._get_metric_max(
+                "vectorized_cloud_topics_l0_gc_min_partition_gc_epoch"
+            )
+            > 10
+            and self.get_num_objects_deleted() > 0,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        # Inject orphaned objects with epoch=1. The watermark is well
+        # above this, so they are immediately epoch-eligible. They just
+        # need to age past the grace period (10s default).
+        self.logger.info(f"Injecting {self.NUM_ORPHANS} orphaned objects")
+        injected_keys = self._inject_orphaned_objects(
+            count=self.NUM_ORPHANS, prefix=0, epoch=1
+        )
+        self.logger.info(
+            f"Injected keys: {injected_keys[:3]}... ({len(injected_keys)} total)"
+        )
+
+        # Poll the bucket directly until every injected key is gone.
+        bucket = self.si_settings.cloud_storage_bucket
+        client = cast(S3Client, self.redpanda.cloud_storage_client)
+
+        def orphans_gone() -> bool:
+            for key in injected_keys:
+                try:
+                    client.get_object_meta(bucket, key)
+                    return False
+                except Exception:
+                    pass
+            return True
+
+        self.logger.info("Waiting for orphaned objects to disappear from bucket")
+        wait_until(
+            orphans_gone,
+            timeout_sec=60,
+            backoff_sec=3,
+            retry_on_exc=False,
+        )
+        self.logger.info("All orphaned objects deleted")
