@@ -1050,3 +1050,56 @@ class CloudTopicsL0GCLeadershipTransferTest(CloudTopicsL0GCTestBase):
             backoff_sec=3,
             retry_on_exc=True,
         )
+
+
+class CloudTopicsL0GCTopicDeletionTest(CloudTopicsL0GCTestBase):
+    """
+    Integration: Delete a cloud topic while GC is actively running.
+    Verify GC handles it gracefully — no crashes, no hangs, and
+    max_deleted_epoch continues advancing for the remaining topic.
+    """
+
+    @cluster(num_nodes=4)
+    @matrix(
+        cloud_storage_type=get_cloud_storage_type(applies_only_on=[CloudStorageType.S3])
+    )
+    def test_topic_deletion_during_gc(self, cloud_storage_type: CloudStorageType):
+        """
+        Create two topics, produce to both, wait for GC to start,
+        delete one topic, and verify GC continues for the survivor.
+        """
+        topic_a = TopicSpec(partition_count=1, replication_factor=3)
+        topic_b = TopicSpec(partition_count=1, replication_factor=3)
+        self.topics = [topic_a, topic_b]
+        self.create_topics(self.topics)
+
+        self.produce_some(topics=[topic_a.name, topic_b.name], n=300)
+
+        self.logger.info("Waiting for GC to start deleting")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        epoch_before = self._get_metric_max(
+            "vectorized_cloud_topics_l0_gc_max_deleted_epoch"
+        )
+
+        # Delete topic B while GC is running.
+        rpk = RpkTool(self.redpanda)
+        self.logger.info(f"Deleting topic {topic_b.name}")
+        rpk.delete_topic(topic_b.name)
+
+        # Verify max_deleted_epoch advances (GC is making real progress).
+        self.logger.info("Waiting for GC to continue after deletion")
+        wait_until(
+            lambda: self._get_metric_max(
+                "vectorized_cloud_topics_l0_gc_max_deleted_epoch"
+            )
+            > epoch_before,
+            timeout_sec=60,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
