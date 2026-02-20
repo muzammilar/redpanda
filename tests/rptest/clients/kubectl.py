@@ -401,7 +401,7 @@ class KubectlTool:
 
         self._redpanda.logger.info(redpanda_to_priv_pods)
         if pod_name is None:
-            pod_name = f"rp-{self._cluster_id}-0"
+            pod_name = self._redpanda_broker_pod_name()
         return redpanda_to_priv_pods[pod_name]
 
     def _setup_tbot(self):
