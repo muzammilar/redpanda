@@ -59,6 +59,14 @@ service LevelZeroGcService {
             authz: SUPERUSER
         };
     }
+
+    // Returns the estimated L0 data size for a cloud topic partition.
+    rpc GetSizeEstimate(GetSizeEstimateRequest)
+        returns (GetSizeEstimateResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
 }
 
 // Request to query GC worker status.
@@ -164,4 +172,17 @@ enum Status {
     L0_GC_STATUS_RUNNING = 2;
     L0_GC_STATUS_STOPPING = 3;
     L0_GC_STATUS_STOPPED = 4;
+}
+
+// Request the L0 size estimate for a single partition.
+message GetSizeEstimateRequest {
+    common.v1.TopicPartition partition = 1;
+}
+
+// Response with the L0 size estimate.
+message GetSizeEstimateResponse {
+    // Estimated bytes of cloud data still active in L0 (not yet reconciled
+    // to L1). This is the value reported by the size estimator after
+    // subtracting data below the last reconciled offset.
+    uint64 active_bytes = 1;
 }

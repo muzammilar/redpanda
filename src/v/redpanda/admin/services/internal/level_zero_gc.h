@@ -81,6 +81,11 @@ public:
         serde::pb::rpc::context,
         proto::admin::level_zero_gc::get_epoch_info_request) override;
 
+    seastar::future<proto::admin::level_zero_gc::get_size_estimate_response>
+      get_size_estimate(
+        serde::pb::rpc::context,
+        proto::admin::level_zero_gc::get_size_estimate_request) override;
+
 private:
     using apply_local = ss::bool_class<struct apply_local_tag>;
     using apply_remote = ss::bool_class<struct apply_remote_tag>;

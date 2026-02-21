@@ -344,4 +344,45 @@ level_zero_gc_service_impl::get_epoch_info(
     co_return response;
 }
 
+seastar::future<proto::admin::level_zero_gc::get_size_estimate_response>
+level_zero_gc_service_impl::get_size_estimate(
+  serde::pb::rpc::context ctx,
+  proto::admin::level_zero_gc::get_size_estimate_request req) {
+    using namespace proto::admin::level_zero_gc;
+
+    auto& tp = req.get_partition();
+    auto ntp = model::ntp{
+      model::kafka_namespace, tp.get_topic(), tp.get_partition()};
+
+    auto leader = _partition_leaders->local().get_leader(ntp);
+    if (!leader.has_value()) {
+        throw serde::pb::rpc::unavailable_exception(
+          ssx::sformat("No leader for {}", ntp.tp));
+    }
+
+    if (leader.value() != _self) {
+        if (proxy::is_proxied(ctx)) {
+            throw serde::pb::rpc::unavailable_exception("Not leader");
+        }
+        co_return co_await _proxy_client
+          .make_client_for_node<level_zero_gc_service_client>(leader.value())
+          .get_size_estimate(ctx, std::move(req));
+    }
+
+    auto shard = _shard_table->local().shard_for(ntp);
+    if (!shard.has_value()) {
+        throw serde::pb::rpc::unavailable_exception("Not leader");
+    }
+
+    auto active_bytes = co_await _partition_manager->invoke_on(
+      shard.value(), [ntp](cluster::partition_manager& pm) {
+          auto fe = make_ct_frontend(pm, ntp);
+          return fe->get_l0_size_estimate();
+      });
+
+    get_size_estimate_response response;
+    response.set_active_bytes(active_bytes);
+    co_return response;
+}
+
 } // namespace admin

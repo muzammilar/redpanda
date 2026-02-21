@@ -1064,6 +1064,10 @@ frontend::get_current_epoch(ss::abort_source& as) noexcept {
     co_return new_epoch.value();
 }
 
+uint64_t frontend::get_l0_size_estimate() const {
+    return _ctp_stm_api->estimated_data_size();
+}
+
 frontend::epoch_info frontend::get_epoch_info() const {
     return epoch_info{
       .estimated_inactive_epoch

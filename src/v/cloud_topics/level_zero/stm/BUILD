@@ -74,6 +74,7 @@ redpanda_cc_library(
     name = "size_estimator",
     srcs = ["size_estimator.cc"],
     hdrs = ["size_estimator.h"],
+    visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
         "//src/v/model",
