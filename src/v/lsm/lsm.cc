@@ -17,6 +17,7 @@
 #include "lsm/core/internal/options.h"
 #include "lsm/db/impl.h"
 #include "lsm/db/memtable.h"
+#include "ssx/time.h"
 
 #include <seastar/core/coroutine.hh>
 
@@ -154,6 +155,9 @@ ss::future<> iterator::seek(std::string_view target) {
 ss::future<> iterator::next() { return _impl->next(); }
 ss::future<> iterator::prev() { return _impl->prev(); }
 std::string_view iterator::key() { return _impl->key().user_key(); }
+sequence_number iterator::seqno() {
+    return from_internal_seqno(_impl->key().seqno());
+}
 iobuf iterator::value() { return _impl->value(); }
 
 database::database(std::unique_ptr<db::impl> impl)
@@ -179,7 +183,9 @@ std::optional<sequence_number> database::max_applied_seqno() const {
       [](auto seqno) { return from_internal_seqno(seqno); });
 }
 
-ss::future<> database::flush() { return _impl->flush(); }
+ss::future<> database::flush(ssx::instant deadline) {
+    return _impl->flush(deadline);
+}
 
 ss::future<> database::apply(write_batch batch) {
     auto b = std::move(batch._batch);
@@ -210,6 +216,8 @@ snapshot database::create_snapshot() {
 }
 
 write_batch database::create_write_batch() { return write_batch{_impl.get()}; }
+
+ss::future<bool> database::refresh() { return _impl->refresh(); }
 
 write_batch::write_batch(db::impl* db)
   : _batch(ss::make_lw_shared<db::memtable>())

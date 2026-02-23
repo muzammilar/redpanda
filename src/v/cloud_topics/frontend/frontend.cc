@@ -18,6 +18,7 @@
 #include "cloud_topics/level_zero/common/producer_queue.h"
 #include "cloud_topics/level_zero/frontend_reader/level_zero_reader.h"
 #include "cloud_topics/level_zero/stm/ctp_stm.h"
+#include "cloud_topics/level_zero/stm/ctp_stm_api.h"
 #include "cloud_topics/level_zero/stm/placeholder.h"
 #include "cloud_topics/logger.h"
 #include "cloud_topics/state_accessors.h"
@@ -33,6 +34,7 @@
 #include "model/timeout_clock.h"
 #include "raft/errc.h"
 #include "raft/replicate.h"
+#include "ssx/future-util.h"
 #include "storage/log_reader.h"
 #include "storage/offset_translator_state.h"
 #include "storage/record_batch_builder.h"
@@ -168,6 +170,20 @@ get_aborted_transactions_local(
     co_return target;
 }
 
+model::topic_id_partition
+get_topic_id_partition(const ss::lw_shared_ptr<cluster::partition>& partition) {
+    const auto& ntp = partition->ntp();
+    auto ct_state = partition->get_cloud_topics_state();
+    auto metadata_cache = ct_state->local().get_metadata_cache();
+    auto topic_cfg = metadata_cache->get_topic_cfg(
+      model::topic_namespace_view(ntp));
+    if (!topic_cfg || !topic_cfg->tp_id) {
+        throw std::runtime_error(
+          fmt::format("no topic ID found for cloud topic {}", ntp));
+    }
+    return model::topic_id_partition{*topic_cfg->tp_id, ntp.tp.partition};
+}
+
 } // namespace
 
 frontend::frontend(
@@ -241,9 +257,8 @@ model::term_id frontend::leader_epoch() const {
     return _partition->raft()->confirmed_term();
 }
 
-ss::future<storage::translating_reader> frontend::make_reader(
-  cloud_topic_log_reader_config cfg,
-  std::optional<model::timeout_clock::time_point>) {
+ss::future<storage::translating_reader>
+frontend::make_reader(cloud_topic_log_reader_config cfg) {
     vassert(_data_plane != nullptr, "cloud topics api not initialized");
 
     const auto lro = _ctp_stm_api->get_last_reconciled_offset();
@@ -317,16 +332,8 @@ bool frontend::cache_enabled() const {
     return true;
 }
 
-std::optional<model::topic_id_partition>
-frontend::ntp_to_topic_id_partition(const model::ntp& ntp) const {
-    auto ct_state = _partition->get_cloud_topics_state();
-    auto metadata_cache = ct_state->local().get_metadata_cache();
-    auto topic_cfg = metadata_cache->get_topic_cfg(
-      model::topic_namespace_view(ntp));
-    if (!topic_cfg || !topic_cfg->tp_id) {
-        return std::nullopt;
-    }
-    return model::topic_id_partition{*topic_cfg->tp_id, ntp.tp.partition};
+model::topic_id_partition frontend::topic_id_partition() const {
+    return get_topic_id_partition(_partition);
 }
 
 std::unique_ptr<model::record_batch_reader::impl>
@@ -335,18 +342,35 @@ frontend::make_l0_reader(const cloud_topic_log_reader_config& cfg) const {
       cfg, _partition, _data_plane);
 }
 
+ss::future<size_t> frontend::size_bytes() {
+    auto ct_state = _partition->get_cloud_topics_state();
+    auto l1_metastore = ct_state->local().get_l1_metastore();
+
+    auto tidp = topic_id_partition();
+    auto size_res = co_await l1_metastore->get_size(tidp);
+    if (!size_res.has_value()) {
+        vlog(
+          cd_log.warn,
+          "Could not fetch L1 partition size for {}: {}",
+          tidp,
+          size_res.error());
+        co_return 0;
+    }
+
+    co_return size_res.value().size;
+}
+
 std::unique_ptr<model::record_batch_reader::impl>
 frontend::make_l1_reader(const cloud_topic_log_reader_config& cfg) const {
     auto ct_state = _partition->get_cloud_topics_state();
     auto l1_metastore = ct_state->local().get_l1_metastore();
     auto l1_io = ct_state->local().get_l1_io();
+    auto l1_reader_probe = ct_state->local().get_l1_reader_probe();
 
-    auto tidp = ntp_to_topic_id_partition(_partition->ntp());
-    vassert(
-      tidp.has_value(), "No topic id for cloud topic {}", _partition->ntp());
+    auto tidp = topic_id_partition();
 
     return std::make_unique<level_one_log_reader_impl>(
-      cfg, _partition->ntp(), *tidp, l1_metastore, l1_io);
+      cfg, _partition->ntp(), tidp, l1_metastore, l1_io, l1_reader_probe);
 }
 
 ss::future<std::optional<storage::timequery_result>>
@@ -383,12 +407,7 @@ ss::future<std::optional<frontend::coarse_grained_timequery_result>>
 frontend::l1_timequery(storage::timequery_config cfg) {
     auto ct_state = _partition->get_cloud_topics_state();
     auto l1_metastore = ct_state->local().get_l1_metastore();
-    auto maybe_tidp = ntp_to_topic_id_partition(_partition->ntp());
-    vassert(
-      maybe_tidp.has_value(),
-      "No topic id for cloud topic {}",
-      _partition->ntp());
-    const auto& tidp = *maybe_tidp;
+    auto tidp = topic_id_partition();
     // I don't love this, but we clamp min/max offsets by the kafka start offset
     // and the LSO/HWM, but we can ignore the max offset for L1 because we never
     // upload anything less than LSO to L1.
@@ -470,7 +489,7 @@ frontend::refine_timequery_result(
     // giving the reader a timestamp so it uses the L1 object indexes to seek
     // to the correct spot within the index, this would allow us to optimize IO
     // against the cloud.
-    auto reader = co_await make_reader(reader_cfg, std::nullopt);
+    auto reader = co_await make_reader(reader_cfg);
     auto generator = std::move(reader.reader).generator(model::no_timeout);
     auto query_interval = model::bounded_offset_interval::checked(
       kafka::offset_cast(input.start_offset),
@@ -527,6 +546,7 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
   chunked_vector<model::record_batch> cache_batches,
   raft::replicate_options opts) {
     const auto& ntp = partition->ntp();
+    auto tidp = get_topic_id_partition(partition);
     // The default errc that will cause the client to retry the operation
     constexpr auto default_errc = raft::errc::timeout;
     /*
@@ -591,8 +611,10 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
       ctp_stm_api->fence_epoch(upload_res.value().front().id.epoch));
     if (fence_fut.failed()) {
         auto e = fence_fut.get_exception();
-        vlog(
-          cd_log.warn,
+        vlogl(
+          cd_log,
+          ssx::is_shutdown_exception(e) ? ss::log_level::debug
+                                        : ss::log_level::warn,
           "Failed to fence epoch {} for ntp {}, error: {}",
           upload_res.value().front().id.epoch,
           ntp,
@@ -603,10 +625,11 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
     if (!fence.has_value()) {
         vlog(
           cd_log.warn,
-          "Failed to fence epoch {} for ntp {}, ctp latest seen epoch is {}",
+          "Failed to fence epoch {} for ntp {}, ctp window is [{}, {}]",
           upload_res.value().front().id.epoch,
           ntp,
-          fence.error().latest_seen);
+          fence.error().window_min,
+          fence.error().window_max);
         co_return default_errc;
     }
 
@@ -662,7 +685,7 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
                   "Putting batch to cache: {}, term: {}",
                   b.base_offset(),
                   b.term());
-                api->cache_put(ntp, b);
+                api->cache_put(tidp, b);
             }
         } else {
             vlog(
@@ -725,10 +748,11 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
     auto fence_fut = co_await ss::coroutine::as_future(
       _ctp_stm_api->fence_epoch(res.value().front().id.epoch));
     if (fence_fut.failed()) {
-        // TODO: handle shutdown failures gracefully
         auto e = fence_fut.get_exception();
-        vlog(
-          cd_log.warn,
+        vlogl(
+          cd_log,
+          ssx::is_shutdown_exception(e) ? ss::log_level::debug
+                                        : ss::log_level::warn,
           "Failed to fence epoch {} for ntp {}, error: {}",
           res.value().front().id.epoch,
           ntp(),
@@ -739,10 +763,12 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
     if (!fence.has_value()) {
         vlog(
           cd_log.warn,
-          "Failed to fence epoch {} for ntp {}, ctp latest seen epoch is {}",
+          "Failed to fence epoch {} for ntp {}, ctp latest seen epoch is [{}, "
+          "{}]",
           res.value().front().id.epoch,
           ntp(),
-          fence.error().latest_seen);
+          fence.error().window_min,
+          fence.error().window_max);
         co_return std::unexpected(
           kafka::make_error_code(kafka::error_code::request_timed_out));
     }
@@ -764,6 +790,7 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
     auto ret_offset = model::offset(result.value().last_offset());
     if (!rb_copy.empty()) {
         update_batches(rb_copy, ret_offset, result.value().last_term);
+        auto tidp = topic_id_partition();
         for (const auto& b : rb_copy) {
             vlog(
               cd_log.trace,
@@ -771,7 +798,7 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
               ntp(),
               b.base_offset(),
               b.term());
-            _data_plane->cache_put(ntp(), b);
+            _data_plane->cache_put(tidp, b);
         }
     }
     co_return ret_offset;
@@ -847,10 +874,8 @@ frontend::get_leader_epoch_last_offset(model::term_id term) const {
     // The term falls below the start of the local log -- lookup in L1.
     auto ct_state = _partition->get_cloud_topics_state();
     auto l1_metastore = ct_state->local().get_l1_metastore();
-    auto tidp = ntp_to_topic_id_partition(_partition->ntp());
-    vassert(
-      tidp.has_value(), "No topic id for cloud topic {}", _partition->ntp());
-    auto l1_res = co_await l1_metastore->get_end_offset_for_term(*tidp, term);
+    auto tidp = topic_id_partition();
+    auto l1_res = co_await l1_metastore->get_end_offset_for_term(tidp, term);
     if (!l1_res.has_value()) {
         switch (l1_res.error()) {
         case l1::metastore::errc::out_of_range:
@@ -1014,6 +1039,63 @@ ss::future<std::error_code> frontend::linearizable_barrier() {
         co_return raft::errc::success;
     }
     co_return r.error();
+}
+
+ss::future<std::expected<cloud_topics::cluster_epoch, frontend_errc>>
+frontend::get_current_epoch(ss::abort_source& as) noexcept {
+    auto new_epoch = co_await _data_plane->get_current_epoch(&as);
+    if (!new_epoch.has_value()) {
+        co_return std::unexpected{frontend_errc::timeout};
+    }
+    co_return new_epoch.value();
+}
+
+frontend::epoch_info frontend::get_epoch_info() const {
+    return epoch_info{
+      .estimated_inactive_epoch
+      = _ctp_stm_api->estimate_inactive_epoch().value_or(cluster_epoch::min()),
+      .max_applied_epoch = _ctp_stm_api->get_max_epoch().value_or(
+        cluster_epoch::min()),
+      .last_reconciled_log_offset
+      = _ctp_stm_api->get_last_reconciled_log_offset(),
+      .current_epoch_window_offset
+      = _ctp_stm_api->get_epoch_window_offset().value_or(model::offset{}),
+    };
+}
+
+auto frontend::advance_epoch(
+  cloud_topics::cluster_epoch new_epoch,
+  model::timeout_clock::time_point deadline)
+  -> ss::future<std::expected<epoch_info, frontend_errc>> {
+    vlog(cd_log.debug, "{}: advance epoch to {}", ntp(), new_epoch);
+
+    constexpr auto api_errc_to_fe_errc =
+      [](ctp_stm_api_errc ec) -> frontend_errc {
+        switch (ec) {
+            using enum ctp_stm_api_errc;
+        case not_leader:
+            return frontend_errc::not_leader_for_partition;
+        case shutdown:
+        case failure:
+        case timeout:
+            return frontend_errc::timeout;
+        }
+    };
+
+    ss::abort_source as;
+
+    auto result = co_await _ctp_stm_api->advance_epoch(new_epoch, deadline, as);
+    if (!result.has_value()) {
+        co_return std::unexpected{api_errc_to_fe_errc(result.error())};
+    }
+
+    auto adv_res = co_await _ctp_stm_api->sync_to_next_placeholder(
+      deadline, as);
+    if (!adv_res.has_value()) {
+        co_return std::unexpected{api_errc_to_fe_errc(adv_res.error())};
+    }
+
+    co_return get_epoch_info();
 }
 
 fmt::iterator

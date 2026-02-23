@@ -16,6 +16,7 @@
 #include "cloud_storage/remote.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/configuration.h"
+#include "cloud_storage_clients/upstream_registry.h"
 #include "cloud_topics/app.h"
 #include "cluster/archival/archiver_manager.h"
 #include "cluster/archival/ntp_archiver_service.h"
@@ -81,7 +82,8 @@ make_upload_controller_config(ss::scheduling_group sg, uint64_t fs_avail);
 void application::wire_up_redpanda_services(
   model::node_id node_id,
   ::stop_signal& app_signal,
-  std::optional<cloud_storage_clients::bucket_name>& bucket_name) {
+  std::optional<cloud_storage_clients::bucket_name>& bucket_name,
+  cloud_topics::test_fixture_cfg ct_test_cfg) {
     ss::smp::invoke_on_all([] {
         resources::available_memory::local().register_metrics();
     }).get();
@@ -182,8 +184,19 @@ void application::wire_up_redpanda_services(
         cloud_config = cloud_storage::configuration::get_config().get();
         backend = cloud_storage_clients::infer_backend_from_configuration(
           cloud_config->client_config, cloud_config->cloud_credentials_source);
+        construct_service(upstreams, cloud_config->client_config).get();
+        upstreams
+          .invoke_on_all(&cloud_storage_clients::upstream_registry::start)
+          .get();
+        upstreams
+          .invoke_on_all(
+            &cloud_storage_clients::upstream_registry::start_evictor,
+            /*interval=*/30s,
+            /*max_idle_time=*/300s)
+          .get();
         construct_service(
           cloud_storage_clients,
+          ss::sharded_parameter([this] { return std::ref(upstreams.local()); }),
           cloud_config->connection_limit,
           cloud_config->client_config,
           cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
@@ -705,7 +718,8 @@ void application::wire_up_redpanda_services(
             &metadata_cache,
             &_connection_cache,
             bucket_name.value(),
-            &storage)
+            &storage,
+            ct_test_cfg.skip_flush_loop)
           .get();
     }
 

@@ -33,6 +33,7 @@
 
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/range/combine.hpp>
+#include <buf/validate/validate.pb.h>
 #include <confluent/meta.pb.h>
 #include <confluent/types/decimal.pb.h>
 #include <fmt/core.h>
@@ -148,7 +149,9 @@ static const known_types_set known_types{
   google::protobuf::FieldMask::GetDescriptor()->file(),
   google::protobuf::Struct::GetDescriptor()->file(),
   google::protobuf::Timestamp::GetDescriptor()->file(),
-  google::protobuf::FieldDescriptorProto::GetDescriptor()->file()};
+  google::protobuf::FieldDescriptorProto::GetDescriptor()->file(),
+  buf::validate::Rule::GetDescriptor()->file(),
+};
 
 class io_error_collector final : public pb::io::ErrorCollector {
     enum class level {
@@ -442,15 +445,16 @@ ss::future<pb::FileDescriptorProto> build_file_with_refs(
         if (dp.FindFileByName(ref.name)) {
             continue;
         }
+        auto resolved_sub = ref.sub.resolve(schema.sub().ctx);
         try {
             auto dep_ss = co_await store.get_subject_schema(
-              ref.sub, ref.version, include_deleted::yes);
+              resolved_sub, ref.version, include_deleted::yes);
             co_await build_file_with_refs(
               dp, store, ref.name, std::move(dep_ss.schema), normalize::no);
         } catch (const exception& e) {
             if (failed_subject_schema_lookup(e.code())) {
                 throw as_exception(
-                  no_reference_found_for(schema, ref.sub, ref.version));
+                  no_reference_found_for(schema, resolved_sub, ref.version));
             }
             throw;
         }
@@ -476,7 +480,7 @@ ss::future<pb::FileDescriptorProto> import_schema(
   normalize norm) {
     try {
         co_return co_await build_file_with_refs(
-          dp, store, schema.sub()(), schema.share(), norm);
+          dp, store, schema.sub().to_string(), schema.share(), norm);
     } catch (const exception& e) {
         // Rethrow if the schema is missing references
         if (e.code() == error_code::schema_missing_reference) {
@@ -667,7 +671,7 @@ ss::future<subject_schema> make_canonical_protobuf_schema(
   subject_schema schema,
   normalize norm,
   output_format format) {
-    subject sub = schema.sub();
+    auto sub = schema.sub();
     co_return subject_schema{
       std::move(sub),
       co_await validate_protobuf_schema(
@@ -681,7 +685,10 @@ ss::future<schema_definition> format_protobuf_schema_definition(
         throw as_exception(format_not_supported(format));
     case output_format::serialized: {
         auto serialized = co_await make_canonical_protobuf_schema(
-          store, {{}, std::move(schema)}, normalize::no, format);
+          store,
+          {context_subject{default_context, subject{""}}, std::move(schema)},
+          normalize::no,
+          format);
         auto [_, def] = std::move(serialized).destructure();
         co_return std::move(def);
     }

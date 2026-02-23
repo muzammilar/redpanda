@@ -70,12 +70,12 @@ void stm_manager::set_max_tx_end_remove_offset(model::offset o) {
     _max_tx_end_remove_offset = o;
 }
 
-bool stm_manager::is_last_batch_for_idempotent_producer(
+bool stm_manager::is_batch_in_idempotent_window(
   const model::record_batch_header& hdr) const {
     if (!_tx_stm) {
         return false;
     }
-    return _tx_stm->is_last_batch_for_idempotent_producer(hdr);
+    return _tx_stm->is_batch_in_idempotent_window(hdr);
 }
 
 fmt::iterator local_log_reader_config::format_to(fmt::iterator it) const {
@@ -142,7 +142,8 @@ operator<<(std::ostream& o, const ntp_config::default_overrides& v) {
       "initial_retention_local_target_ms: {}, write_caching: {}, flush_ms: {}, "
       "flush_bytes: {}, iceberg_mode: {}, remote_allow_gaps: {}, "
       "delete_retention_ms: {}, min_cleanable_dirty_ratio: {}, "
-      "min_compaction_lag_ms: {}, max_compaction_lag_ms: {} }}",
+      "min_compaction_lag_ms: {}, max_compaction_lag_ms: {}, storage_mode: {} "
+      "}}",
       v.compaction_strategy,
       v.cleanup_policy_bitflags,
       v.segment_size,
@@ -163,11 +164,8 @@ operator<<(std::ostream& o, const ntp_config::default_overrides& v) {
       v.delete_retention_ms,
       v.min_cleanable_dirty_ratio,
       v.min_compaction_lag_ms,
-      v.max_compaction_lag_ms);
-
-    if (config::shard_local_cfg().cloud_topics_enabled()) {
-        fmt::print(o, ", cloud_topic_enabled: {}", v.cloud_topic_enabled);
-    }
+      v.max_compaction_lag_ms,
+      v.storage_mode);
 
     o << "}";
 

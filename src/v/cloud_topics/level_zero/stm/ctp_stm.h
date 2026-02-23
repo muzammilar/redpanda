@@ -25,6 +25,28 @@ namespace cloud_topics {
 class ctp_stm_api;
 struct ctp_stm_accessor;
 
+// Log sliding window state, we use this to assert that the log contents
+// never break the invariants that the epoch fencing should enforce.
+struct epoch_window_checker
+  : serde::envelope<
+      epoch_window_checker,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    auto serde_fields() {
+        return std::tie(_min_epoch, _max_epoch, _latest_offset);
+    }
+
+    // Assert if the epoch at this offset in the log is valid or not.
+    void
+    check_epoch(const model::ntp&, cluster_epoch epoch, model::offset offset);
+
+    fmt::iterator format_to(fmt::iterator it) const;
+
+    cluster_epoch _min_epoch;
+    cluster_epoch _max_epoch;
+    model::offset _latest_offset;
+};
+
 /// The STM that tracks current cluster epoch and LRO.
 /// The goal is to guarantee that the cluster epoch is monotonic and
 /// to provide the smallest cluster epoch available through the
@@ -53,8 +75,8 @@ public:
 
     const ctp_stm_state& state() const noexcept { return _state; }
 
-    void advance_max_seen_epoch(cluster_epoch epoch) {
-        _state.advance_max_seen_epoch(epoch);
+    void advance_max_seen_epoch(model::term_id term, cluster_epoch epoch) {
+        _state.advance_max_seen_epoch(term, epoch);
     }
 
     ss::future<std::expected<cluster_epoch_fence, stale_cluster_epoch>>
@@ -95,6 +117,7 @@ private:
     void apply_placeholder(const model::record_batch&);
     void apply_advance_reconciled_offset(model::record);
     void apply_set_start_offset(model::record);
+    void apply_advance_epoch(model::record, model::offset base_offset);
 
     ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
@@ -129,9 +152,12 @@ private:
     /// Current in-memory state of the STM
     ctp_stm_state _state;
 
-    // The last observed epoch to be applied to the state machine. This value is
-    // used to check for violations of monotonicity in epoch order.
-    cluster_epoch _last_seen_epoch{};
+    // The checker of the STM state.
+    //
+    // this is seperate from the state object itself because the assertion
+    // is about the content of the log rather than the computed state. The state
+    // is purely idempotent in terms of operations applied.
+    epoch_window_checker _epoch_checker;
 
     // An abort source to stop the prefix truncation loop on stop.
     ss::condition_variable _lro_advanced;

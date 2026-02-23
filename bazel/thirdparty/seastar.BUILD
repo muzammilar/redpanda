@@ -74,7 +74,7 @@ int_flag(
 
 int_flag(
     name = "scheduling_groups",
-    build_setting_default = 18,
+    build_setting_default = 21,
     make_variable = "SCHEDULING_GROUPS",
 )
 
@@ -606,7 +606,10 @@ cc_library(
     implementation_deps = [
         "@c-ares",
         "@openssl",
-    ],
+    ] + select({
+        ":use_hwloc": ["@hwloc"],
+        "//conditions:default": [],
+    }),
     includes = [
         "include",
         "src",
@@ -662,9 +665,6 @@ cc_library(
         "@protobuf",
         "@yaml-cpp",
     ] + select({
-        ":use_hwloc": ["@hwloc"],
-        "//conditions:default": [],
-    }) + select({
         ":use_io_uring": ["@liburing"],
         "//conditions:default": [],
     }),
@@ -726,6 +726,33 @@ cc_library(
         ":testing",
     ],
 )
+
+[
+    cc_binary(
+        name = name,
+        testonly = True,
+        srcs = ["tests/perf/" + name + ".cc"],
+        tags = ["seastar_perf"],
+        visibility = ["//visibility:public"],
+        deps = [":benchmark"] + extra_deps,
+    )
+    for name, extra_deps in [
+        ("allocator_perf", []),
+        (
+            "container_perf",
+            ["@boost//:container"],
+        ),
+        ("coroutine_perf", []),
+        ("fair_queue_perf", []),
+        (
+            "future_util_perf",
+            ["@boost//:range"],
+        ),
+        ("metrics_perf", []),
+        ("perf_tests_perf", []),
+        ("rpc_perf", []),
+    ]
+]
 
 cc_binary(
     name = "iotune",

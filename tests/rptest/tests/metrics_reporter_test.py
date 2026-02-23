@@ -11,13 +11,17 @@ import hashlib
 import json
 import random
 
+import requests
 from ducktape.utils.util import wait_until
 
+from rptest.clients.admin.proto.redpanda.core.admin.v2 import security_pb2
+from rptest.clients.admin.v2 import Admin as AdminV2
+from rptest.clients.rpk import RpkTool
 from rptest.clients.types import TopicSpec
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.http_server import HttpServer
-from rptest.services.redpanda import RESTART_LOG_ALLOW_LIST
+from rptest.services.redpanda import RESTART_LOG_ALLOW_LIST, SchemaRegistryConfig
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.utils.rpenv import sample_license
 
@@ -243,3 +247,243 @@ class SingleNodeMetricsReporterTest(MetricsReporterTest):
     @cluster(num_nodes=2, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_redpanda_metrics_reporting(self):
         self._test_redpanda_metrics_reporting()
+
+
+class UniqueGroupCountMetricsTest(RedpandaTest):
+    """
+    Test that unique_group_count is correctly reported in metrics.
+    Groups can come from two sources:
+    - Role members with type 'Group'
+    - ACL principals with 'Group:' prefix
+    """
+
+    def __init__(self, test_ctx):
+        self._ctx = test_ctx
+        self.metrics = MetricsReporterServer(self._ctx)
+        super(UniqueGroupCountMetricsTest, self).__init__(
+            test_context=test_ctx,
+            num_brokers=1,
+            extra_rp_conf={
+                "health_monitor_max_metadata_age": 1000,
+                **self.metrics.rp_conf(),
+            },
+        )
+
+    def setUp(self):
+        self.metrics.start()
+        self.redpanda.start()
+
+    def _make_group_member(self, group_name: str) -> security_pb2.RoleMember:
+        """Create a RoleMember with a group."""
+        return security_pb2.RoleMember(group=security_pb2.RoleGroup(name=group_name))
+
+    @cluster(num_nodes=2)
+    def test_unique_group_count(self):
+        """
+        Test that unique_group_count correctly counts groups from roles and ACLs.
+        """
+        superuser = self.redpanda.SUPERUSER_CREDENTIALS
+        admin_v2 = AdminV2(self.redpanda, auth=(superuser.username, superuser.password))
+        rpk = RpkTool(self.redpanda)
+
+        # Initially, unique_group_count should be 0
+        def _get_unique_group_count():
+            if self.metrics.requests():
+                r = self.metrics.reports()[-1]
+                self.logger.info(f"Latest request: {r}")
+                return r.get("unique_group_count", -1)
+            return -1
+
+        def _wait_for_group_count(expected):
+            def check():
+                count = _get_unique_group_count()
+                self.logger.info(
+                    f"Current unique_group_count: {count}, expected: {expected}"
+                )
+                return count == expected
+
+            wait_until(check, timeout_sec=20, backoff_sec=1)
+
+        # Wait for initial report with 0 groups
+        _wait_for_group_count(0)
+
+        # Add a role with a group member
+        self.logger.info("Creating role with group member")
+        admin_v2.security().create_role(
+            security_pb2.CreateRoleRequest(
+                role=security_pb2.Role(
+                    name="test_role_1",
+                    members=[self._make_group_member("group1")],
+                )
+            )
+        )
+
+        # Should now have 1 unique group
+        _wait_for_group_count(1)
+
+        # Add another role with the same group (should still be 1 unique)
+        self.logger.info("Creating another role with same group member")
+        admin_v2.security().create_role(
+            security_pb2.CreateRoleRequest(
+                role=security_pb2.Role(
+                    name="test_role_2",
+                    members=[self._make_group_member("group1")],
+                )
+            )
+        )
+
+        # Still 1 unique group (same group name)
+        _wait_for_group_count(1)
+
+        # Add a role with a different group
+        self.logger.info("Creating role with different group member")
+        admin_v2.security().create_role(
+            security_pb2.CreateRoleRequest(
+                role=security_pb2.Role(
+                    name="test_role_3",
+                    members=[self._make_group_member("group2")],
+                )
+            )
+        )
+
+        # Now 2 unique groups
+        _wait_for_group_count(2)
+
+        # Add an ACL with Group: principal
+        self.logger.info("Creating ACL with Group: principal")
+        rpk.acl_create_allow_cluster(
+            username="group3", op="describe", principal_type="Group"
+        )
+
+        # Now 3 unique groups
+        _wait_for_group_count(3)
+
+        # Add another ACL with same group (should still be 3)
+        self.logger.info("Creating another ACL with same Group: principal")
+        rpk.acl_create_allow_cluster(
+            username="group3", op="alter", principal_type="Group"
+        )
+
+        # Still 3 unique groups
+        _wait_for_group_count(3)
+
+        # Add an ACL with a group that's also in a role (group1)
+        self.logger.info("Creating ACL with Group: principal that matches role group")
+        rpk.acl_create_allow_cluster(
+            username="group1", op="describe", principal_type="Group"
+        )
+
+        # Still 3 unique groups (group1 already counted from roles)
+        _wait_for_group_count(3)
+
+        # Add a new unique group via ACL
+        self.logger.info("Creating ACL with new Group: principal")
+        rpk.acl_create_allow_cluster(
+            username="group4", op="describe", principal_type="Group"
+        )
+
+        # Now 4 unique groups
+        _wait_for_group_count(4)
+
+        self.metrics.stop()
+
+
+class SchemaRegistryContextMetricsTest(RedpandaTest):
+    # Simple Avro schema for testing
+    SCHEMA_DEF = (
+        '{"type":"record","name":"test","fields":[{"name":"f1","type":"string"}]}'
+    )
+
+    def __init__(self, test_ctx):
+        self._ctx = test_ctx
+        self.metrics = MetricsReporterServer(self._ctx)
+        super(SchemaRegistryContextMetricsTest, self).__init__(
+            test_context=test_ctx,
+            num_brokers=1,
+            extra_rp_conf={
+                "health_monitor_max_metadata_age": 1000,
+                "schema_registry_enable_qualified_subjects": True,
+                **self.metrics.rp_conf(),
+            },
+            schema_registry_config=SchemaRegistryConfig(),
+        )
+
+    def setUp(self):
+        self.metrics.start()
+        self.redpanda.start()
+
+    def tearDown(self):
+        self.metrics.stop()
+        super().tearDown()
+
+    def _get_sr_base_uri(self):
+        return f"http://{self.redpanda.nodes[0].account.hostname}:8081"
+
+    def _register_schema(self, subject: str):
+        """Register a schema to a subject (may be context-qualified)."""
+        uri = f"{self._get_sr_base_uri()}/subjects/{subject}/versions"
+        headers = {
+            "Content-Type": "application/vnd.schemaregistry.v1+json",
+            "Accept": "application/vnd.schemaregistry.v1+json",
+        }
+        data = json.dumps({"schema": self.SCHEMA_DEF})
+        resp = requests.post(uri, headers=headers, data=data)
+        assert resp.status_code == 200, f"Failed to register schema: {resp.text}"
+        return resp.json()
+
+    @cluster(num_nodes=2)
+    def test_schema_registry_context_count(self):
+        """
+        Test that schema_registry.context_count correctly counts non-default contexts.
+        """
+
+        def _get_context_count() -> int | None:
+            if self.metrics.requests():
+                r = self.metrics.reports()[-1]
+                self.logger.info(f"Latest request: {r}")
+                sr = r.get("schema_registry")
+                if sr is None:
+                    return None
+                return sr.get("context_count", None)
+            return None
+
+        def _wait_for_context_count(expected: int):
+            def check():
+                count = _get_context_count()
+                self.logger.info(
+                    f"Current context_count: {count}, expected: {expected}"
+                )
+                return count == expected
+
+            wait_until(check, timeout_sec=30, backoff_sec=1)
+
+        # Initially, context_count should be 0 (only default context exists)
+        _wait_for_context_count(0)
+
+        # Register a schema in the default context (no prefix)
+        self.logger.info("Registering schema in default context")
+        self._register_schema("default-subject")
+
+        # Still 0 non-default contexts
+        _wait_for_context_count(0)
+
+        # Register a schema in a non-default context using qualified subject
+        self.logger.info("Creating first non-default context")
+        self._register_schema(":.ctx1:subject1")
+
+        # Now 1 non-default context
+        _wait_for_context_count(1)
+
+        # Register another schema in the same context
+        self.logger.info("Registering another schema in same context")
+        self._register_schema(":.ctx1:subject2")
+
+        # Still 1 non-default context (same context)
+        _wait_for_context_count(1)
+
+        # Create a second non-default context
+        self.logger.info("Creating second non-default context")
+        self._register_schema(":.ctx2:subject1")
+
+        # Now 2 non-default contexts
+        _wait_for_context_count(2)

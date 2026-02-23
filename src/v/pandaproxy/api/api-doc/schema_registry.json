@@ -6,6 +6,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject to get the config for. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context. Use :.<context>: for context-level config.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -48,6 +49,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject to set the config for. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context. Use :.<context>: for context-level config.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -86,6 +88,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject to delete the config for. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context. Use :.<context>: for context-level config.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -264,7 +267,7 @@
         "parameters": [
           {
             "name": "subject",
-            "description": "The subject to get the mode for.",
+            "description": "The subject to get the mode for. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context. Use :.<context>: for context-level mode.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -314,7 +317,7 @@
         "parameters": [
           {
             "name": "subject",
-            "description": "The subject to set the mode for.",
+            "description": "The subject to set the mode for. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context. Use :.<context>: for context-level mode.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -372,7 +375,7 @@
         "parameters": [
           {
             "name": "subject",
-            "description": "The subject to delete the mode for.",
+            "description": "The subject to delete the mode for. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context. Use :.<context>: for context-level mode.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -451,6 +454,20 @@
             "required": false,
             "type": "string",
             "description": "Redpanda version 25.2 or later. For Avro and Protobuf schemas only. Supported values: an empty string `''` returns the schema in its current format (default), and `serialized` (Protobuf only) returns the schema in its Base64-encoded wire binary format. Unsupported values return a 501 error."
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "Optional qualified subject to search for the schema under. Use <:.context:> for context-only lookup, or <:.context:subject> to also verify the schema is associated with that subject. Defaults to searching the default context if unspecified."
+          },
+          {
+            "name": "referenceFormat",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "If set to 'qualified', schema references are returned in context-qualified form. Otherwise, unqualified references are returned."
           }
         ],
         "produces": [
@@ -486,6 +503,60 @@
         }
       }
     },
+    "/schemas/ids/{id}/schema": {
+      "get": {
+        "summary": "Get the raw schema by ID.",
+        "operationId": "get_schemas_ids_id_schema",
+        "description": "Retrieves only the schema identified by the input ID, without additional metadata.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "Optional qualified subject to search for the schema under. Use <:.context:> for context-only lookup, or <:.context:subject> to also verify the schema is associated with that subject. Defaults to searching the default context if unspecified."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "Desired output format, dependent on schema type."
+          }
+        ],
+        "produces": [
+          "application/vnd.schemaregistry.v1+json",
+          "application/vnd.schemaregistry+json",
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw schema string",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "404": {
+            "description": "Not Found: Schema not found",
+            "schema": {
+              "$ref": "#/definitions/error_body"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "$ref": "#/definitions/error_body"
+            }
+          }
+        }
+      }
+    },
     "/schemas/ids/{id}/versions": {
       "get": {
         "summary": "Get a list of subject-version for the schema ID.",
@@ -496,6 +567,13 @@
             "in": "path",
             "required": true,
             "type": "integer"
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "Optional qualified subject to search for the schema under. Use <:.context:> for context-only lookup, or <:.context:subject> to also verify the schema is associated with that subject. Defaults to searching the default context if unspecified."
           }
         ],
         "produces": [
@@ -552,6 +630,13 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "description": "Optional qualified subject to search for the schema under. Use <:.context:> for context-only lookup, or <:.context:subject> to also verify the schema is associated with that subject. Defaults to searching the default context if unspecified."
           }
         ],
         "produces": [
@@ -597,6 +682,7 @@
           },
           {
             "name": "subjectPrefix",
+            "description": "If specified, only return subjects that start with the given prefix. A plain prefix (e.g. \"my-\") matches subjects in the default context. A context-qualified prefix \":.<context>:<prefix>\" (e.g. \":.my-context:my-\") matches within a specific context. The wildcard context \":*:<prefix>\" (e.g. \":*:my-\") matches across all contexts. Use just the context qualifier (e.g. \":.my-context:\" or \":*:\") to list all subjects in a context.",
             "in": "query",
             "required": false,
             "type": "string"
@@ -638,6 +724,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -719,6 +806,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -767,6 +855,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -787,7 +876,10 @@
           "200": {
             "description": "OK",
             "schema": {
-              "$ref": "#/definitions/post_subject_versions_response"
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
             }
           },
           "404": {
@@ -815,6 +907,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -873,6 +966,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -942,6 +1036,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -1001,6 +1096,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -1072,6 +1168,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -1128,6 +1225,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -1188,6 +1286,7 @@
         "parameters": [
           {
             "name": "subject",
+            "description": "The subject name. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context.",
             "in": "path",
             "required": true,
             "type": "string"
@@ -1257,6 +1356,79 @@
           },
           "503": {
             "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/contexts": {
+      "get": {
+        "summary": "List all contexts.",
+        "operationId": "get_contexts",
+        "parameters": [],
+        "produces": [
+          "application/vnd.schemaregistry.v1+json",
+          "application/vnd.schemaregistry+json",
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "$ref": "#/definitions/error_body"
+            }
+          }
+        }
+      }
+    },
+    "/contexts/{context}": {
+      "delete": {
+        "summary": "Delete a context.",
+        "description": "Deletes the specified context if it is empty. Subjects must be permanently deleted before the context can be deleted.",
+        "operationId": "delete_context",
+        "parameters": [
+          {
+            "name": "context",
+            "description": "The context to delete (e.g., .staging). Cannot delete the default context.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": [
+          "application/vnd.schemaregistry.v1+json",
+          "application/vnd.schemaregistry+json",
+          "application/json"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "description": "Not Found: Context not found",
+            "schema": {
+              "$ref": "#/definitions/error_body"
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity: Context not empty",
+            "schema": {
+              "$ref": "#/definitions/error_body"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "$ref": "#/definitions/error_body"
+            }
           }
         }
       }

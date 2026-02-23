@@ -22,7 +22,10 @@
 
 namespace cloud_storage_clients {
 
-class client_pool;
+class upstream;
+class multipart_upload;
+class multipart_upload_state;
+using multipart_upload_ref = ss::shared_ptr<multipart_upload>;
 
 // Corresponds to the Range HTTP header in the form <range-start>-<range-end>
 //
@@ -38,8 +41,8 @@ public:
     struct no_response {};
 
 public:
-    explicit client(ss::weak_ptr<client_pool> pool_ptr)
-      : _pool_ptr(std::move(pool_ptr)) {}
+    explicit client(ss::weak_ptr<upstream> upstream_ptr)
+      : _upstream_ptr(std::move(upstream_ptr)) {}
     virtual ~client() = default;
 
 public:
@@ -101,6 +104,31 @@ public:
       ss::input_stream<char> body,
       ss::lowres_clock::duration timeout,
       bool accept_no_content = false)
+      = 0;
+
+    /// Initiate a multipart upload state
+    ///
+    /// Returns a multipart_upload_state object that can be used to construct
+    /// a multipart_upload. This allows callers to wrap the state with
+    /// additional context (e.g., client lease) before creating the upload.
+    ///
+    /// The returned state should be wrapped in a multipart_upload using:
+    ///   auto upload = ss::make_shared<multipart_upload>(state, part_size);
+    ///
+    /// \param bucket Bucket name
+    /// \param key Object key
+    /// \param part_size Size of each part in bytes. Requirements:
+    ///        - S3/GCS: Must be >= 5 MiB (except last part)
+    ///        - ABS: Must be <= 4000 MiB (4 GB)
+    /// \param timeout Operation timeout
+    /// \return multipart_upload_state that can be wrapped in multipart_upload
+    virtual ss::future<
+      result<ss::shared_ptr<multipart_upload_state>, error_outcome>>
+    initiate_multipart_upload(
+      const plain_bucket_name& bucket,
+      const object_key& key,
+      size_t part_size,
+      ss::lowres_clock::duration timeout)
       = 0;
 
     struct list_bucket_item {
@@ -187,8 +215,16 @@ public:
       ss::lowres_clock::duration timeout)
       = 0;
 
+    /// Returns true if the client is in a valid state to perform operations.
+    /// If this returns false, the client should be discarded and a new one
+    /// created.
+    virtual bool is_valid() const noexcept = 0;
+
+    /// Format human-readable representation of the client.
+    virtual fmt::iterator format_to(fmt::iterator it) const = 0;
+
 protected:
-    ss::weak_ptr<client_pool> _pool_ptr;
+    ss::weak_ptr<upstream> _upstream_ptr;
 };
 
 } // namespace cloud_storage_clients

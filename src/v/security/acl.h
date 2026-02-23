@@ -16,6 +16,7 @@
 #include "kafka/protocol/types.h"
 #include "model/fundamental.h"
 #include "pandaproxy/schema_registry/types.h"
+#include "security/audit/schemas/types.h"
 #include "serde/envelope.h"
 #include "serde/rw/enum.h"
 #include "serde/rw/envelope.h"
@@ -111,7 +112,7 @@ consteval resource_type get_resource_type() {
         return resource_type::cluster;
     } else if constexpr (std::is_same_v<T, kafka::transactional_id>) {
         return resource_type::transactional_id;
-    } else if constexpr (std::is_same_v<T, ppsr::subject>) {
+    } else if constexpr (std::is_same_v<T, ppsr::context_subject>) {
         return resource_type::sr_subject;
     } else if constexpr (std::is_same_v<T, ppsr::registry_resource>) {
         return resource_type::sr_registry;
@@ -345,6 +346,12 @@ private:
     principal_type _type;
     ss::sstring _name;
 };
+
+/// Convert ACL group principals to audit group objects for inclusion in audit
+/// logs. Filters to only principals with type::group and converts them to
+/// audit::group with type idp_group.
+chunked_vector<::security::audit::group>
+acl_principals_to_audit_groups(const chunked_vector<acl_principal>& principals);
 
 } // namespace security
 

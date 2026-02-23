@@ -12,7 +12,7 @@ redpanda_test_cc_library(
         "//src/v/security:license",
         "//src/v/test_utils:random",
         "//src/v/test_utils:random_bytes",
-        "@abseil-cpp//absl/strings",
+        "//src/v/test_utils:test_env",
     ],
 )
 
@@ -55,6 +55,7 @@ redpanda_cc_btest(
         "credential_store_test.cc",
     ],
     deps = [
+        "//src/v/model",
         "//src/v/random:generators",
         "//src/v/security",
         "//src/v/test_utils:seastar_boost",

@@ -60,7 +60,7 @@ void write_encoded_schema_def(
     w->append(def.refs().size());
     for (const auto& ref : def.refs()) {
         w->append_with_length(ref.name);
-        w->append_with_length(ref.sub());
+        w->append_with_length(ref.sub.to_string());
         w->append(ref.version());
     }
 }
@@ -82,7 +82,11 @@ read_encoded_schema_def(ffi::reader* r) {
         auto name = r->read_sized_string();
         auto sub = r->read_sized_string();
         auto v = int(r->read_varint());
-        refs.emplace_back(name, subject(sub), schema_version(v));
+        refs.emplace_back(
+          name,
+          pandaproxy::schema_registry::context_subject_reference::from_string(
+            sub),
+          schema_version(v));
     }
     return {std::move(def), *type, std::move(refs), {}};
 }
@@ -113,7 +117,8 @@ ss::future<int32_t> schema_registry_module::get_schema_definition_len(
         co_return SCHEMA_REGISTRY_NOT_ENABLED;
     }
     try {
-        auto schema = co_await _sr->get_schema_definition(schema_id);
+        auto schema = co_await _sr->get_schema_definition(
+          {pandaproxy::schema_registry::default_context, schema_id});
         ffi::sizer sizer;
         write_encoded_schema_def(schema, &sizer);
         *size_out = sizer.total();
@@ -130,7 +135,8 @@ ss::future<int32_t> schema_registry_module::get_schema_definition(
         co_return SCHEMA_REGISTRY_NOT_ENABLED;
     }
     try {
-        auto schema = co_await _sr->get_schema_definition(schema_id);
+        auto schema = co_await _sr->get_schema_definition(
+          {pandaproxy::schema_registry::default_context, schema_id});
         ffi::writer writer(buf);
         write_encoded_schema_def(schema, &writer);
         co_return writer.total();
@@ -152,7 +158,8 @@ ss::future<int32_t> schema_registry_module::get_subject_schema_len(
         std::optional<schema_version> v = version == invalid_schema_version
                                             ? std::nullopt
                                             : std::make_optional(version);
-        auto schema = co_await _sr->get_subject_schema(sub, v);
+        auto schema = co_await _sr->get_subject_schema(
+          {default_context, sub}, v);
         ffi::sizer sizer;
         write_encoded_schema_subject(schema, &sizer);
         *size_out = sizer.total();
@@ -176,7 +183,8 @@ ss::future<int32_t> schema_registry_module::get_subject_schema(
         std::optional<schema_version> v = version == invalid_schema_version
                                             ? std::nullopt
                                             : std::make_optional(version);
-        auto schema = co_await _sr->get_subject_schema(sub, v);
+        auto schema = co_await _sr->get_subject_schema(
+          {default_context, sub}, v);
         ffi::writer writer(buf);
         write_encoded_schema_subject(schema, &writer);
         co_return writer.total();
@@ -199,7 +207,7 @@ ss::future<int32_t> schema_registry_module::create_subject_schema(
     using namespace pandaproxy::schema_registry;
     try {
         auto ctx_id = co_await _sr->create_schema(
-          subject_schema(sub, read_encoded_schema_def(&r)));
+          subject_schema({default_context, sub}, read_encoded_schema_def(&r)));
         *out_schema_id = ctx_id.id;
     } catch (const std::exception& ex) {
         vlog(wasm_log.warn, "error registering subject schema: {}", ex);

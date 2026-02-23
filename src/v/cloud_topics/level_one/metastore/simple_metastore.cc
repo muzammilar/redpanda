@@ -162,6 +162,25 @@ simple_metastore::get_offsets(
     };
 }
 
+ss::future<std::expected<metastore::size_response, metastore::errc>>
+simple_metastore::get_size(const model::topic_id_partition& tpr) {
+    co_return get_size(state_, tpr);
+}
+
+std::expected<metastore::size_response, metastore::errc>
+simple_metastore::get_size(
+  const state& state, const model::topic_id_partition& tpr) {
+    auto prt_ref = state.partition_state(tpr);
+    if (!prt_ref.has_value()) {
+        vlog(cd_log.debug, "Partition {} not tracked", tpr);
+        return std::unexpected(metastore::errc::missing_ntp);
+    }
+    const auto& prt = prt_ref->get();
+    return size_response{
+      .size = prt.calculate_size(),
+    };
+}
+
 ss::future<std::expected<metastore::add_response, metastore::errc>>
 simple_metastore::add_objects(
   const metastore::object_metadata_builder& builder,
@@ -639,31 +658,34 @@ simple_metastore::get_earliest_dirty_ts(
 
     const auto& compaction_state = prt.compaction_state;
 
-    // Start search for first dirty offset from the start offset of the log
-    // (which may not be 0 for a `compact,delete` topic). If compaction hasn't
-    // yet been run for this partition, this value is already the first dirty
-    // offset.
-    kafka::offset first_dirty_offset{prt.start_offset};
+    // Get cleaned ranges if compaction has been run.
+    offset_interval_set cleaned_ranges;
     if (compaction_state.has_value()) {
-        const auto& clean_ranges = compaction_state->cleaned_ranges;
-        auto clean_ranges_strm = clean_ranges.make_stream();
-        while (clean_ranges_strm.has_next()) {
-            auto clean_interval = clean_ranges_strm.next();
-            if (first_dirty_offset < clean_interval.base_offset) {
-                break;
-            }
+        cleaned_ranges = compaction_state->cleaned_ranges;
+    }
 
-            first_dirty_offset = kafka::next_offset(clean_interval.last_offset);
+    // Iterate through all extents to find the minimum timestamp among dirty
+    // extents.
+    std::optional<model::timestamp> earliest_dirty_ts;
+    for (const auto& extent : prt.extents) {
+        auto base = extent.base_offset;
+        if (base < prt.start_offset) {
+            // The extent is partially truncated.
+            base = prt.start_offset;
+        }
+        auto last = extent.last_offset;
+
+        if (!cleaned_ranges.covers(base, last)) {
+            // This extent is dirty. Track the minimum timestamp.
+            if (
+              !earliest_dirty_ts.has_value()
+              || extent.max_timestamp < *earliest_dirty_ts) {
+                earliest_dirty_ts = extent.max_timestamp;
+            }
         }
     }
 
-    auto it = std::ranges::lower_bound(
-      prt.extents, first_dirty_offset, std::less<>{}, &extent::last_offset);
-    if (it != prt.extents.end()) {
-        return it->max_timestamp;
-    }
-
-    return std::nullopt;
+    return earliest_dirty_ts;
 }
 
 std::expected<metastore::compaction_epoch, metastore::errc>
@@ -761,6 +783,7 @@ simple_metastore::get_extent_metadata_forwards(
     const auto& prt = prt_ref->get();
 
     extent_metadata_vec extents;
+    bool end_of_stream = true;
 
     auto min_it = std::ranges::lower_bound(
       prt.extents, min_offset, std::less<>{}, &extent::last_offset);
@@ -770,17 +793,19 @@ simple_metastore::get_extent_metadata_forwards(
             break;
         }
 
-        if (extents.size() >= max_num_extents) {
-            break;
-        }
-
         extents.push_back(
           {.base_offset = extent.base_offset,
            .last_offset = extent.last_offset,
            .max_timestamp = extent.max_timestamp});
+
+        if (extents.size() >= max_num_extents) {
+            end_of_stream = false;
+            break;
+        }
     }
 
-    return extent_metadata_response{.extents = std::move(extents)};
+    return extent_metadata_response{
+      .extents = std::move(extents), .end_of_stream = end_of_stream};
 }
 
 ss::future<std::expected<metastore::extent_metadata_response, metastore::errc>>
@@ -810,6 +835,7 @@ simple_metastore::get_extent_metadata_backwards(
     const auto& prt = prt_ref->get();
 
     extent_metadata_vec extents;
+    bool end_of_stream = true;
 
     auto max_it = std::ranges::lower_bound(
       prt.extents, max_offset, std::less<>{}, &extent::last_offset);
@@ -830,17 +856,19 @@ simple_metastore::get_extent_metadata_backwards(
             break;
         }
 
-        if (extents.size() >= max_num_extents) {
-            break;
-        }
-
         extents.push_back(
           {.base_offset = extent.base_offset,
            .last_offset = extent.last_offset,
            .max_timestamp = extent.max_timestamp});
+
+        if (extents.size() >= max_num_extents) {
+            end_of_stream = false;
+            break;
+        }
     }
 
-    return extent_metadata_response{.extents = std::move(extents)};
+    return extent_metadata_response{
+      .extents = std::move(extents), .end_of_stream = end_of_stream};
 }
 
 } // namespace cloud_topics::l1

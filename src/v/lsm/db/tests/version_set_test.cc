@@ -22,6 +22,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 namespace {
 
 using lsm::internal::operator""_level;
@@ -83,15 +85,27 @@ public:
         builder.finish().get();
         size_t file_size = builder.file_size();
         builder.close().get();
-        lsm::db::version_edit edit(*_options);
-        edit.add_file({
+        auto edit = _version_set->new_edit();
+        auto min_seqno = std::ranges::min_element(
+                           spec.keys,
+                           std::less<>(),
+                           [](lsm::internal::key_view k) { return k.seqno(); })
+                           ->seqno();
+        auto max_seqno = std::ranges::max_element(
+                           spec.keys,
+                           std::less<>(),
+                           [](lsm::internal::key_view k) { return k.seqno(); })
+                           ->seqno();
+        edit->add_file({
           .level = spec.level,
           .file_handle = {.id = spec.id},
           .file_size = file_size,
           .smallest = spec.keys.front(),
           .largest = spec.keys.back(),
+          .oldest_seqno = min_seqno,
+          .newest_seqno = max_seqno,
         });
-        edit.set_last_seqno(0_seqno);
+        edit->set_last_seqno(max_seqno);
         _version_set->log_and_apply(std::move(edit)).get();
     }
 
@@ -146,8 +160,8 @@ public:
       lsm::internal::key smallest,
       lsm::internal::key largest,
       uint64_t file_size = 100) {
-        lsm::db::version_edit edit(*_options);
-        edit.add_file({
+        auto edit = _version_set->new_edit();
+        edit->add_file({
           .level = level,
           .file_handle = {.id = id},
           .file_size = file_size,
@@ -156,7 +170,7 @@ public:
           .oldest_seqno = 0_seqno,
           .newest_seqno = 0_seqno,
         });
-        edit.set_last_seqno(0_seqno);
+        edit->set_last_seqno(0_seqno);
         _version_set->log_and_apply(std::move(edit)).get();
     }
 
@@ -209,15 +223,15 @@ TEST_F(VersionSetTest, Empty) {
 
 TEST_F(VersionSetTest, ApplyEdit) {
     auto& vset = version_set();
-    lsm::db::version_edit edit(options());
-    edit.add_file({
+    auto edit = vset.new_edit();
+    edit->add_file({
       .level = 0_level,
       .file_handle = {.id = 1_file_id},
       .file_size = 100,
       .smallest = "a"_key,
       .largest = "z"_key,
     });
-    edit.set_last_seqno(0_seqno);
+    edit->set_last_seqno(0_seqno);
     vset.log_and_apply(std::move(edit)).get();
     EXPECT_EQ(vset.current()->num_files(0_level), 1);
     EXPECT_EQ(vset.current()->num_files(1_level), 0);
@@ -226,29 +240,29 @@ TEST_F(VersionSetTest, ApplyEdit) {
 TEST_F(VersionSetTest, ApplyEditWithDelete) {
     auto& vset = version_set();
     {
-        lsm::db::version_edit edit(options());
-        edit.add_file({
+        auto edit = vset.new_edit();
+        edit->add_file({
           .level = 0_level,
           .file_handle = {.id = 1_file_id},
           .file_size = 100,
           .smallest = "a"_key,
           .largest = "z"_key,
         });
-        edit.set_last_seqno(0_seqno);
+        edit->set_last_seqno(0_seqno);
         vset.log_and_apply(std::move(edit)).get();
         EXPECT_EQ(vset.current()->num_files(0_level), 1);
         EXPECT_EQ(vset.current()->num_files(1_level), 0);
     }
-    lsm::db::version_edit edit(options());
-    edit.remove_file(0_level, {.id = 1_file_id});
-    edit.add_file({
+    auto edit = vset.new_edit();
+    edit->remove_file(0_level, {.id = 1_file_id});
+    edit->add_file({
       .level = 1_level,
       .file_handle = {.id = 1_file_id},
       .file_size = 100,
       .smallest = "a"_key,
       .largest = "z"_key,
     });
-    edit.add_file({
+    edit->add_file({
       .level = 0_level,
       .file_handle = {.id = 2_file_id},
       .file_size = 80,
@@ -264,22 +278,22 @@ TEST_F(VersionSetTest, ApplyEditWithDelete) {
 TEST_F(VersionSetTest, Recovery) {
     {
         auto& vset = version_set();
-        lsm::db::version_edit edit(options());
-        edit.add_file({
+        auto edit = vset.new_edit();
+        edit->add_file({
           .level = 0_level,
           .file_handle = {.id = 1_file_id},
           .file_size = 100,
           .smallest = "a"_key,
           .largest = "z"_key,
         });
-        edit.add_file({
+        edit->add_file({
           .level = 0_level,
           .file_handle = {.id = 2_file_id},
           .file_size = 80,
           .smallest = "c"_key,
           .largest = "d"_key,
         });
-        edit.set_last_seqno(0_seqno);
+        edit->set_last_seqno(0_seqno);
         vset.log_and_apply(std::move(edit)).get();
         EXPECT_EQ(vset.current()->num_files(0_level), 2);
         EXPECT_EQ(vset.current()->num_files(1_level), 0);
@@ -292,29 +306,29 @@ TEST_F(VersionSetTest, Recovery) {
 
 TEST_F(VersionSetTest, OverlapInLevel0) {
     auto& vset = version_set();
-    lsm::db::version_edit edit(options());
-    edit.add_file({
+    auto edit = vset.new_edit();
+    edit->add_file({
       .level = 0_level,
       .file_handle = {.id = 1_file_id},
       .file_size = 100,
       .smallest = "d"_key,
       .largest = "g"_key,
     });
-    edit.add_file({
+    edit->add_file({
       .level = 0_level,
       .file_handle = {.id = 2_file_id},
       .file_size = 80,
       .smallest = "i"_key,
       .largest = "k"_key,
     });
-    edit.add_file({
+    edit->add_file({
       .level = 0_level,
       .file_handle = {.id = 3_file_id},
       .file_size = 80,
       .smallest = "b"_key,
       .largest = "e"_key,
     });
-    edit.set_last_seqno(0_seqno);
+    edit->set_last_seqno(0_seqno);
     vset.log_and_apply(std::move(edit)).get();
     auto current = vset.current();
     EXPECT_TRUE(current->overlap_in_level(0_level, "a"_user_key, "z"_user_key));
@@ -342,22 +356,22 @@ TEST_F(VersionSetTest, OverlapInLevel0) {
 
 TEST_F(VersionSetTest, OverlapInLevel1) {
     auto& vset = version_set();
-    lsm::db::version_edit edit(options());
-    edit.add_file({
+    auto edit = vset.new_edit();
+    edit->add_file({
       .level = 1_level,
       .file_handle = {.id = 1_file_id},
       .file_size = 100,
       .smallest = "d"_key,
       .largest = "g"_key,
     });
-    edit.add_file({
+    edit->add_file({
       .level = 1_level,
       .file_handle = {.id = 2_file_id},
       .file_size = 80,
       .smallest = "i"_key,
       .largest = "k"_key,
     });
-    edit.set_last_seqno(0_seqno);
+    edit->set_last_seqno(0_seqno);
     vset.log_and_apply(std::move(edit)).get();
     auto current = vset.current();
     EXPECT_TRUE(current->overlap_in_level(1_level, "a"_user_key, "z"_user_key));
@@ -388,42 +402,118 @@ TEST_F(VersionSetTest, Get) {
       .id = 1_file_id,
       .level = 2_level,
       .keys = {
-        "b"_key,
-        "c"_key,
-        "d"_key,
-        "e"_key,
+        "b@1"_key,
+        "c@1"_key,
+        "d@1"_key,
+        "e@1"_key,
       },
     });
     add_sst({
       .id = 2_file_id,
       .level = 1_level,
       .keys = {
-        "a"_key,
-        "b"_key,
-        "c"_key,
-        "d"_key,
+        "a@2"_key,
+        "b@2"_key,
+        "c@2"_key,
+        "d@2"_key,
       },
     });
     add_sst({
       .id = 3_file_id,
       .level = 1_level,
       .keys = {
-        "w"_key,
-        "x"_key,
-        "y"_key,
-        "z"_key,
+        "w@2"_key,
+        "x@2"_key,
+        "y@2"_key,
+        "z@2"_key,
       },
     });
     auto& vset = version_set();
     lsm::db::version::get_stats stats;
-    auto result = vset.current()->get("a"_key, &stats).get();
-    EXPECT_THAT(result, IsLookupValue("a"_key, 1_level));
-    result = vset.current()->get("e"_key, &stats).get();
-    EXPECT_THAT(result, IsLookupValue("e"_key, 2_level));
-    result = vset.current()->get("b"_key, &stats).get();
-    EXPECT_THAT(result, IsLookupValue("b"_key, 1_level));
-    result = vset.current()->get("j"_key, &stats).get();
+    auto result = vset.current()->get("a@2"_key, &stats).get();
+    EXPECT_THAT(result, IsLookupValue("a@2"_key, 1_level));
+    result = vset.current()->get("e@1"_key, &stats).get();
+    EXPECT_THAT(result, IsLookupValue("e@1"_key, 2_level));
+    result = vset.current()->get("b@2"_key, &stats).get();
+    EXPECT_THAT(result, IsLookupValue("b@2"_key, 1_level));
+    result = vset.current()->get("j@1"_key, &stats).get();
     EXPECT_THAT(result, IsMissing());
+}
+
+TEST_F(VersionSetTest, GetOverlappingUserKey) {
+    // Test a scenario with `get` where a level has the same user key split
+    // across multiple files. This is a rare but valid case.
+    add_sst({
+      .id = 2_file_id,
+      .level = 1_level,
+      .keys = {
+        "a@3"_key,
+        "a@2"_key,
+      },
+    });
+    add_sst({
+      .id = 3_file_id,
+      .level = 1_level,
+      .keys = {
+        "a@1"_key,
+        "b@2"_key,
+      },
+    });
+    auto& vset = version_set();
+    lsm::db::version::get_stats stats;
+    auto result = vset.current()->get("a@4"_key, &stats).get();
+    EXPECT_THAT(result, IsLookupValue("a@3"_key, 1_level));
+    result = vset.current()->get("a@1"_key, &stats).get();
+    EXPECT_THAT(result, IsLookupValue("a@1"_key, 1_level));
+    result = vset.current()->get("b@2"_key, &stats).get();
+    EXPECT_THAT(result, IsLookupValue("b@2"_key, 1_level));
+    result = vset.current()->get("j@1"_key, &stats).get();
+    EXPECT_THAT(result, IsMissing());
+}
+
+TEST_F(VersionSetTest, IteratorsKeepVersionFilesLive) {
+    // When add_iterators is called on a version with only L0 files, the
+    // version_lifetime_iterator keeps the version alive. This means
+    // get_live_files() must still report those files even after a new version
+    // is installed that removes them.
+    add_sst({
+      .id = 1_file_id,
+      .level = 0_level,
+      .keys = {"a@1"_key, "b@1"_key},
+    });
+    add_sst({
+      .id = 2_file_id,
+      .level = 0_level,
+      .keys = {"c@1"_key, "d@1"_key},
+    });
+
+    // Create iterators for the current version. Since we only have L0 files,
+    // add_iterators will insert a version_lifetime_iterator that holds a
+    // reference to this version.
+    chunked_vector<std::unique_ptr<lsm::internal::iterator>> iters;
+    version_set().current()->add_iterators(&iters).get();
+
+    // Create a new version that removes both files.
+    auto edit = version_set().new_edit();
+    edit->remove_file(0_level, {.id = 1_file_id});
+    edit->remove_file(0_level, {.id = 2_file_id});
+    edit->set_last_seqno(1_seqno);
+    version_set().log_and_apply(std::move(edit)).get();
+
+    // The current version should have no files.
+    EXPECT_EQ(version_set().current()->num_files(0_level), 0);
+
+    // But get_live_files must still include the old files because the
+    // iterators keep the old version alive.
+    auto live = version_set().get_live_files();
+    EXPECT_TRUE(live.contains({.id = 1_file_id}));
+    EXPECT_TRUE(live.contains({.id = 2_file_id}));
+
+    // Drop the iterators, releasing the version reference.
+    iters.clear();
+
+    // Now the files should no longer be considered live.
+    EXPECT_THAT(version_set().get_live_files(), IsEmpty());
 }
 
 TEST_F(CompactionTest, PickCompactionLevel0ToLevel1) {
@@ -693,8 +783,8 @@ TEST_F(CompactionTest, CompactionPointerRespected) {
 
     // Set the compaction pointer to after file 2, so next compaction should
     // start from file 3
-    lsm::db::version_edit edit(options());
-    edit.set_compact_pointer(1_level, "d"_key);
+    auto edit = version_set().new_edit();
+    edit->set_compact_pointer(1_level, "d"_key);
     version_set().log_and_apply(std::move(edit)).get();
 
     // Next compaction should pick file 3 or later, not file 1 or 2

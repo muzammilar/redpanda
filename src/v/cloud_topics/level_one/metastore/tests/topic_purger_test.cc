@@ -53,10 +53,8 @@ private:
 class TopicPurgerTest : public testing::Test {
 public:
     void SetUp() override {
-        ss::smp::invoke_on_all([] {
-            config::node().node_id.set_value(model::node_id{1});
-        }).get();
-        topic_table = std::make_unique<cluster::topic_table>(mr);
+        topic_table = std::make_unique<cluster::topic_table>(
+          mr, model::node_id{1});
     }
     model::offset next_topic_table_offset() const {
         return model::offset(topic_table->last_applied_revision()() + 1);
@@ -67,7 +65,7 @@ public:
       model::topic_id tp_id) {
         auto topic_cfg = cluster::topic_configuration(
           model::kafka_namespace, topic, 1, 1, tp_id);
-        topic_cfg.properties.cloud_topic_enabled = true;
+        topic_cfg.properties.storage_mode = model::redpanda_storage_mode::cloud;
         topic_cfg.properties.remote_delete = true;
         co_return co_await topic_table->apply(
           cluster::create_topic_cmd{

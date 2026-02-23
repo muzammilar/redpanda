@@ -86,6 +86,80 @@ class GetCoordinatorStateResponse(google.protobuf.message.Message):
 Global___GetCoordinatorStateResponse: typing_extensions.TypeAlias = GetCoordinatorStateResponse
 
 @typing.final
+class PartitionStateOverride(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    LAST_COMMITTED_FIELD_NUMBER: builtins.int
+    last_committed: builtins.int
+
+    def __init__(self, *, last_committed: builtins.int | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['_last_committed', b'_last_committed', 'last_committed', b'last_committed']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['_last_committed', b'_last_committed', 'last_committed', b'last_committed']) -> None:
+        ...
+
+    def WhichOneof(self, oneof_group: typing.Literal['_last_committed', b'_last_committed']) -> typing.Literal['last_committed'] | None:
+        ...
+Global___PartitionStateOverride: typing_extensions.TypeAlias = PartitionStateOverride
+
+@typing.final
+class CoordinatorResetTopicStateRequest(google.protobuf.message.Message):
+    """When reset_all_partitions is true, clears pending entries and
+    last_committed for all partitions, then applies overrides. When false,
+    clears pending entries only for partitions in partition_overrides and
+    applies their overrides. No-op when false and partition_overrides is empty.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    @typing.final
+    class PartitionOverridesEntry(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+        KEY_FIELD_NUMBER: builtins.int
+        VALUE_FIELD_NUMBER: builtins.int
+        key: builtins.int
+
+        @property
+        def value(self) -> Global___PartitionStateOverride:
+            ...
+
+        def __init__(self, *, key: builtins.int=..., value: Global___PartitionStateOverride | None=...) -> None:
+            ...
+
+        def HasField(self, field_name: typing.Literal['value', b'value']) -> builtins.bool:
+            ...
+
+        def ClearField(self, field_name: typing.Literal['key', b'key', 'value', b'value']) -> None:
+            ...
+    TOPIC_NAME_FIELD_NUMBER: builtins.int
+    REVISION_FIELD_NUMBER: builtins.int
+    RESET_ALL_PARTITIONS_FIELD_NUMBER: builtins.int
+    PARTITION_OVERRIDES_FIELD_NUMBER: builtins.int
+    topic_name: builtins.str
+    revision: builtins.int
+    reset_all_partitions: builtins.bool
+
+    @property
+    def partition_overrides(self) -> google.protobuf.internal.containers.MessageMap[builtins.int, Global___PartitionStateOverride]:
+        ...
+
+    def __init__(self, *, topic_name: builtins.str=..., revision: builtins.int=..., reset_all_partitions: builtins.bool=..., partition_overrides: collections.abc.Mapping[builtins.int, Global___PartitionStateOverride] | None=...) -> None:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['partition_overrides', b'partition_overrides', 'reset_all_partitions', b'reset_all_partitions', 'revision', b'revision', 'topic_name', b'topic_name']) -> None:
+        ...
+Global___CoordinatorResetTopicStateRequest: typing_extensions.TypeAlias = CoordinatorResetTopicStateRequest
+
+@typing.final
+class CoordinatorResetTopicStateResponse(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    def __init__(self) -> None:
+        ...
+Global___CoordinatorResetTopicStateResponse: typing_extensions.TypeAlias = CoordinatorResetTopicStateResponse
+
+@typing.final
 class CoordinatorState(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
@@ -246,17 +320,19 @@ class TopicState(google.protobuf.message.Message):
     PARTITION_STATES_FIELD_NUMBER: builtins.int
     LIFECYCLE_STATE_FIELD_NUMBER: builtins.int
     TOTAL_KAFKA_PROCESSED_BYTES_FIELD_NUMBER: builtins.int
+    LAST_COMMITTED_SNAPSHOT_ID_FIELD_NUMBER: builtins.int
     revision: builtins.int
     lifecycle_state: Global___LifecycleState.ValueType
     total_kafka_processed_bytes: builtins.int
+    last_committed_snapshot_id: builtins.int
 
     @property
     def partition_states(self) -> google.protobuf.internal.containers.MessageMap[builtins.int, Global___PartitionState]:
         ...
 
-    def __init__(self, *, revision: builtins.int=..., partition_states: collections.abc.Mapping[builtins.int, Global___PartitionState] | None=..., lifecycle_state: Global___LifecycleState.ValueType=..., total_kafka_processed_bytes: builtins.int=...) -> None:
+    def __init__(self, *, revision: builtins.int=..., partition_states: collections.abc.Mapping[builtins.int, Global___PartitionState] | None=..., lifecycle_state: Global___LifecycleState.ValueType=..., total_kafka_processed_bytes: builtins.int=..., last_committed_snapshot_id: builtins.int=...) -> None:
         ...
 
-    def ClearField(self, field_name: typing.Literal['lifecycle_state', b'lifecycle_state', 'partition_states', b'partition_states', 'revision', b'revision', 'total_kafka_processed_bytes', b'total_kafka_processed_bytes']) -> None:
+    def ClearField(self, field_name: typing.Literal['last_committed_snapshot_id', b'last_committed_snapshot_id', 'lifecycle_state', b'lifecycle_state', 'partition_states', b'partition_states', 'revision', b'revision', 'total_kafka_processed_bytes', b'total_kafka_processed_bytes']) -> None:
         ...
 Global___TopicState: typing_extensions.TypeAlias = TopicState

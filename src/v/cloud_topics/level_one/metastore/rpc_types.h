@@ -10,6 +10,7 @@
 #pragma once
 
 #include "cloud_topics/level_one/common/object_id.h"
+#include "cloud_topics/level_one/metastore/domain_uuid.h"
 #include "cloud_topics/level_one/metastore/offset_interval_set.h"
 #include "cloud_topics/level_one/metastore/state_update.h"
 #include "model/fundamental.h"
@@ -189,6 +190,23 @@ struct get_offsets_request
     model::topic_id_partition tp;
 };
 
+struct get_size_reply
+  : serde::
+      envelope<get_size_reply, serde::version<0>, serde::compat_version<0>> {
+    auto serde_fields() { return std::tie(ec, size); }
+
+    errc ec;
+    size_t size{0};
+};
+struct get_size_request
+  : serde::
+      envelope<get_size_request, serde::version<0>, serde::compat_version<0>> {
+    using resp_t = get_size_reply;
+    auto serde_fields() { return std::tie(tp); }
+
+    model::topic_id_partition tp;
+};
+
 struct extent_metadata
   : serde::
       envelope<extent_metadata, serde::version<0>, serde::compat_version<0>> {
@@ -359,10 +377,13 @@ struct get_extent_metadata_reply
       get_extent_metadata_reply,
       serde::version<0>,
       serde::compat_version<0>> {
-    auto serde_fields() { return std::tie(ec, extents); }
+    auto serde_fields() { return std::tie(ec, extents, end_of_stream); }
 
     errc ec;
     chunked_vector<extent_metadata> extents;
+    // True when no more extents exist beyond this response (end of iteration).
+    // False when more extents may exist (hit max_num_extents limit).
+    bool end_of_stream{true};
 };
 struct get_extent_metadata_request
   : serde::envelope<
@@ -382,6 +403,44 @@ struct get_extent_metadata_request
     kafka::offset max_offset;
     order o;
     size_t max_num_extents;
+};
+
+struct restore_domain_reply
+  : serde::envelope<
+      restore_domain_reply,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    auto serde_fields() { return std::tie(ec); }
+    errc ec;
+};
+struct restore_domain_request
+  : serde::envelope<
+      restore_domain_request,
+      serde::version<1>,
+      serde::compat_version<0>> {
+    using resp_t = restore_domain_reply;
+    auto serde_fields() { return std::tie(metastore_partition, new_uuid); }
+    model::partition_id metastore_partition;
+    domain_uuid new_uuid;
+};
+
+struct flush_domain_reply
+  : serde::envelope<
+      flush_domain_reply,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    auto serde_fields() { return std::tie(ec, uuid); }
+    errc ec;
+    domain_uuid uuid;
+};
+struct flush_domain_request
+  : serde::envelope<
+      flush_domain_request,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    using resp_t = flush_domain_reply;
+    auto serde_fields() { return std::tie(metastore_partition); }
+    model::partition_id metastore_partition;
 };
 
 } //  namespace cloud_topics::l1::rpc

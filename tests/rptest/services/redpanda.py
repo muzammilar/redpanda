@@ -80,7 +80,11 @@ from rptest.context.gcp import GCPContext
 from rptest.services import redpanda_types, tls
 from rptest.services.admin import Admin
 from rptest.services.cloud_broker import CloudBroker
-from rptest.services.redpanda_cloud import CloudCluster, get_config_profile_name
+from rptest.services.redpanda_cloud import (
+    CloudCluster,
+    get_config_profile_name,
+    ThroughputTierInfo,
+)
 from rptest.services.redpanda_installer import (
     VERSION_RE as RI_VERSION_RE,
 )
@@ -115,6 +119,7 @@ from rptest.utils.mode_checks import in_fips_environment
 from rptest.utils.rpenv import sample_license
 
 T = TypeVar("T")
+U = TypeVar("U")
 
 
 class Partition(NamedTuple):
@@ -328,7 +333,7 @@ OIDC_ALLOW_LIST = [
     re.compile("security - .* - Error updating"),
 ]
 
-CLOUD_TOPICS_CONFIG_STR = "unstable_beta_feature_cloud_topics_enabled"
+CLOUD_TOPICS_CONFIG_STR = "cloud_topics_enabled"
 
 
 class RemoteClusterNode(Protocol):
@@ -1131,6 +1136,7 @@ class LoggingConfig:
     # assumed it was always supported/does not require special handling.
     LOGGER_GENESIS: dict[str, RedpandaVersionTriple] = {
         "datalake": (24, 3, 1),
+        "cloud_topics-compaction": (26, 1, 1),
     }
 
     def __init__(self, default_level: str, logger_levels: dict[str, str] = {}) -> None:
@@ -1270,6 +1276,7 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._usage_stats = UsageStats()
+        self._max_workers: int | None = None
 
     @property
     @abstractmethod
@@ -1398,6 +1405,17 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
             err_msg=err_msg,
             logger=logger,
         )
+
+    def for_nodes(self, nodes: Collection[U], cb: Callable[[U], T]) -> list[T]:
+        if len(nodes) > 0:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._max_workers
+            ) as executor:
+                # The list() wrapper is to cause futures to be evaluated here+now
+                # (including throwing any exceptions) and not just spawned in background.
+                return list(executor.map(cb, nodes))
+        else:
+            return []
 
     def _extract_samples(
         self, metrics: list[Metric], sample_pattern: str, node: Any
@@ -1537,14 +1555,19 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
 
         patterns_or_name = sample_patterns if sample_patterns else names
 
-        sample_values_per_pattern = {
-            pattern: cast(list[MetricSample], []) for pattern in patterns_or_name
+        sample_values_per_pattern: dict[str, list[MetricSample]] = {
+            pattern: [] for pattern in patterns_or_name
         }
 
         if nodes is None:
             nodes = self.all_nodes_abc()
 
-        for n in nodes:
+        def fetch_node_samples(
+            n: ClusterNode | CloudBroker,
+        ) -> dict[str, list[MetricSample]]:
+            node_samples: dict[str, list[MetricSample]] = {
+                pattern: [] for pattern in patterns_or_name
+            }
             # if exact names are provided, we use RP-side filtering support to query
             # only for those metrics, which is much faster especially when many
             # metrics are involved
@@ -1555,15 +1578,16 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
                         metrics_endpoint=metrics_endpoint,
                         name=name,
                     )
-                    sample_values_per_pattern[name] += self._extract_samples(
-                        metrics, name, n
-                    )
+                    node_samples[name] = self._extract_samples(metrics, name, n)
             else:
                 metrics = self.metrics(n, metrics_endpoint)
                 for pattern in sample_patterns:
-                    sample_values_per_pattern[pattern] += self._extract_samples(
-                        metrics, pattern, n
-                    )
+                    node_samples[pattern] = self._extract_samples(metrics, pattern, n)
+            return node_samples
+
+        for node_samples in self.for_nodes(nodes, fetch_node_samples):
+            for pattern, samples in node_samples.items():
+                sample_values_per_pattern[pattern] += samples
 
         return {
             pattern: MetricSamples(values)
@@ -1626,7 +1650,7 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
         namespace: str | None = None,
         topic: str | None = None,
-        nodes: Any = None,
+        nodes: list[ClusterNode] | list[CloudBroker] | None = None,
         expect_metric: bool = False,
     ) -> float:
         """Pings the 'metrics_endpoint' of each node and returns the summed values
@@ -1636,13 +1660,18 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
         if nodes is None:
             nodes = self.all_nodes_abc()
 
-        value = 0.0
-        metric_seen = False
         basename = self._metric_basename(metric_name)
 
-        matched_families: set[str] = set()
+        @dataclass
+        class Result:
+            value: float
+            metric_seen: bool
+            matched_families: set[str]
 
-        for n in nodes:
+        def sum_for_node(n: ClusterNode | CloudBroker) -> Result:
+            value = 0.0
+            metric_seen = False
+            matched_families: set[str] = set()
             metrics = self.metrics(
                 n, metrics_endpoint=metrics_endpoint, name=basename + "*"
             )
@@ -1669,6 +1698,15 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
                             continue
                     metric_seen = True
                     value += sample.value
+            return Result(value, metric_seen, matched_families)
+
+        value = 0.0
+        metric_seen = False
+        matched_families: set[str] = set()
+        for r in self.for_nodes(nodes, sum_for_node):
+            value += r.value
+            metric_seen |= r.metric_seen
+            matched_families |= r.matched_families
 
         # catch any weirdness, like if two metrics foo_total and foo both exist, which would
         # be ambiguous
@@ -1760,6 +1798,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
         super().__init__()
 
+        # Cloudv2 agents run on very small instances that can easily be
+        # overwhelmed by too many concurrent ssh sessions.
+        self._max_workers = 10
+
         self.config_profile_name = config_profile_name
         self._min_brokers = min_brokers
         self._superuser = RedpandaService.SUPERUSER_CREDENTIALS
@@ -1835,10 +1877,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         )
 
         self.rebuild_pods_classes()
+        self._initial_node_count = len(self.pods)
 
-        node_count = self.config_profile["nodes_count"]
-        assert self._min_brokers <= node_count, (
-            f"Not enough brokers: test needs {self._min_brokers} but cluster has {node_count}"
+        assert self._min_brokers <= self._initial_node_count, (
+            f"Not enough brokers: test needs {self._min_brokers} but cluster has {self._initial_node_count}"
         )
 
     @property
@@ -1870,9 +1912,11 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
     def rebuild_pods_classes(self) -> None:
         """Querry pods and create Classes fresh"""
-        self.pods = [
-            CloudBroker(p, self.kubectl, self.logger) for p in self.get_redpanda_pods()
-        ]
+
+        def make_cloud_broker(p: dict[str, Any]) -> CloudBroker:
+            return CloudBroker(p, self.kubectl, self.logger)
+
+        self.pods = self.for_nodes(self.get_redpanda_pods(), make_cloud_broker)
 
     def start(self) -> None:
         """Does nothing, do not call."""
@@ -2228,6 +2272,37 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         """
         return self._cloud_cluster.get_tier()
 
+    def get_scaled_tier(self) -> ThroughputTierInfo | None:
+        """Get tier limits scaled for the actual number of nodes.
+
+        Returns tier info with limits adjusted proportionally based on
+        the ratio of actual nodes to the default tier node count.
+        Returns None if base tier info is not found.
+        """
+        tier = self.get_tier()
+        if tier is None:
+            return None
+
+        # Global limits
+        global_partition_limit = 112500
+
+        default_nodes = int(self.config_profile["nodes_count"])
+        actual_nodes = len(self.pods)
+
+        if actual_nodes == default_nodes:
+            return tier
+
+        scale_factor = actual_nodes / default_nodes
+
+        return ThroughputTierInfo(
+            max_ingress=int(tier.max_ingress * scale_factor),
+            max_egress=int(tier.max_egress * scale_factor),
+            max_connections_count=int(tier.max_connections_count * scale_factor),
+            max_partition_count=min(
+                int(tier.max_partition_count * scale_factor), global_partition_limit
+            ),
+        )
+
     def get_install_pack(self):
         install_pack_client = InstallPackClient(
             self._cloud_cluster.config.install_pack_url_template,
@@ -2292,20 +2367,20 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
         self._cloud_cluster._ensure_cluster_health()
 
-        expected_nodes = int(self.config_profile["nodes_count"])
+        expected_nodes = self._initial_node_count
         active, _, _ = self.get_redpanda_pods_presorted()
         failed = self.get_redpanda_pods_filtered("failed")
         active_count = len(active)
         failed_count = len(failed)
         assert expected_nodes == active_count, (
-            f"Expected {expected_nodes} per tier definition but found {active_count} active pods"
+            f"Expected {expected_nodes} nodes (initial count) but found {active_count} active pods"
         )
         assert failed_count == 0, f"Expected no failed pods, found {failed_count}"
 
         brokers = self._cloud_cluster.get_brokers()
         broker_count = len(brokers)
         assert expected_nodes == broker_count, (
-            f"Expected {expected_nodes} per tier definition but there "
+            f"Expected {expected_nodes} nodes (initial count) but there "
             f"were only {broker_count} brokers: {brokers}"
         )
 
@@ -2868,21 +2943,25 @@ class RedpandaService(Service, RedpandaServiceABC):
         later be replaced by a proper / official start-up probe type check on
         the health of a node after a restart.
         """
-        counts: dict[int, int | None] = {self.idx(node): None for node in self.nodes}
-        for node in self.nodes:
+
+        def check_node(node: ClusterNode) -> tuple[int, bool]:
+            """Returns (count, had_error)."""
             try:
                 metrics = self.metrics(node)
             except Exception:
-                return False
-            idx = self.idx(node)
+                return (0, True)
+            count = 0
             for family in metrics:
                 for sample in family.samples:
                     if (
                         sample.name
                         == "vectorized_cluster_partition_under_replicated_replicas"
                     ):
-                        counts[idx] = int(sample.value) + (counts[idx] or 0)
-        return all(map(lambda count: count == 0, counts.values()))
+                        count += int(sample.value)
+            return (count, False)
+
+        results = self.for_nodes(self.nodes, check_node)
+        return all(not had_error and count == 0 for count, had_error in results)
 
     def rolling_restart_nodes(
         self,
@@ -2918,20 +2997,6 @@ class RedpandaService(Service, RedpandaServiceABC):
             "si_settings were None, probably because they were not specified during redpanda service creation"
         )
         return self._si_settings
-
-    def for_nodes(
-        self, nodes: Collection[ClusterNode], cb: Callable[[ClusterNode], T]
-    ) -> list[T]:
-        n_workers = len(nodes)
-        if n_workers > 0:
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=n_workers
-            ) as executor:
-                # The list() wrapper is to cause futures to be evaluated here+now
-                # (including throwing any exceptions) and not just spawned in background.
-                return list(executor.map(cb, nodes))
-        else:
-            return []
 
     def trim_logs(self):
         if not self._trim_logs:
@@ -3032,16 +3097,19 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         allow_list = prepare_allow_list(allow_list)
 
-        _searchable_nodes: list[tuple[str | None, Any]] = []
-        for node in self.nodes:
+        def check_node(node: ClusterNode) -> tuple[str | None, ClusterNode] | None:
             if self._skip_if_no_redpanda_log and not node.account.exists(
                 RedpandaService.STDOUT_STDERR_CAPTURE
             ):
                 self.logger.info(
                     f"{RedpandaService.STDOUT_STDERR_CAPTURE} not found on {node.account.hostname}. Skipping log scan."
                 )
-                continue
-            _searchable_nodes.append((self.get_version_if_not_head(node), node))
+                return None
+            return (self.get_version_if_not_head(node), node)
+
+        _searchable_nodes = [
+            r for r in self.for_nodes(self.nodes, check_node) if r is not None
+        ]
 
         lsearcher = LogSearchLocal(
             self._context,
@@ -4285,14 +4353,12 @@ class RedpandaService(Service, RedpandaServiceABC):
                     return True
             return False
 
-        crashes: list[tuple[ClusterNode, str]] = []
         # We log long encoded AWS/GCP headers that occasionally have 'SEGV' in
         # them by chance
         cloud_header_strings = ["x-amz-id", "x-amz-request", "x-guploader-uploadid"]
-        for node in self.nodes:
-            self.logger.info(f"Scanning node {node.account.hostname} log for errors...")
 
-            crash_log = None
+        def scan_node_for_crash(node: ClusterNode) -> tuple[ClusterNode, str] | None:
+            self.logger.info(f"Scanning node {node.account.hostname} log for errors...")
             # crashes appear near the "end" of the file, so examine only the last
             # 10 MB, to avoid timeouts on large logs
             for line in node.account.ssh_capture(
@@ -4311,18 +4377,24 @@ class RedpandaService(Service, RedpandaServiceABC):
                     continue
 
                 if "No such file or directory" not in line:
-                    crash_log = line
-                    break
+                    return (node, line)
+            return None
 
-            if crash_log:
-                crashes.append((node, crash_log))
+        crash_results = self.for_nodes(self.nodes, scan_node_for_crash)
+        crashes: list[tuple[ClusterNode, str]] = [
+            r for r in crash_results if r is not None
+        ]
 
         if not crashes:
             # Even if there is no assertion or segfault, look for unexpectedly
             # not-running processes
-            for node in self._started:
+            def check_pid(node: ClusterNode) -> tuple[ClusterNode, str] | None:
                 if not self.redpanda_pid(node):
-                    crashes.append((node, "Redpanda process unexpectedly stopped"))
+                    return (node, "Redpanda process unexpectedly stopped")
+                return None
+
+            pid_results = self.for_nodes(list(self._started), check_pid)
+            crashes = [r for r in pid_results if r is not None]
 
         if crashes:
             if self._tolerate_crashes:
@@ -4610,10 +4682,10 @@ class RedpandaService(Service, RedpandaServiceABC):
         :return: None
         """
 
-        for node in self.nodes:
+        def decode_node_backtraces(node: ClusterNode) -> Exception | None:
             if not node.account.exists(RedpandaService.STDOUT_STDERR_CAPTURE):
-                # Log many not exist if node never started
-                continue
+                # Log may not exist if node never started
+                return None
 
             self.logger.info(f"Decoding backtraces on {node.account.hostname}.")
             cmd = "/opt/scripts/seastar-addr2line"
@@ -4627,13 +4699,21 @@ class RedpandaService(Service, RedpandaServiceABC):
 
             try:
                 node.account.ssh(cmd)
-            except Exception:
+            except Exception as e:
                 # We run during teardown on failures, so if something
                 # goes wrong we must not raise, or we would usurp
                 # the original exception that caused the failure.
                 self.logger.exception("Failed to run seastar-addr2line")
-                if raise_on_failure:
-                    raise
+                return e
+            return None
+
+        errors = [
+            e
+            for e in self.for_nodes(self.nodes, decode_node_backtraces)
+            if e is not None
+        ]
+        if raise_on_failure and errors:
+            raise errors[0]
 
     def rp_install_path(self):
         if self._installer._started:
@@ -5258,7 +5338,8 @@ class RedpandaService(Service, RedpandaServiceABC):
             conf.update(dict(rpk_path=rpk_path))
 
         conf_yaml = yaml.dump(conf)
-        for node in self.nodes:
+
+        def write_config_to_node(node: ClusterNode) -> None:
             self.logger.info(
                 "Writing bootstrap cluster config file {}:{}".format(
                     node.name, RedpandaService.CLUSTER_BOOTSTRAP_CONFIG_FILE
@@ -5270,6 +5351,8 @@ class RedpandaService(Service, RedpandaServiceABC):
             node.account.create_file(
                 RedpandaService.CLUSTER_BOOTSTRAP_CONFIG_FILE, conf_yaml
             )
+
+        self.for_nodes(self.nodes, write_config_to_node)
 
     def get_node_by_id(self, node_id: int) -> ClusterNode | None:
         """
@@ -5642,8 +5725,8 @@ class RedpandaService(Service, RedpandaServiceABC):
         """
         Fetch the max shard id for each node.
         """
-        shards_per_node: dict[int, int] = {}
-        for node in self._started:
+
+        def get_node_shards(node: ClusterNode) -> tuple[int, int]:
             num_shards = 0
             metrics = self.metrics(node)
             for family in metrics:
@@ -5651,8 +5734,9 @@ class RedpandaService(Service, RedpandaServiceABC):
                     if sample.name == "vectorized_reactor_utilization":
                         num_shards = max(num_shards, int(sample.labels["shard"]))
             assert num_shards > 0
-            shards_per_node[self.idx(node)] = num_shards
-        return shards_per_node
+            return (self.idx(node), num_shards)
+
+        return dict(self.for_nodes(list(self._started), get_node_shards))
 
     def cov_enabled(self):
         cov_option = self._context.globals.get(self.COV_KEY, self.DEFAULT_COV_OPT)
@@ -5718,19 +5802,17 @@ class RedpandaService(Service, RedpandaServiceABC):
         if nodes is None:
             nodes = self.nodes
 
-        for node in nodes:
+        def search_node(node: ClusterNode) -> bool:
             exit_status = node.account.ssh(
                 f'grep "{pattern}" {RedpandaService.STDOUT_STDERR_CAPTURE}',
                 allow_fail=True,
             )
-
-            # Match not found
             if exit_status != 0:
                 self.logger.debug(f"Did not find {pattern} on node {node.name}")
                 return False
+            return True
 
-        # Fall through, match on all nodes
-        return True
+        return all(self.for_nodes(nodes, search_node))
 
     def wait_for_controller_snapshot(
         self,
@@ -6182,20 +6264,22 @@ class RedpandaService(Service, RedpandaServiceABC):
         """
         tmp_file = "/tmp/failure_injection_config.json"
         finject_cfg.write_to_file(tmp_file)
-        for node in nodes:
+
+        def setup_node(node: ClusterNode) -> None:
             node.account.mkdirs(
                 os.path.dirname(RedpandaService.FAILURE_INJECTION_CONFIG_PATH)
             )
             node.account.copy_to(
                 tmp_file, RedpandaService.FAILURE_INJECTION_CONFIG_PATH
             )
-
             self._extra_node_conf[node].update(
                 {
                     "storage_failure_injection_enabled": enabled,
                     "storage_failure_injection_config_path": RedpandaService.FAILURE_INJECTION_CONFIG_PATH,
                 }
             )
+
+        self.for_nodes(nodes, setup_node)
 
         # Disable segment size jitter in order to get more deterministic
         # failure injection.
@@ -6227,20 +6311,23 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         Any test that intentionally
         """
-        max_length = None
-        for node in self.started_nodes():
+
+        def get_node_length(node: ClusterNode) -> int | None:
             try:
                 status = self._admin.get_controller_status(node=node)
-                node_length = status["committed_index"] - max(
-                    0, status["start_offset"] - 1
-                )
+                return status["committed_index"] - max(0, status["start_offset"] - 1)
             except Exception as e:
                 self.logger.warning(
                     f"Failed to read controller status from {node.name}: {e}"
                 )
-            else:
-                if max_length is None or node_length > max_length:
-                    max_length = node_length
+                return None
+
+        lengths = [
+            l
+            for l in self.for_nodes(list(self.started_nodes()), get_node_length)
+            if l is not None
+        ]
+        max_length = max(lengths) if lengths else None
 
         if max_length is None:
             self.logger.warning(

@@ -17,6 +17,7 @@
 #include "pandaproxy/schema_registry/test/compatibility_common.h"
 #include "pandaproxy/schema_registry/test/store_fixture.h"
 #include "pandaproxy/schema_registry/types.h"
+#include "test_utils/test_env.h"
 
 #include <seastar/core/sstring.hh>
 #include <seastar/testing/thread_test_case.hh>
@@ -46,10 +47,14 @@ pps::compatibility_result check_compatible_verbose(
     pps::sharded_store s;
     return check_compatible(
       pps::make_json_schema_definition(
-        s, {pps::subject("r"), {r.shared_raw(), pps::schema_type::json}})
+        s,
+        {pps::context_subject::unqualified("r"),
+         {r.shared_raw(), pps::schema_type::json}})
         .get(),
       pps::make_json_schema_definition(
-        s, {pps::subject("w"), {w.shared_raw(), pps::schema_type::json}})
+        s,
+        {pps::context_subject::unqualified("w"),
+         {w.shared_raw(), pps::schema_type::json}})
         .get(),
       pps::verbose::yes);
 }
@@ -183,7 +188,8 @@ SEASTAR_THREAD_TEST_CASE(test_make_invalid_json_schema) {
             try {
                 pps::make_canonical_json_schema(
                   f.store(),
-                  {pps::subject{"test"}, {data.def, pps::schema_type::json}})
+                  {pps::context_subject::unqualified("test"),
+                   {data.def, pps::schema_type::json}})
                   .get();
                 BOOST_CHECK_MESSAGE(
                   false, "terminated without an exception for invalid schema");
@@ -281,7 +287,8 @@ SEASTAR_THREAD_TEST_CASE(test_make_valid_json_schema) {
                   f.store(),
                   pps::make_canonical_json_schema(
                     f.store(),
-                    {pps::subject{"test"}, {data, pps::schema_type::json}})
+                    {pps::context_subject::unqualified("test"),
+                     {data, pps::schema_type::json}})
                     .get())
                   .get();
             } catch (...) {
@@ -303,7 +310,7 @@ struct test_references_data {
 };
 
 const auto referenced = pps::subject_schema{
-  pps::subject{"referenced"},
+  pps::context_subject::unqualified("referenced"),
   pps::schema_definition{
     R"({
   "description": "A base schema that defines a number",
@@ -319,7 +326,7 @@ const auto referenced = pps::subject_schema{
     {}}};
 
 const auto referencer = pps::subject_schema{
-  pps::subject{"referencer"},
+  pps::context_subject::unqualified("referencer"),
   pps::schema_definition{
     R"({
   "description": "A schema that references the base schema",
@@ -333,7 +340,7 @@ const auto referencer = pps::subject_schema{
     pps::schema_type::json,
     {pps::schema_reference{
       .name = "example.com/referenced.json",
-      .sub{referenced.sub()},
+      .sub = pps::context_subject_reference::unqualified("referenced"),
       .version = pps::schema_version{1}}},
     {}}};
 
@@ -344,7 +351,7 @@ const auto referencer_wrong_sub = pps::subject_schema{
     referencer.def().type(),
     {pps::schema_reference{
       .name = "example.com/referenced.json",
-      .sub{"wrong_sub"},
+      .sub = pps::context_subject_reference::unqualified("wrong_sub"),
       .version = pps::schema_version{1}}},
     {}}};
 
@@ -1660,7 +1667,7 @@ static const auto compatibility_test_cases = std::to_array<compatibility_test_ca
     .compat_result = {{"#/properties/a/exclusiveMinimum", incompat_t::exclusive_minimum_added}},
   },
   {
-// simple infinite recursive ref
+// simple infinite recursive ref - cycle detection handles this case
     .reader_schema = R"(
 {
   "type": "object",
@@ -1685,7 +1692,7 @@ static const auto compatibility_test_cases = std::to_array<compatibility_test_ca
   }
 })",
     .compat_result = {},
-    .expected_exception = true,
+    .expected_exception = false,
   },
   {
 // simple multiple recursive ref
@@ -2189,7 +2196,8 @@ SEASTAR_THREAD_TEST_CASE(test_compatibility_check) {
                  f.store(),
                  pps::make_canonical_json_schema(
                    f.store(),
-                   {pps::subject{"test"}, {schema, pps::schema_type::json}})
+                   {pps::context_subject::unqualified("test"),
+                    {schema, pps::schema_type::json}})
                    .get())
           .get();
     };
@@ -2337,6 +2345,69 @@ SEASTAR_THREAD_TEST_CASE(test_json_compat_messages) {
     }
 }
 
+namespace {
+
+// Generate a deeply nested JSON schema with the specified depth.
+// Each level wraps the previous in an object property, creating a schema
+// like:
+// {"type":"object","properties":{"p":{"type":"object","properties":{...}}}}
+ss::sstring generate_deeply_nested_schema(int depth) {
+    if (depth <= 0) {
+        return R"({"type": "string"})";
+    }
+    ss::sstring result = R"({"type": "string"})";
+    for (int i = 0; i < depth; ++i) {
+        result = fmt::format(
+          R"({{"type":"object","properties":{{"p":{}}}}})", result);
+    }
+    return result;
+}
+
+} // namespace
+
+// Test that compatibility checking can handle deeply nested schemas without
+// stack overflow.
+SEASTAR_THREAD_TEST_CASE(test_object_recursion_depths) {
+    store_fixture f;
+    auto make_json_schema = [&](std::string_view schema) {
+        return pps::make_json_schema_definition(
+                 f.store(),
+                 pps::make_canonical_json_schema(
+                   f.store(),
+                   {pps::context_subject::unqualified("test"),
+                    {schema, pps::schema_type::json}})
+                   .get())
+          .get();
+    };
+
+    // Test increasing depths to find stack limits.
+    // Note: jsoncons validation overflows the stack at about 31.
+    // With validation disabled, setting the limit above ~130 causes corruption
+    // of the heap due to stack overflow, which typically manifests as a crash
+    // during Seastar shutdown, or during is_superset.
+    const int max_test_depth = test_env::is_on_ci() ? 30 : 17;
+
+    for (int depth = 1; depth <= max_test_depth; ++depth) {
+        BOOST_TEST_MESSAGE(fmt::format("Testing depth {}", depth));
+        try {
+            auto schema = generate_deeply_nested_schema(depth);
+            auto json_schema = make_json_schema(schema);
+
+            auto result = pps::check_compatible(
+              json_schema, json_schema, pps::verbose::yes);
+
+            BOOST_CHECK_MESSAGE(
+              result.is_compat,
+              fmt::format(
+                "Schema at depth {} should be compatible with itself", depth));
+        } catch (const std::exception& e) {
+            BOOST_TEST_MESSAGE(
+              fmt::format("Depth {} failed: {}", depth, e.what()));
+            break;
+        }
+    }
+}
+
 SEASTAR_THREAD_TEST_CASE(test_refs_fixing) {
     // test that look check that in the in-memory representation of a schema,
     // the refs are absolute
@@ -2405,7 +2476,7 @@ SEASTAR_THREAD_TEST_CASE(test_refs_fixing) {
           f.store(),
           pps::make_canonical_json_schema(
             f.store(),
-            {pps::subject{"test"},
+            {pps::context_subject::unqualified("test"),
              {fmt::format("{}", jsoncons::print(input_schema)),
               pps::schema_type::json}})
             .get())

@@ -133,18 +133,21 @@ compaction_source::compaction_source(
   const chunked_vector<offset_interval_set::interval>& dirty_range_intervals,
   const offset_interval_set& removable_tombstone_ranges,
   kafka::offset start_offset,
+  kafka::offset max_compactible_offset,
   compaction::key_offset_map* map,
   std::chrono::milliseconds min_compaction_lag_ms,
   metastore* metastore,
   io* io,
   ss::abort_source& as,
   compaction_job_state& state,
-  compaction_worker_probe& probe)
+  compaction_worker_probe& probe,
+  level_one_reader_probe* level_one_reader_probe)
   : _ntp(std::move(ntp))
   , _tp(tp)
   , _dirty_range_intervals(dirty_range_intervals)
   , _removable_tombstone_ranges(removable_tombstone_ranges)
   , _start_offset(start_offset)
+  , _max_compactible_offset(max_compactible_offset)
   , _dirty_range_it(_dirty_range_intervals.crbegin())
   , _extent_reader(
       metastore,
@@ -160,7 +163,8 @@ compaction_source::compaction_source(
   , _io(io)
   , _as(as)
   , _state(state)
-  , _probe(probe) {}
+  , _probe(probe)
+  , _l1_reader_probe(level_one_reader_probe) {}
 
 ss::future<> compaction_source::initialize() { co_return; }
 
@@ -208,7 +212,7 @@ ss::future<ss::stop_iteration> compaction_source::map_building_iteration() {
         cloud_topic_log_reader_config config(start_offset, max_offset, _as);
         auto rdr = model::record_batch_reader(
           std::make_unique<level_one_log_reader_impl>(
-            config, _ntp, _tp, _metastore, _io));
+            config, _ntp, _tp, _metastore, _io, _l1_reader_probe));
 
         auto res = co_await std::move(rdr).consume(
           map_building_reducer(*_map, start_offset), model::no_timeout);
@@ -265,13 +269,19 @@ ss::future<ss::stop_iteration> compaction_source::deduplication_iteration(
 
     auto extent = std::move(extent_res).value();
 
+    if (extent.last_offset > _max_compactible_offset) {
+        // We have iterated to an extent we cannot compact, stop compaction
+        // here.
+        co_return ss::stop_iteration::yes;
+    }
+
     if (should_compact_extent(extent, _min_compaction_lag_ms)) {
         kafka::offset start_offset{extent.base_offset};
         kafka::offset last_offset{extent.last_offset};
         cloud_topic_log_reader_config config(start_offset, last_offset, _as);
         auto rdr = model::record_batch_reader(
           std::make_unique<level_one_log_reader_impl>(
-            config, _ntp, _tp, _metastore, _io));
+            config, _ntp, _tp, _metastore, _io, _l1_reader_probe));
 
         co_await ct_sink.prepare_iteration(start_offset);
         auto stats = co_await rdr.consume(

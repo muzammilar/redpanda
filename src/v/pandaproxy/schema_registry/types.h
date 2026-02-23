@@ -14,6 +14,7 @@
 #include "absl/container/btree_map.h"
 #include "base/outcome.h"
 #include "base/seastarx.h"
+#include "config/startup_config.h"
 #include "container/chunked_vector.h"
 #include "kafka/protocol/errors.h"
 #include "model/fundamental.h"
@@ -38,6 +39,7 @@ using default_to_global = ss::bool_class<struct default_to_global_tag>;
 using force = ss::bool_class<struct force_tag>;
 using normalize = ss::bool_class<struct normalize_tag>;
 using verbose = ss::bool_class<struct verbose_tag>;
+using is_qualified = ss::bool_class<struct is_qualified_tag>;
 
 template<typename E>
 std::enable_if_t<std::is_enum_v<E>, std::optional<E>>
@@ -122,6 +124,31 @@ from_string_view<output_format>(std::string_view sv) {
 
 std::ostream& operator<<(std::ostream& os, const output_format& of);
 
+enum class reference_format { none = 0, qualified };
+
+constexpr std::string_view to_string_view(reference_format rf) {
+    switch (rf) {
+    case reference_format::qualified:
+        return "qualified";
+    case reference_format::none:
+        break;
+    }
+    return "";
+}
+
+template<>
+inline std::optional<reference_format>
+from_string_view<reference_format>(std::string_view sv) {
+    return string_switch<std::optional<reference_format>>(sv)
+      .match(to_string_view(reference_format::none), reference_format::none)
+      .match(
+        to_string_view(reference_format::qualified),
+        reference_format::qualified)
+      .default_match(std::nullopt);
+}
+
+std::ostream& operator<<(std::ostream& os, const reference_format& rf);
+
 ///\brief Type representing a global resource for ACLs.
 using registry_resource = named_type<ss::sstring, struct registry_resource_tag>;
 
@@ -129,13 +156,16 @@ using registry_resource = named_type<ss::sstring, struct registry_resource_tag>;
 ///
 /// Typically it will be "<topic>-key" or "<topic>-value".
 using subject = named_type<ss::sstring, struct subject_tag>;
-inline const subject invalid_subject{};
 
 /// \brief A schema context, used for namespacing schemas and schema ids. Can be
 /// used to implement multi-tenancy, environment (e.g., dev, staging, prod)
 /// separation, and so on. By default, schemas are stored under the "." context.
 using context = named_type<ss::sstring, struct context_tag>;
 inline const context default_context{"."};
+
+/// Whether qualified subject parsing is enabled. Captured at SR startup.
+using enable_qualified_subjects
+  = config::startup_config<bool, struct enable_qualified_subjects_tag>;
 
 // A subject bound to a context
 struct context_subject {
@@ -144,18 +174,6 @@ struct context_subject {
     context_subject(context c, subject s)
       : ctx{std::move(c)}
       , sub{std::move(s)} {}
-
-    // TODO: remove this, it is only for gradual commit-by-commit source code
-    // migration
-    context_subject(subject sub)
-      : ctx{default_context}
-      , sub{std::move(sub)} {}
-
-    // TODO: remove this, it is only for gradual commit-by-commit source code
-    // migration
-    context_subject(ss::sstring sub)
-      : ctx{default_context}
-      , sub{std::move(sub)} {}
 
     friend auto
     operator<=>(const context_subject& lhs, const context_subject& rhs)
@@ -168,22 +186,12 @@ struct context_subject {
 
     /// Parse from qualified subject ":.context:subject" or unqualified
     /// "subject" (which uses the default context)
-    static context_subject from_string(std::string_view input) {
-        // Check for qualified syntax: starts with ":."
-        if (input.starts_with(":.")) {
-            // Find the second colon that separates context from subject
-            auto second_colon = input.find(':', 2);
+    static context_subject from_string(std::string_view input);
 
-            if (second_colon != std::string_view::npos) {
-                auto ctx_str = input.substr(1, second_colon - 1);
-                auto sub_str = input.substr(second_colon + 1);
-
-                return context_subject{context{ctx_str}, subject{sub_str}};
-            }
-        }
-
-        // Default case: unqualified subject or invalid qualified syntax
-        return context_subject{default_context, subject{input}};
+    /// Helper for testing to create a simple unqualified subject in the default
+    /// context
+    static context_subject unqualified(std::string_view input) {
+        return {default_context, subject{input}};
     }
 
     /// Format as qualified subject ":.context:subject" or "subject" if in the
@@ -197,12 +205,72 @@ struct context_subject {
         return fmt::format_to(it, ":{}:{}", ctx, sub);
     }
 
-    bool starts_with(const ss::sstring& prefix) const {
+    bool starts_with(std::string_view prefix) const {
         return to_string().starts_with(prefix);
+    }
+
+    /// Returns the qualified subject string for ACL authorization.
+    ss::sstring operator()() const { return to_string(); }
+
+    /// Returns true if this represents a context-only identifier (empty
+    /// subject). Used to distinguish context-level operations (like setting
+    /// context-wide mode/config) from subject-level operations.
+    bool is_context_only() const { return sub().empty(); }
+
+    /// Retrurns true if this represents the default context with an empty
+    /// subject.
+    bool is_default_context() const {
+        return is_context_only() && ctx == default_context;
     }
 
     context ctx;
     subject sub;
+};
+
+inline const context_subject invalid_subject{default_context, subject{""}};
+
+/// A reference subject that may be qualified or unqualified.
+/// Unqualified references are resolved relative to a parent schema's context.
+struct context_subject_reference {
+    /// Parse from a string while detecting qualification status
+    static context_subject_reference from_string(std::string_view input);
+
+    /// Helper for testing to create a simple unqualified reference
+    static context_subject_reference unqualified(std::string_view input) {
+        return context_subject_reference{
+          context_subject{default_context, subject{ss::sstring(input)}},
+          is_qualified::no};
+    }
+
+    /// Resolve relative to a parent context.
+    /// - If qualified: returns sub as-is
+    /// - If unqualified: returns context_subject{parent_ctx, sub.sub}
+    context_subject resolve(const context& parent_ctx) const;
+
+    /// Serialize back to original form (qualified or unqualified)
+    ss::sstring to_string() const;
+
+    fmt::iterator format_to(fmt::iterator it) const;
+
+    friend bool operator==(
+      const context_subject_reference& lhs,
+      const context_subject_reference& rhs)
+      = default;
+
+    /// Comparison is done by string representation for compatibility with the
+    /// reference implementation where normalization sorts references by string.
+    friend auto operator<=>(
+      const context_subject_reference& lhs,
+      const context_subject_reference& rhs) {
+        return lhs.to_string() <=> rhs.to_string();
+    }
+
+    /// The subject as parsed
+    context_subject sub{invalid_subject};
+
+    /// True if the original string was qualified (e.g., ":.:subject" instead of
+    /// "subject")
+    is_qualified qualified{false};
 };
 
 ///\brief The version of the schema registered with a subject.
@@ -224,7 +292,7 @@ struct schema_reference {
     operator<(const schema_reference& lhs, const schema_reference& rhs);
 
     ss::sstring name;
-    subject sub{invalid_subject};
+    context_subject_reference sub{invalid_subject, is_qualified::no};
     schema_version version{invalid_schema_version};
 };
 
@@ -418,8 +486,6 @@ public:
         return {raw(), type(), refs().copy(), meta()};
     }
 
-    ss::sstring name() const;
-
     // retrieve "title" property from the schema, used to form the record name
     std::optional<ss::sstring> title() const;
 
@@ -494,12 +560,6 @@ inline constexpr schema_id invalid_schema_id{-1};
 
 // A schema id that is valid within a context.
 struct context_schema_id {
-    // TODO: remove this, it is only for gradual commit-by-commit source code
-    // migration
-    context_schema_id(schema_id id)
-      : ctx{default_context}
-      , id{id} {}
-
     context_schema_id(context c, schema_id s)
       : ctx{std::move(c)}
       , id{s} {}
@@ -518,10 +578,10 @@ struct context_schema_id {
 };
 
 struct subject_version {
-    subject_version(subject s, schema_version v)
+    subject_version(context_subject s, schema_version v)
       : sub{std::move(s)}
       , version{v} {}
-    subject sub;
+    context_subject sub;
     schema_version version;
 };
 
@@ -572,7 +632,7 @@ class subject_schema {
 public:
     subject_schema() = default;
 
-    subject_schema(subject sub, schema_definition def)
+    subject_schema(context_subject sub, schema_definition def)
       : _sub{std::move(sub)}
       , _def{std::move(def)} {}
 
@@ -582,7 +642,7 @@ public:
     friend std::ostream&
     operator<<(std::ostream& os, const subject_schema& schema);
 
-    const subject& sub() const { return _sub; }
+    const context_subject& sub() const { return _sub; }
     schema_type type() const { return _def.type(); }
     const schema_definition& def() const { return _def; }
 
@@ -590,11 +650,11 @@ public:
     subject_schema copy() const { return {sub(), def().copy()}; }
 
     auto destructure() && {
-        return make_tuple(std::move(_sub), std::move(_def));
+        return std::make_tuple(std::move(_sub), std::move(_def));
     }
 
 private:
-    subject _sub{invalid_subject};
+    context_subject _sub{invalid_subject};
     schema_definition _def{"", schema_type::avro, {}, {}};
 };
 
@@ -608,18 +668,19 @@ struct stored_schema {
     stored_schema share() const {
         return {schema.share(), version, id, deleted};
     }
+    context_schema_id context_id() const { return {schema.sub().ctx, id}; }
 };
 
 ///\brief A mapping of version and schema id for a subject.
 struct subject_version_entry {
     subject_version_entry(
-      schema_version version, context_schema_id id, is_deleted deleted)
+      schema_version version, schema_id id, is_deleted deleted)
       : version{version}
-      , id{std::move(id)}
+      , id{id}
       , deleted(deleted) {}
 
     schema_version version;
-    context_schema_id id;
+    schema_id id;
     is_deleted deleted{is_deleted::no};
 };
 

@@ -25,6 +25,18 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "test_fixture_cfg",
+    hdrs = [
+        "test_fixture_cfg.h",
+    ],
+    visibility = [
+        "//src/v/cloud_topics/tests:__pkg__",
+        "//src/v/redpanda:__pkg__",
+        "//src/v/redpanda/tests:__pkg__",
+    ],
+)
+
+redpanda_cc_library(
     name = "types",
     srcs = [
         "types.cc",
@@ -79,10 +91,15 @@ redpanda_cc_library(
     implementation_deps = [
         ":cluster_services_interface",
         ":data_plane_impl",
+        ":logger",
+        ":topic_manifest_upload_manager",
         "//src/v/cloud_topics/housekeeper:manager",
+        "//src/v/cloud_topics/level_one/metastore:flush_loop",
         "//src/v/cloud_topics/level_one/metastore:topic_purger",
         "//src/v/cloud_topics/level_zero/gc:level_zero_gc",
         "//src/v/cloud_topics/manager",
+        "//src/v/ssx:future_util",
+        "//src/v/utils:directory_walker",
     ],
     visibility = [
         "//src/v/cloud_topics/frontend:__pkg__",
@@ -102,14 +119,17 @@ redpanda_cc_library(
         "//src/v/cloud_topics/level_one/common:file_io",
         "//src/v/cloud_topics/level_one/compaction:scheduler",
         "//src/v/cloud_topics/level_one/domain:domain_supervisor",
+        "//src/v/cloud_topics/level_one/frontend_reader:level_one_reader_probe",
         "//src/v/cloud_topics/level_one/metastore:leader_router",
         "//src/v/cloud_topics/level_one/metastore:replicated_metastore",
+        "//src/v/cloud_topics/level_zero/cluster_services_impl",
         "//src/v/cloud_topics/level_zero/common:extent_meta",
         "//src/v/cloud_topics/reconciler",
         "//src/v/cluster",
         "//src/v/config",
         "//src/v/container:chunked_vector",
         "//src/v/model",
+        "//src/v/resource_mgmt:cpu_scheduling",
         "//src/v/ssx:sharded_service_container",
         "//src/v/storage",
         "@seastar",
@@ -169,7 +189,9 @@ redpanda_cc_library(
     deps = [
         ":cluster_services_interface",
         ":types",
+        "//src/v/base",
         "//src/v/cloud_storage_clients",
+        "//src/v/container:chunked_vector",
         "//src/v/ssx:sformat",
         "//src/v/utils:uuid",
         "@fmt",
@@ -183,6 +205,7 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/v/cloud_topics/level_one/frontend_reader:level_one_reader_probe",
     ],
 )
 
@@ -223,5 +246,54 @@ redpanda_cc_library(
         "//src/v/base",
         "//src/v/model",
         "//src/v/utils:to_string",
+    ],
+)
+
+redpanda_cc_library(
+    name = "topic_manifest_uploader",
+    srcs = [
+        "topic_manifest_uploader.cc",
+    ],
+    hdrs = [
+        "topic_manifest_uploader.h",
+    ],
+    deps = [
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage:topic_manifest_state",
+        "//src/v/cloud_storage:topic_path_provider",
+        "//src/v/cloud_storage_clients",
+        "//src/v/cluster:topic_configuration",
+        "//src/v/model",
+        "//src/v/serde",
+        "//src/v/ssx:future_util",
+        "//src/v/utils:detailed_error",
+        "//src/v/utils:retry_chain_node",
+        "@fmt",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "topic_manifest_upload_manager",
+    srcs = [
+        "topic_manifest_upload_manager.cc",
+    ],
+    hdrs = [
+        "topic_manifest_upload_manager.h",
+    ],
+    implementation_deps = [
+        ":topic_manifest_uploader",
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage:topic_path_provider",
+        "//src/v/cluster",
+        "//src/v/utils:retry_chain_node",
+    ],
+    deps = [
+        ":logger",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/model",
+        "//src/v/ssx:actor",
+        "//src/v/ssx:work_queue",
+        "@seastar",
     ],
 )

@@ -35,7 +35,7 @@
 
 namespace pps = pandaproxy::schema_registry;
 
-const pps::subject subject0{"subject0"};
+const auto subject0 = pps::context_subject::unqualified("subject0");
 constexpr pps::topic_key_magic magic0{0};
 constexpr pps::topic_key_magic magic1{1};
 constexpr pps::topic_key_magic magic2{2};
@@ -56,7 +56,7 @@ const pps::schema_definition int_def0{
     {R"({"type": "int"})", pps::schema_type::avro})
     .value()};
 
-inline model::record_batch make_delete_subject_batch(pps::subject sub) {
+inline model::record_batch make_delete_subject_batch(pps::context_subject sub) {
     storage::record_batch_builder rb{
       model::record_batch_type::raft_data, model::offset{0}};
 
@@ -69,7 +69,8 @@ inline model::record_batch make_delete_subject_batch(pps::subject sub) {
 }
 
 inline model::record_batch make_delete_subject_permanently_batch(
-  pps::subject sub, const chunked_vector<pps::schema_version>& versions) {
+  pps::context_subject sub,
+  const chunked_vector<pps::schema_version>& versions) {
     storage::record_batch_builder rb{
       model::record_batch_type::raft_data, model::offset{0}};
 
@@ -87,6 +88,10 @@ inline model::record_batch make_delete_subject_permanently_batch(
 }
 
 SEASTAR_THREAD_TEST_CASE(test_consume_to_store) {
+    pps::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { pps::enable_qualified_subjects::reset_local(); });
+
     pps::sharded_store s;
     s.start(pps::is_mutable::yes, ss::default_smp_service_group()).get();
     auto stop_store = ss::defer([&s]() { s.stop().get(); });
@@ -209,6 +214,10 @@ model::record_batch as_record_batch(Key key) {
 }
 
 SEASTAR_THREAD_TEST_CASE(test_consume_to_store_after_compaction) {
+    pps::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { pps::enable_qualified_subjects::reset_local(); });
+
     pps::sharded_store s;
     s.start(pps::is_mutable::no, ss::default_smp_service_group()).get();
     auto stop_store = ss::defer([&s]() { s.stop().get(); });
@@ -265,6 +274,10 @@ SEASTAR_THREAD_TEST_CASE(test_consume_to_store_after_compaction) {
 }
 
 SEASTAR_THREAD_TEST_CASE(test_writes_disabled) {
+    pps::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { pps::enable_qualified_subjects::reset_local(); });
+
     pps::sharded_store s;
     s.start(pps::is_mutable::no, ss::default_smp_service_group()).get();
     auto stop_store = ss::defer([&s]() { s.stop().get(); });
@@ -296,7 +309,10 @@ SEASTAR_THREAD_TEST_CASE(test_writes_disabled) {
 
     BOOST_REQUIRE_EXCEPTION(
       seq.local()
-        .write_mode(std::nullopt, pps::mode::read_only, pps::force::no)
+        .write_mode(
+          pps::context_subject{pps::default_context, pps::subject{""}},
+          pps::mode::read_only,
+          pps::force::no)
         .get(),
       pps::exception,
       [](pps::exception e) {

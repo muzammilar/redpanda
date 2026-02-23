@@ -328,14 +328,13 @@ model::offset partition::next_cloud_offset() const {
     return kafka::offset_cast(_cloud_storage_partition->next_kafka_offset());
 }
 
-ss::future<storage::translating_reader> partition::make_cloud_reader(
-  cloud_storage::cloud_log_reader_config config,
-  std::optional<model::timeout_clock::time_point> deadline) {
+ss::future<storage::translating_reader>
+partition::make_cloud_reader(cloud_storage::cloud_log_reader_config config) {
     vassert(
       cloud_data_available(),
       "Method can only be called if cloud data is available, ntp: {}",
       _raft->ntp());
-    return _cloud_storage_partition->make_reader(config, deadline);
+    return _cloud_storage_partition->make_reader(config);
 }
 
 ss::future<result<kafka_result>> partition::replicate(
@@ -841,30 +840,28 @@ uint64_t partition::non_log_disk_size_bytes() const {
     return raft_size + stm_local_size;
 }
 
-ss::future<> partition::update_configuration(topic_properties properties) {
+ss::future<> partition::update_configuration(topic_properties new_properties) {
     auto& old_ntp_config = _raft->log()->config();
-    auto new_ntp_config = properties.get_ntp_cfg_overrides();
+    auto new_overrides = new_properties.get_ntp_cfg_overrides();
 
     // Before applying change, consider whether it changes cloud storage
     // mode
     bool cloud_storage_changed = false;
 
     bool old_archival = old_ntp_config.is_archival_enabled();
-    bool new_archival = new_ntp_config.shadow_indexing_mode
-                        && model::is_archival_enabled(
-                          new_ntp_config.shadow_indexing_mode.value());
+    bool new_archival = new_properties.is_archival_enabled();
 
     auto old_retention_ms = old_ntp_config.has_overrides()
                               ? old_ntp_config.get_overrides().retention_time
                               : tristate<std::chrono::milliseconds>(
                                   std::nullopt);
-    auto new_retention_ms = new_ntp_config.retention_time;
+    auto new_retention_ms = new_overrides.retention_time;
 
     auto old_retention_bytes
       = old_ntp_config.has_overrides()
           ? old_ntp_config.get_overrides().retention_bytes
           : tristate<size_t>(std::nullopt);
-    auto new_retention_bytes = new_ntp_config.retention_bytes;
+    auto new_retention_bytes = new_overrides.retention_bytes;
 
     if (old_archival != new_archival) {
         vlog(
@@ -892,7 +889,7 @@ ss::future<> partition::update_configuration(topic_properties properties) {
     }
 
     // Pass the configuration update into the storage layer
-    _raft->log()->set_overrides(new_ntp_config);
+    _raft->log()->set_overrides(new_overrides);
     bool compaction_changed = _raft->log()->notify_compaction_update();
     if (compaction_changed) {
         vlog(
@@ -904,7 +901,7 @@ ss::future<> partition::update_configuration(topic_properties properties) {
 
     // Update cached instance of topic properties
     if (_topic_cfg) {
-        _topic_cfg->properties = std::move(properties);
+        _topic_cfg->properties = std::move(new_properties);
     }
 
     // Pass the configuration update to the raft layer
@@ -1614,10 +1611,9 @@ partition::remote_partition() const {
     return _cloud_storage_partition;
 }
 
-ss::future<model::record_batch_reader> partition::make_local_reader(
-  storage::local_log_reader_config config,
-  std::optional<model::timeout_clock::time_point> debounce_deadline) {
-    return _raft->make_reader(std::move(config), debounce_deadline);
+ss::future<model::record_batch_reader>
+partition::make_local_reader(storage::local_log_reader_config config) {
+    return _raft->make_reader(config);
 }
 
 model::term_id partition::term() const { return _raft->term(); }
@@ -1748,7 +1744,8 @@ consensus_ptr partition::raft() const { return _raft; }
 
 ss::future<result<model::offset>> partition::set_writes_disabled(
   partition_properties_stm::writes_disabled disable,
-  model::timeout_clock::time_point deadline) {
+  model::timeout_clock::time_point deadline,
+  model::revision_id revision_id) {
     ss::rwlock::holder holder;
     auto lock_deadline = ss::semaphore::clock::now()
                          + ss::semaphore::clock::duration(
@@ -1776,7 +1773,7 @@ ss::future<result<model::offset>> partition::set_writes_disabled(
 
     auto method = disable ? &partition_properties_stm::disable_writes
                           : &partition_properties_stm::enable_writes;
-    co_return co_await (*_partition_properties_stm.*method)();
+    co_return co_await (*_partition_properties_stm.*method)(revision_id);
 }
 
 partition_flush_hook_id partition::register_flush_hook(flush_hook&& cb) {

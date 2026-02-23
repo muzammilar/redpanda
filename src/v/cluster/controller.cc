@@ -224,9 +224,10 @@ ss::future<> controller::wire_up() {
             }));
       })
       .then([this] {
-          return _tp_state.start(ss::sharded_parameter([this] {
-              return std::ref(_data_migrated_resources.local());
-          }));
+          return _tp_state.start(
+            ss::sharded_parameter(
+              [this] { return std::ref(_data_migrated_resources.local()); }),
+            config::node().node_id().value());
       })
       .then([this] {
           return _partition_balancer_state.start_single(
@@ -255,7 +256,8 @@ ss::future<> controller::start(
     offsets_recovery,
   std::chrono::milliseconds application_start_time,
   ss::sharded<std::unique_ptr<cluster::data_migrations::group_proxy>>&
-    data_migrations_group_proxy) {
+    data_migrations_group_proxy,
+  ss::sharded<cloud_topics::state_accessors>* ct_state) {
     /**
      * Switch to cluster scheduling group to ensure that all the controller
      * services are started within that scheduling group.
@@ -779,6 +781,7 @@ ss::future<> controller::start(
       std::ref(_config_frontend),
       std::ref(_feature_table),
       std::ref(_roles),
+      std::ref(_authorizer),
       std::addressof(_plugin_table),
       std::addressof(_feature_manager),
       std::addressof(_storage),
@@ -857,7 +860,8 @@ ss::future<> controller::start(
                 producer_id_recovery,
                 offsets_recovery,
                 std::ref(_recovery_table),
-                _raft0);
+                _raft0,
+                ct_state);
             if (!config::shard_local_cfg()
                    .disable_cluster_recovery_loop_for_tests()) {
                 _recovery_backend->start();
@@ -903,6 +907,24 @@ ss::future<> controller::set_ready() {
     }
     _is_ready = true;
     return _raft_manager.invoke_on_all(&raft::group_manager::set_ready);
+}
+
+metrics_reporter::metrics_contributor_id
+controller::register_metrics_contributor(
+  metrics_reporter::metrics_contributor_fn fn) {
+    vassert(
+      ss::this_shard_id() == 0,
+      "Only shard 0 can register metrics contributors");
+    return _metrics_reporter.local().register_metrics_contributor(
+      std::move(fn));
+}
+
+void controller::unregister_metrics_contributor(
+  metrics_reporter::metrics_contributor_id id) {
+    vassert(
+      ss::this_shard_id() == 0,
+      "Only shard 0 can unregister metrics contributors");
+    _metrics_reporter.local().unregister_metrics_contributor(id);
 }
 
 ss::future<> controller::shutdown_input() {

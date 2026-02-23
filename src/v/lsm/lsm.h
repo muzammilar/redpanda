@@ -14,6 +14,7 @@
 #include "absl/time/time.h"
 #include "base/seastarx.h"
 #include "lsm/io/persistence.h"
+#include "ssx/time.h"
 #include "utils/named_type.h"
 
 #include <seastar/core/future.hh>
@@ -175,7 +176,7 @@ public:
 
     // Flush existing buffered data such that that `max_persisted_offset()`
     // becomes >= the current `max_applied_offset()`.
-    ss::future<> flush();
+    ss::future<> flush(ssx::instant deadline);
 
     // Apply a batch of data atomically to the database.
     //
@@ -203,6 +204,15 @@ public:
     // tied to this database as well, meaning the write batch must not outlive
     // the database being closed.
     write_batch create_write_batch();
+
+    // Reload the manifest from disk, picking up changes made by other writers.
+    //
+    // Returns true if the manifest was updated, false if no change. Throws if
+    // the database is not read-only, or if the downloaded manifest would
+    // regress the file ID or sequence number.
+    //
+    // REQUIRES: Database must be opened in read-only mode.
+    ss::future<bool> refresh();
 
 private:
     std::unique_ptr<db::impl> _impl;
@@ -249,6 +259,10 @@ public:
     // until the iterator is moved.
     // REQUIRES: valid()
     std::string_view key();
+
+    // Return the sequence number for the current entry.
+    // REQUIRES: valid()
+    sequence_number seqno();
 
     // Return the value for the current entry.
     // REQUIRES: valid()

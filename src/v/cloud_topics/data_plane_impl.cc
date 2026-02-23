@@ -192,17 +192,41 @@ public:
         co_return std::move(res.value().results);
     }
 
-    void cache_put(const model::ntp& ntp, const model::record_batch& b) final {
-        _batch_cache.local().put(ntp, b);
+    void cache_put(
+      const model::topic_id_partition& tidp,
+      const model::record_batch& b) final {
+        _batch_cache.local().put(tidp, b);
     }
 
     std::optional<model::record_batch>
-    cache_get(const model::ntp& ntp, model::offset o) final {
-        return _batch_cache.local().get(ntp, o);
+    cache_get(const model::topic_id_partition& tidp, model::offset o) final {
+        return _batch_cache.local().get(tidp, o);
+    }
+
+    ss::future<> cache_wait(
+      const model::topic_id_partition& tidp,
+      model::offset offset,
+      model::offset last_known,
+      model::timeout_clock::time_point deadline,
+      std::optional<std::reference_wrapper<ss::abort_source>> as) final {
+        return _batch_cache.local().wait_for_offset(
+          tidp, offset, last_known, deadline, as);
     }
 
     size_t materialize_max_bytes() const final {
         return _read_pipeline.local().memory_quota_capacity();
+    }
+
+    ss::future<std::optional<cluster_epoch>>
+    get_current_epoch(ss::abort_source* as) noexcept final {
+        auto epoch_fut = co_await ss::coroutine::as_future(
+          _cluster_services.local().current_epoch(as));
+        if (epoch_fut.failed()) {
+            auto e = epoch_fut.get_exception();
+            vlog(_log.warn, "Failed to get cluster epoch: {}", e);
+            co_return std::nullopt;
+        }
+        co_return epoch_fut.get();
     }
 
 private:

@@ -13,7 +13,13 @@
 
 namespace pandaproxy::schema_registry {
 
-TEST(ContextSubjectTest, FromString) {
+class ContextSubjectTest : public ::testing::Test {
+protected:
+    void SetUp() override { enable_qualified_subjects::set_local(true); }
+    void TearDown() override { enable_qualified_subjects::reset_local(); }
+};
+
+TEST_F(ContextSubjectTest, FromString) {
     // Unqualified subjects use default context
     EXPECT_EQ(
       context_subject::from_string("my-topic"),
@@ -39,16 +45,18 @@ TEST(ContextSubjectTest, FromString) {
       context_subject::from_string(":.ctx:a:b:c"),
       (context_subject{context{".ctx"}, subject{"a:b:c"}}));
 
-    // Invalid qualified syntax falls back to unqualified
+    // Invalid qualified syntax (no dot after colon) falls back to unqualified
     EXPECT_EQ(
       context_subject::from_string(":no-dot"),
       (context_subject{default_context, subject{":no-dot"}}));
+
+    // Context-only form without trailing colon: ":.ctx" (empty subject)
     EXPECT_EQ(
       context_subject::from_string(":.no-second-colon"),
-      (context_subject{default_context, subject{":.no-second-colon"}}));
+      (context_subject{context{".no-second-colon"}, subject{""}}));
 }
 
-TEST(ContextSubjectTest, ToStringAndRoundTrip) {
+TEST_F(ContextSubjectTest, ToStringAndRoundTrip) {
     // Default context: just the subject
     auto unqualified = context_subject{default_context, subject{"my-topic"}};
     EXPECT_EQ(unqualified.to_string(), "my-topic");
@@ -64,6 +72,107 @@ TEST(ContextSubjectTest, ToStringAndRoundTrip) {
     auto ctx_only = context_subject{context{".my-ctx"}, subject{""}};
     EXPECT_EQ(ctx_only.to_string(), ":.my-ctx:");
     EXPECT_EQ(context_subject::from_string(ctx_only.to_string()), ctx_only);
+}
+
+TEST_F(ContextSubjectTest, FlagOffTreatsQualifiedAsLiteral) {
+    enable_qualified_subjects::reset_local();
+    enable_qualified_subjects::set_local(false);
+
+    auto ctx_sub = context_subject::from_string(":.myctx:my-topic");
+
+    // With flag off, the entire string is the subject in default context
+    EXPECT_EQ(ctx_sub.ctx, default_context);
+    EXPECT_EQ(ctx_sub.sub(), ":.myctx:my-topic");
+}
+
+TEST_F(ContextSubjectTest, FlagOnParsesQualifiedSyntax) {
+    auto ctx_sub = context_subject::from_string(":.myctx:my-topic");
+
+    // With flag on, qualified syntax is parsed
+    EXPECT_EQ(ctx_sub.ctx(), ".myctx");
+    EXPECT_EQ(ctx_sub.sub(), "my-topic");
+}
+
+TEST_F(ContextSubjectTest, FlagOnUnqualifiedUsesDefaultContext) {
+    auto ctx_sub = context_subject::from_string("plain-topic");
+
+    EXPECT_EQ(ctx_sub.ctx, default_context);
+    EXPECT_EQ(ctx_sub.sub(), "plain-topic");
+}
+
+TEST_F(ContextSubjectTest, FlagOffUnqualifiedUsesDefaultContext) {
+    enable_qualified_subjects::reset_local();
+    enable_qualified_subjects::set_local(false);
+
+    auto ctx_sub = context_subject::from_string("plain-topic");
+
+    EXPECT_EQ(ctx_sub.ctx, default_context);
+    EXPECT_EQ(ctx_sub.sub(), "plain-topic");
+}
+
+class ContextSubjectReferenceTest : public ::testing::Test {
+protected:
+    void SetUp() override { enable_qualified_subjects::set_local(true); }
+    void TearDown() override { enable_qualified_subjects::reset_local(); }
+};
+
+TEST_F(ContextSubjectReferenceTest, FromString) {
+    // Unqualified subjects: qualified=false
+    auto unqual = context_subject_reference::from_string("subject-for-C");
+    EXPECT_EQ(
+      unqual.sub, (context_subject{default_context, subject{"subject-for-C"}}));
+    EXPECT_FALSE(unqual.qualified);
+
+    // Qualified subjects: qualified=true
+    auto qual = context_subject_reference::from_string(":.ctx:subject-for-C");
+    EXPECT_EQ(
+      qual.sub, (context_subject{context{".ctx"}, subject{"subject-for-C"}}));
+    EXPECT_TRUE(qual.qualified);
+
+    // Explicit default context is still qualified
+    auto default_qual = context_subject_reference::from_string(
+      ":.:subject-for-C");
+    EXPECT_EQ(
+      default_qual.sub,
+      (context_subject{default_context, subject{"subject-for-C"}}));
+    EXPECT_TRUE(default_qual.qualified);
+
+    // Context-only form without second colon: :.something is qualified
+    auto ctx_only = context_subject_reference::from_string(":.something");
+    EXPECT_EQ(ctx_only.qualified, is_qualified::yes);
+    EXPECT_EQ(
+      ctx_only.sub, (context_subject{context{".something"}, subject{""}}));
+}
+
+TEST_F(ContextSubjectReferenceTest, Resolve) {
+    auto parent_ctx = context{".parent"};
+
+    // Unqualified: inherits parent's context
+    auto unqual = context_subject_reference::from_string("subject-for-C");
+    EXPECT_EQ(
+      unqual.resolve(parent_ctx),
+      (context_subject{parent_ctx, subject{"subject-for-C"}}));
+
+    // Qualified: keeps its own context
+    auto qual = context_subject_reference::from_string(":.other:subject-for-C");
+    EXPECT_EQ(
+      qual.resolve(parent_ctx),
+      (context_subject{context{".other"}, subject{"subject-for-C"}}));
+}
+
+TEST_F(ContextSubjectReferenceTest, ToStringRoundTrip) {
+    auto inputs = {
+      "simple-subject",
+      ":.:default-context-subject",
+      ":.ctx:qualified-subject",
+      ":.ctx-only:",
+    };
+    // Unqualified round-trip
+    for (const auto& input : inputs) {
+        SCOPED_TRACE(input);
+        auto got = context_subject_reference::from_string(input).to_string();
+        EXPECT_EQ(got, input);
+    }
 }
 
 } // namespace pandaproxy::schema_registry

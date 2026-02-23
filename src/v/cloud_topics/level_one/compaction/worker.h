@@ -15,10 +15,14 @@
 #include "cloud_topics/level_one/compaction/meta.h"
 #include "cloud_topics/level_one/compaction/source.h"
 #include "cloud_topics/level_one/compaction/worker_probe.h"
+#include "cloud_topics/level_one/frontend_reader/level_one_reader_probe.h"
 #include "cloud_topics/level_one/metastore/metastore.h"
 #include "cluster/metadata_cache.h"
 #include "compaction/key_offset_map.h"
+#include "config/property.h"
 #include "ssx/work_queue.h"
+
+#include <seastar/core/scheduling.hh>
 
 class WorkerManagerTestFixture;
 
@@ -43,7 +47,9 @@ public:
       io*,
       metastore*,
       compaction_committer*,
-      cluster::metadata_cache*);
+      cluster::metadata_cache*,
+      ss::scheduling_group,
+      level_one_reader_probe*);
 
     // Launches background loop.
     ss::future<> start();
@@ -174,8 +180,12 @@ private:
 
     ss::abort_source _as;
 
-    // Used to alert worker that a job has become available.
+    // Used to alert worker that a job has become available, or when
+    // `cloud_topics_compaction_interval_ms` config changes.
     ss::condition_variable _worker_cv;
+
+    // The interval on which the worker polls for new work.
+    config::binding<std::chrono::milliseconds> _poll_interval;
 
     // Owned by `scheduler`.
     worker_manager* _worker_manager;
@@ -191,7 +201,12 @@ private:
 
     cluster::metadata_cache* _metadata_cache;
 
+    ss::scheduling_group _compaction_sg;
+
     compaction_worker_probe _probe;
+
+    // Owned by `app`.
+    level_one_reader_probe* _l1_reader_probe;
 };
 
 } // namespace cloud_topics::l1

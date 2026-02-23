@@ -76,7 +76,7 @@ func exportConfig(
 		if len(commentTokens) > 0 {
 			commentDetails = fmt.Sprintf(" (%s)", strings.Join(commentTokens, ", "))
 		}
-		sb.WriteString(fmt.Sprintf("\n# %s%s\n", meta.Description, commentDetails))
+		fmt.Fprintf(&sb, "\n# %s%s\n", meta.Description, commentDetails)
 
 		// Compose a YAML representation of the property: this is
 		// done with simple prints rather than the yaml module, because
@@ -95,7 +95,7 @@ func exportConfig(
 					fmt.Fprintf(&sb, "%s: []", name)
 				}
 			default:
-				out.Die("Unexpected property value type: %s: %T", name, curValue)
+				out.Die("unexpected property value type: %s: %T", name, curValue)
 			}
 		} else {
 			scalarVal := ""
@@ -109,7 +109,7 @@ func exportConfig(
 			case nil:
 				// Leave scalarVal empty
 			default:
-				out.Die("Unexpected property value type: %s: %T", name, curValue)
+				out.Die("unexpected property value type: %s: %T", name, curValue)
 			}
 
 			if len(scalarVal) > 0 {

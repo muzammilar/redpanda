@@ -71,6 +71,20 @@ build --@seastar//:stack_guards=True
 # Debug mode by default. Disabled in release builds.
 build --@seastar//:debug=True
 
+# Protobuf 33.5 contains internal uses of deprecated APIs (specifically the
+# RepeatedPtrField constructor in map_field.h, deprecated in favor of
+# Arena::Create<RepeatedPtrField<...>>(Arena*)). Since this deprecation occurs
+# in third-party headers we cannot modify, we suppress the warning for internal
+# files that include protobuf-generated code. These warnings would otherwise be
+# treated as errors due to -Werror,-Wdeprecated-declarations.
+build --per_file_copt=src/v/serde/protobuf/tests/round_trip_test.cc@-Wno-deprecated-declarations
+build --per_file_copt=src/v/serde/protobuf/tests/parser_test.cc@-Wno-deprecated-declarations
+build --per_file_copt=src/v/iceberg/conversion/tests/iceberg_protobuf_tests.cc@-Wno-deprecated-declarations
+build --per_file_copt=src/v/pandaproxy/schema_registry/protobuf.cc@-Wno-deprecated-declarations
+# Suppress deprecated declarations in the protobuf external module itself
+build --per_file_copt=external/protobuf.*@-Wno-deprecated-declarations
+build --host_per_file_copt=external/protobuf.*@-Wno-deprecated-declarations
+
 # -base configs generally aren't meant to be used directly but are
 # helpers to DRY later user-facing configs
 
@@ -121,6 +135,19 @@ build:san-all  --//bazel:sanitizer_mode=all
 build:san-all     --copt=-fsanitize=address,undefined,vptr,function,alignment
 build:san-all  --linkopt=-fsanitize=address,undefined,vptr,function,alignment
 
+# LTO mixin: enable LTO for C++ and Rust. Usually mixed in with
+# PGO + release, but should work with any.
+build:lto --copt -flto=thin
+build:lto --linkopt -flto=thin
+build:lto --@rules_rust//rust/settings:lto=fat
+build:lto --@rules_rust//rust/settings:extra_rustc_flag=-Ccodegen-units=1
+# I've seen others claim these flags help with LTO and the final binary, but these also
+# require a specific version of clang and I don't really want to tie rustc version with
+# clang version.
+# build:lto --@rules_rust//rust/settings:extra_rustc_flag=-Clinker-plugin-lto
+# build:lto --@rules_rust//rust/settings:extra_rustc_flag=-Cembed-bitcode=yes
+# build:lto --@rules_rust//rust/settings:extra_rustc_flag=-Clink-arg=-fuse-ld=lld
+
 ################################################
 # PRIMARY BUILD MODES
 #
@@ -166,6 +193,20 @@ build:debugger --config=dbgsym-all
 # will be missing, etc).
 build:debug --config=debugger
 build:debug --copt=-O1
+
+# =================================
+# Fuzz
+# =================================
+# Fuzz configuration for running fuzz tests. It includes the coverage information
+# that libFuzzer needs to guide fuzzing. Fuzz tests still run without this, but
+# the state space will be poorly explored, you will see a message like:
+#
+# WARNING: no interesting inputs were found so far. Is the code instrumented for coverage?
+# This may also happen if the target rejected all inputs we tried so far
+#
+# https://llvm.org/docs/LibFuzzer.html
+build:fuzz --config=debug
+build:fuzz --copt=-fsanitize=fuzzer-no-link
 
 # =================================
 # ODR Finder
@@ -217,19 +258,8 @@ build:secure --config=relro
 # least --stamp=full and PGO-specific compile steps (outside of bazel).
 build:release --compilation_mode opt
 build:release --config=secure
-build:release --copt -mllvm --copt -inline-threshold=2500
 build:release --@seastar//:stack_guards=False --@seastar//:debug=False
-build:release --//src/v/redpanda:lto=True
-build:release --copt -flto=thin --copt -ffat-lto-objects
 build:release --copt -g --strip=never
-build:release --@rules_rust//rust/settings:lto=fat
-build:release --@rules_rust//rust/settings:extra_rustc_flag=-Ccodegen-units=1
-# I've seen others claim these flags help with LTO and the final binary, but these also
-# require a specific version of clang and I don't really want to tie rustc version with
-# clang version.
-# build:release --@rules_rust//rust/settings:extra_rustc_flag=-Clinker-plugin-lto
-# build:release --@rules_rust//rust/settings:extra_rustc_flag=-Cembed-bitcode=yes
-# build:release --@rules_rust//rust/settings:extra_rustc_flag=-Clink-arg=-fuse-ld=lld
 # For now, disable the hardened libc++ for release builds for maximum perf 🚀
 build:release --cxxopt=-U_LIBCPP_ASSERTION_SEMANTIC
 build:release --cxxopt=-U_LIBCPP_HARDENING_MODE
@@ -237,11 +267,10 @@ build:release --host_cxxopt=-U_LIBCPP_HARDENING_MODE
 build:release --cxxopt=-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE
 build:release --host_cxxopt=-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE
 
-# Separate PGO configs to be combined with release
 
 # Instrumentation/training step
 # Empty arg is intentional, we provide the path via env var at run time
-build:pgo-instrument --fdo_instrument=
+build:pgo-instrument --config=lto --fdo_instrument=
 
 # Final/Optimization build step
 
@@ -252,7 +281,7 @@ build:pgo-instrument --fdo_instrument=
 
 # bazel seems to pass -fprofile-correction unconditionally but that only exists
 # in gcc so need to make clang ignore it
-build:pgo-optimize --copt -Wno-ignored-optimization-argument
+build:pgo-optimize --config=lto --copt -Wno-ignored-optimization-argument
 
 
 build:stamp --stamp --workspace_status_command=./bazel/stamp_vars.sh

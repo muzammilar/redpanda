@@ -24,6 +24,8 @@ from ducktape.errors import TimeoutError
 from ducktape.mark import matrix
 from keycloak import KeycloakOpenID
 
+from rptest.clients.admin.proto.redpanda.core.admin.v2 import security_pb2
+from rptest.clients.admin.v2 import Admin as AdminV2
 from rptest.clients.default import DefaultClient
 from rptest.clients.kcl import KCL
 from rptest.clients.python_librdkafka import PythonLibrdkafka
@@ -2285,6 +2287,46 @@ class AuditLogTestOauth(AuditLogTestBase):
         )
 
     @staticmethod
+    def normalize_group_name(name: str) -> str:
+        """Normalize group name by stripping leading / prefix (Keycloak convention)"""
+        return name.lstrip("/") if name else name
+
+    @staticmethod
+    def oidc_authn_with_groups_filter_function(
+        service_name: str,
+        username: Optional[str],
+        sub: Optional[str],
+        expected_groups: list[str],
+        record,
+    ):
+        """Filter for OIDC authentication events that include IDP groups"""
+        if not (
+            record["class_uid"] == 3002
+            and record["service"]["name"] == service_name
+            and record["auth_protocol_id"] == 6
+            and (record["user"]["name"] == username if username is not None else True)
+            and (record["user"]["uid"] == sub if sub is not None else True)
+        ):
+            return False
+
+        # Check that groups are present and match expected
+        user_groups = record.get("user", {}).get("groups", [])
+        if not expected_groups:
+            return True
+
+        # Verify all expected groups are present with type "idp_group"
+        # Normalize group names to handle Keycloak's leading / prefix
+        for expected_group in expected_groups:
+            if not any(
+                g.get("type") == "idp_group"
+                and AuditLogTestOauth.normalize_group_name(g.get("name", ""))
+                == expected_group
+                for g in user_groups
+            ):
+                return False
+        return True
+
+    @staticmethod
     def oidc_metadata_filter_function(
         service_name: str, topic: str, username: str, role: Optional[str], record
     ):
@@ -2447,6 +2489,336 @@ class AuditLogTestOauth(AuditLogTestBase):
 
         assert len(records) == len(ip_set), (
             f"Expected one record but received {len(records)}"
+        )
+
+    @skip_fips_mode
+    @cluster(num_nodes=6)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_kafka_oauth_with_idp_groups(self, audit_transport_mode):
+        """
+        Validate that IDP groups from OIDC tokens are included in audit log
+        authentication messages for Kafka clients
+        """
+        kc_node = self.keycloak.nodes[0]
+        self.super_rpk.create_topic(self.example_topic)
+
+        # Create groups and group mapper in Keycloak
+        test_groups = ["developers", "admins"]
+        for group_name in test_groups:
+            self.keycloak.admin.create_group(group_name)
+
+        # Create group mapper to include groups in the token
+        self.keycloak.admin.create_group_mapper(self.client_id)
+
+        # Add service account to groups
+        for group_name in test_groups:
+            self.keycloak.admin.add_service_user_to_group(self.client_id, group_name)
+
+        service_user_id = self.keycloak.admin_ll.get_user_id(
+            f"service-account-{self.client_id}"
+        )
+
+        # Grant permissions to the service account
+        _ = self.super_rpk.sasl_allow_principal(
+            f"User:{service_user_id}",
+            ["all"],
+            "topic",
+            self.example_topic,
+            self.redpanda.SUPERUSER_CREDENTIALS[0],
+            self.redpanda.SUPERUSER_CREDENTIALS[1],
+            self.redpanda.SUPERUSER_CREDENTIALS[2],
+        )
+
+        cfg = self.keycloak.generate_oauth_config(kc_node, self.client_id)
+        assert cfg.client_secret is not None, "client_secret is None"
+        assert cfg.token_endpoint is not None, "token_endpoint is None"
+
+        k_client = PythonLibrdkafka(
+            self.redpanda, algorithm="OAUTHBEARER", oauth_config=cfg
+        )
+        producer = k_client.get_producer()
+        producer.poll(0.0)
+
+        expected_topics = set([self.example_topic])
+        wait_until(
+            lambda: set(producer.list_topics(timeout=5).topics.keys())
+            == expected_topics,
+            timeout_sec=5,
+        )
+
+        # Read audit log and verify groups are present
+        records = self.read_all_from_audit_log(
+            partial(
+                self.oidc_authn_with_groups_filter_function,
+                self.kafka_rpc_service_name,
+                service_user_id,
+                service_user_id,
+                test_groups,
+            ),
+            lambda records: self.aggregate_count(records) >= 1,
+        )
+
+        assert len(records) >= 1, (
+            f"Expected at least 1 record with IDP groups but received {len(records)}"
+        )
+
+        # Verify the groups in the record
+        for record in records:
+            user_groups = record.get("user", {}).get("groups", [])
+            self.logger.debug(f"Found groups in audit record: {user_groups}")
+            for expected_group in test_groups:
+                assert any(
+                    g.get("type") == "idp_group"
+                    and self.normalize_group_name(g.get("name", "")) == expected_group
+                    for g in user_groups
+                ), (
+                    f"Expected group '{expected_group}' with type 'idp_group' not found in {user_groups}"
+                )
+
+    @skip_fips_mode
+    @cluster(num_nodes=6)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_admin_oauth_with_idp_groups(self, audit_transport_mode):
+        """
+        Validate that IDP groups from OIDC tokens are included in audit log
+        authentication messages for Admin API requests
+        """
+        kc_node = self.keycloak.nodes[0]
+
+        # Create groups and group mapper in Keycloak
+        test_groups = ["ops-team", "platform-admins"]
+        for group_name in test_groups:
+            self.keycloak.admin.create_group(group_name)
+
+        # Create group mapper to include groups in the token
+        self.keycloak.admin.create_group_mapper(self.client_id)
+
+        # Add service account to groups
+        for group_name in test_groups:
+            self.keycloak.admin.add_service_user_to_group(self.client_id, group_name)
+
+        cfg = self.keycloak.generate_oauth_config(kc_node, self.client_id)
+        token_endpoint_url = urlparse(cfg.token_endpoint)
+        openid = KeycloakOpenID(
+            server_url=f"{token_endpoint_url.scheme}://{token_endpoint_url.netloc}",
+            client_id=cfg.client_id,
+            client_secret_key=cfg.client_secret,
+            realm_name=DEFAULT_REALM,
+            verify=True,
+        )
+        token = openid.token(grant_type="client_credentials")
+        userinfo = openid.userinfo(token["access_token"])
+
+        def check_cluster_status():
+            response = requests.get(
+                url=f"http://{self.redpanda.nodes[0].account.hostname}:9644/v1/status/ready",
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {token['access_token']}",
+                },
+                timeout=5,
+            )
+            return response.status_code == requests.codes.ok
+
+        wait_until(check_cluster_status, timeout_sec=5)
+
+        # Read audit log and verify groups are present
+        records = self.read_all_from_audit_log(
+            partial(
+                self.oidc_authn_with_groups_filter_function,
+                self.admin_audit_svc_name,
+                userinfo["sub"],
+                None,
+                test_groups,
+            ),
+            lambda records: self.aggregate_count(records) >= 1,
+        )
+
+        assert len(records) >= 1, (
+            f"Expected at least 1 record with IDP groups but received {len(records)}"
+        )
+
+        # Verify the groups in the record
+        for record in records:
+            user_groups = record.get("user", {}).get("groups", [])
+            self.logger.debug(f"Found groups in audit record: {user_groups}")
+            for expected_group in test_groups:
+                assert any(
+                    g.get("type") == "idp_group"
+                    and self.normalize_group_name(g.get("name", "")) == expected_group
+                    for g in user_groups
+                ), (
+                    f"Expected group '{expected_group}' with type 'idp_group' not found in {user_groups}"
+                )
+
+    @staticmethod
+    def oidc_authz_with_role_filter_function(
+        service_name: str,
+        username: Optional[str],
+        expected_role: str,
+        record,
+    ):
+        """Filter for authorization events that include a role"""
+        if not (
+            record["class_uid"] == 6003
+            and record["api"]["service"]["name"] == service_name
+            and (record["actor"]["user"]["name"] == username if username else True)
+        ):
+            return False
+
+        # Check that role is present in groups
+        user_groups = record.get("actor", {}).get("user", {}).get("groups", [])
+        if not user_groups:
+            return False
+
+        # Check for expected role
+        return any(
+            g.get("type") == "role" and g.get("name") == expected_role
+            for g in user_groups
+        )
+
+    @skip_fips_mode
+    @cluster(num_nodes=6)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_kafka_oauth_with_groups_and_role(self, audit_transport_mode):
+        """
+        Validate that the complete audit trail contains:
+        1. IDP groups from OIDC tokens (in authentication events)
+        2. Role assigned via group membership (in authorization events)
+
+        This test creates a Keycloak group, assigns it to a Redpanda role,
+        grants permissions to the role, and verifies that:
+        - Authentication events contain the IDP group
+        - Authorization events contain the role used for permission
+        """
+        self.modify_audit_event_types(["describe", "authenticate"])
+        kc_node = self.keycloak.nodes[0]
+        self.super_rpk.create_topic(self.example_topic)
+
+        # Create Keycloak group and group mapper
+        # use_full_path=False gives simple group names (e.g., "mygroup" instead of "/mygroup")
+        test_group = "audit-test-group"
+        self.keycloak.admin.create_group(test_group)
+        self.keycloak.admin.create_group_mapper(self.client_id, use_full_path=False)
+        self.keycloak.admin.add_service_user_to_group(self.client_id, test_group)
+
+        service_user_id = self.keycloak.admin_ll.get_user_id(
+            f"service-account-{self.client_id}"
+        )
+
+        # Create a role in Redpanda with the Keycloak group as a member
+        role_name = "audit-test-role"
+        admin_v2 = AdminV2(
+            self.redpanda,
+            auth=(
+                self.redpanda.SUPERUSER_CREDENTIALS[0],
+                self.redpanda.SUPERUSER_CREDENTIALS[1],
+            ),
+        )
+        role = security_pb2.Role(
+            name=role_name,
+            members=[
+                security_pb2.RoleMember(group=security_pb2.RoleGroup(name=test_group))
+            ],
+        )
+        admin_v2.security().create_role(security_pb2.CreateRoleRequest(role=role))
+        self.logger.info(
+            f"Created role '{role_name}' with group '{test_group}' as member"
+        )
+
+        # Grant permissions to the role
+        self.super_rpk.sasl_allow_principal(
+            f"RedpandaRole:{role_name}",
+            ["all"],
+            "topic",
+            self.example_topic,
+            self.redpanda.SUPERUSER_CREDENTIALS[0],
+            self.redpanda.SUPERUSER_CREDENTIALS[1],
+            self.redpanda.SUPERUSER_CREDENTIALS[2],
+        )
+        self.logger.info(f"Granted 'all' permission to role '{role_name}'")
+
+        # Authenticate and perform an action
+        cfg = self.keycloak.generate_oauth_config(kc_node, self.client_id)
+        assert cfg.client_secret is not None, "client_secret is None"
+        assert cfg.token_endpoint is not None, "token_endpoint is None"
+
+        k_client = PythonLibrdkafka(
+            self.redpanda, algorithm="OAUTHBEARER", oauth_config=cfg
+        )
+        producer = k_client.get_producer()
+        producer.poll(0.0)
+
+        expected_topics = set([self.example_topic])
+        wait_until(
+            lambda: set(producer.list_topics(timeout=5).topics.keys())
+            == expected_topics,
+            timeout_sec=5,
+        )
+
+        # Verify authentication event contains IDP groups
+        records = self.read_all_from_audit_log(
+            partial(
+                self.oidc_authn_with_groups_filter_function,
+                self.kafka_rpc_service_name,
+                service_user_id,
+                service_user_id,
+                [test_group],
+            ),
+            lambda records: self.aggregate_count(records) >= 1,
+        )
+
+        assert len(records) >= 1, (
+            f"Expected at least 1 authentication record with IDP group but received {len(records)}"
+        )
+        self.logger.info(
+            f"Found {len(records)} authentication record(s) with IDP group '{test_group}'"
+        )
+
+        # Verify authentication record contains the IDP group
+        for record in records:
+            user_groups = record.get("user", {}).get("groups", [])
+            self.logger.debug(
+                f"Found groups in authentication audit record: {user_groups}"
+            )
+            idp_groups = [g for g in user_groups if g.get("type") == "idp_group"]
+            assert len(idp_groups) >= 1, (
+                f"Expected at least 1 IDP group in authentication record, found {idp_groups}"
+            )
+
+        # Verify authorization event contains the role
+        records = self.read_all_from_audit_log(
+            partial(
+                self.oidc_authz_with_role_filter_function,
+                self.kafka_rpc_service_name,
+                service_user_id,
+                role_name,
+            ),
+            lambda records: self.aggregate_count(records) >= 1,
+        )
+
+        assert len(records) >= 1, (
+            f"Expected at least 1 authorization record with role but received {len(records)}"
+        )
+
+        # Verify authorization record contains the role
+        for record in records:
+            user_groups = record.get("actor", {}).get("user", {}).get("groups", [])
+            self.logger.debug(
+                f"Found groups in authorization audit record: {user_groups}"
+            )
+            roles = [g for g in user_groups if g.get("type") == "role"]
+            assert len(roles) >= 1, (
+                f"Expected at least 1 role in authorization record, found {roles}"
+            )
+            assert any(g.get("name") == role_name for g in roles), (
+                f"Expected role '{role_name}' not found in {roles}"
+            )
+
+        self.logger.info(
+            f"Verified complete audit trail: authentication contains IDP group '{test_group}', "
+            f"authorization contains role '{role_name}'"
         )
 
 
@@ -2684,6 +3056,11 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
 
     def assert_in(self, member, container, msg=None):
         assert member in container, msg or f"{member!r} not found in {container!r}"
+
+    def assert_not_in(self, member, container, msg=None):
+        assert member not in container, (
+            msg or f"{member!r} unexpectedly found in {container!r}"
+        )
 
     def _create_acl(
         self, resource, resource_type, pattern_type, operation, permission="ALLOW"
@@ -2991,6 +3368,364 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
             lambda record_count: record_count == authn_success_count,
             "authn attempt in sr",
         )
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_sr_audit_context_qualified_subjects(self, audit_transport_mode):
+        """
+        Test that audit logs contain qualified subject names for context-bound
+        subjects, verifying both successful and failed authorization attempts.
+        """
+        self.setup_cluster()
+
+        schema_data = json.dumps({"schema": schema1_def})
+
+        # Create subjects in different contexts
+        staging_subject = ":.staging:my-topic"
+        prod_subject = ":.prod:my-topic"
+        default_subject = "my-topic"
+
+        # Register schemas in contexts (using superuser)
+        for subject in [staging_subject, prod_subject, default_subject]:
+            result = self.sr_client.post_subjects_subject_versions(
+                subject=subject, data=schema_data, auth=self.super_auth
+            )
+            self.assert_equal(result.status_code, 200)
+
+        # Grant prefix ACL on .staging context only
+        self._post_acl(self._create_acl(":.staging:", "SUBJECT", "PREFIXED", "READ"))
+
+        # Successful access to .staging subject - should log qualified subject
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=staging_subject, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+
+        # Verify audit log contains qualified subject for successful access
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"subjects/{staging_subject}/versions",
+                resources={"name": staging_subject, "type": "subject"},
+                status_id=StatusID.SUCCESS,
+                operation="get_subject_versions",
+            ),
+            lambda record_count: record_count == 1,
+            "successful access to staging context subject",
+        )
+        self.assert_equal(len(records), 1)
+
+        # Failed access to .prod subject - should log qualified subject in failure
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=prod_subject, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+        # Verify audit log contains qualified subject for failed access
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"subjects/{prod_subject}/versions",
+                resources={"name": prod_subject, "type": "subject"},
+                status_id=StatusID.FAILURE,
+                operation="get_subject_versions",
+            ),
+            lambda record_count: record_count == 1,
+            "failed access to prod context subject",
+        )
+        self.assert_equal(len(records), 1)
+
+        # Grant ACL on default context subject
+        self._post_acl(self._create_acl(default_subject, "SUBJECT", "LITERAL", "READ"))
+
+        # Access default context subject - should log unqualified subject
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=default_subject, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+
+        # Verify audit log contains unqualified subject for default context
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"subjects/{default_subject}/versions",
+                resources={"name": default_subject, "type": "subject"},
+                status_id=StatusID.SUCCESS,
+                operation="get_subject_versions",
+            ),
+            lambda record_count: record_count == 1,
+            "successful access to default context subject",
+        )
+        self.assert_equal(len(records), 1)
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_sr_audit_context_config_authz(self, audit_transport_mode):
+        """
+        Verifies that config endpoints use different ACL resources for context
+        vs subject operations, and that audit logs contain the correct resource:
+        - Context-level (e.g., /config/:.ctx:) uses sr_registry
+        - Subject-level (e.g., /config/:.ctx:subject) uses sr_subject
+        """
+        self.redpanda.set_cluster_config(
+            {"schema_registry_enable_qualified_subjects": True}, expect_restart=True
+        )
+        self.setup_cluster()
+
+        context_only = ":.staging:"
+        subject_in_context = ":.staging:my-topic"
+
+        # Setup: create schema and config using superuser
+        self.sr_client.post_subjects_subject_versions(
+            subject=subject_in_context,
+            data=json.dumps({"schema": schema1_def}),
+            auth=self.super_auth,
+        )
+        self.sr_client.set_config_subject(
+            subject=subject_in_context,
+            data=json.dumps({"compatibility": "BACKWARD"}),
+            auth=self.super_auth,
+        )
+
+        # Grant sr_subject ACL - this should NOT grant context-level access
+        self._post_acl(
+            self._create_acl(context_only, "SUBJECT", "PREFIXED", "DESCRIBE_CONFIGS")
+        )
+
+        # Context-level access with only sr_subject ACL should fail
+        result = self.sr_client.get_config_subject(
+            subject=context_only, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+        # Grant sr_registry ACL - now context-level should work
+        self._post_acl(self._create_acl("", "REGISTRY", "LITERAL", "DESCRIBE_CONFIGS"))
+
+        # Context-level: audit should show registry resource
+        result = self.sr_client.get_config_subject(
+            subject=context_only, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"config/{context_only}",
+                resources={"name": "", "type": "registry"},
+                status_id=StatusID.SUCCESS,
+                operation="get_config_subject",
+            ),
+            lambda record_count: record_count >= 1,
+            "context-level config access",
+        )
+        self.assert_equal(len(records), 1)
+
+        # Subject-level: audit should show qualified subject resource
+        result = self.sr_client.get_config_subject(
+            subject=subject_in_context, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"config/{subject_in_context}",
+                resources={"name": subject_in_context, "type": "subject"},
+                status_id=StatusID.SUCCESS,
+                operation="get_config_subject",
+            ),
+            lambda record_count: record_count >= 1,
+            "subject-level config access",
+        )
+        self.assert_equal(len(records), 1)
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_sr_audit_get_contexts(self, audit_transport_mode):
+        self.redpanda.set_cluster_config(
+            {"schema_registry_enable_qualified_subjects": True}, expect_restart=True
+        )
+        self.setup_cluster()
+
+        schema_data = json.dumps({"schema": schema1_def})
+
+        # Create subjects in different contexts
+        staging_subject = ":.staging:topic-a"
+        prod_subject = ":.prod:topic-b"
+        default_subject = "topic-c"
+
+        # Register schemas
+        for subject in [staging_subject, prod_subject, default_subject]:
+            result = self.sr_client.post_subjects_subject_versions(
+                subject=subject, data=schema_data, auth=self.super_auth
+            )
+            self.assert_equal(result.status_code, 200)
+
+        # Superuser should see all contexts
+        result = self.sr_client.get_contexts(auth=self.super_auth)
+        self.assert_equal(result.status_code, 200)
+        contexts = result.json()
+        self.assert_in(".", contexts)
+        self.assert_in(".staging", contexts)
+        self.assert_in(".prod", contexts)
+
+        # Grant describe ACL only for staging subject
+        self._post_acl(
+            self._create_acl(staging_subject, "SUBJECT", "LITERAL", "DESCRIBE")
+        )
+
+        # User should only see .staging context (has access to staging_subject)
+        result = self.sr_client.get_contexts(auth=self.user_auth)
+        self.assert_equal(result.status_code, 200)
+        contexts = result.json()
+        self.assert_in(".staging", contexts)
+        self.assert_not_in(".", contexts)
+        self.assert_not_in(".prod", contexts)
+
+        # Verify audit log shows subject checks performed
+        # Successful: staging_subject (authorized)
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path="contexts",
+                resources={"name": staging_subject, "type": "subject"},
+                status_id=StatusID.SUCCESS,
+                operation="get_contexts",
+            ),
+            lambda record_count: record_count >= 1,
+            "get_contexts authorized subject",
+        )
+        self.assert_equal(len(records), 1)
+
+        # Failed: other subjects (not authorized)
+        # The audit should contain the subjects that were checked and failed
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path="contexts",
+                resources=[
+                    {"name": prod_subject, "type": "subject"},
+                    {"name": default_subject, "type": "subject"},
+                ],
+                status_id=StatusID.FAILURE,
+                operation="get_contexts",
+            ),
+            lambda record_count: record_count >= 1,
+            "get_contexts unauthorized subjects",
+        )
+        self.assert_equal(len(records), 1)
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    @matrix(audit_transport_mode=get_audit_modes())
+    def test_sr_audit_delete_context(self, audit_transport_mode):
+        self.redpanda.set_cluster_config(
+            {"schema_registry_enable_qualified_subjects": True}, expect_restart=True
+        )
+        self.setup_cluster()
+
+        schema_data = json.dumps({"schema": schema1_def})
+        ctx = ".testctx"
+        ctx_subject = f":{ctx}:topic-a"
+
+        # Create a schema in a custom context (materializes the context)
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=schema_data, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+
+        # Superuser should see the context
+        result = self.sr_client.get_contexts(auth=self.super_auth)
+        self.assert_equal(result.status_code, 200)
+        self.assert_in(ctx, result.json())
+
+        # Make the context empty by deleting the subject (soft then hard delete)
+        result = self.sr_client.delete_subject(
+            subject=ctx_subject, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        result = self.sr_client.delete_subject(
+            subject=ctx_subject, permanent=True, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+
+        # Superuser should still see the empty context
+        result = self.sr_client.get_contexts(auth=self.super_auth)
+        self.assert_equal(result.status_code, 200)
+        self.assert_in(ctx, result.json())
+
+        # User without permissions should not see the empty context
+        result = self.sr_client.get_contexts(auth=self.user_auth)
+        self.assert_equal(result.status_code, 200)
+        self.assert_not_in(ctx, result.json())
+        self.assert_not_in(".prod", result.json())
+
+        # Grant sr_registry DESCRIBE - user should now see empty context
+        self._post_acl(self._create_acl("", "REGISTRY", "LITERAL", "DESCRIBE"))
+
+        result = self.sr_client.get_contexts(auth=self.user_auth)
+        self.assert_equal(result.status_code, 200)
+        self.assert_in(ctx, result.json())
+
+        # Verify audit log shows registry resource check for empty context
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path="contexts",
+                resources={"name": "", "type": "registry"},
+                status_id=StatusID.SUCCESS,
+                operation="get_contexts",
+            ),
+            lambda record_count: record_count >= 1,
+            "get_contexts with registry describe for empty context",
+        )
+        self.assert_equal(len(records), 1)
+
+        # User with only DESCRIBE cannot delete context
+        result = self.sr_client.delete_context(ctx, auth=self.user_auth)
+        self.assert_equal(result.status_code, 403)
+
+        # Verify audit log shows failed delete attempt
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"contexts/{ctx}",
+                resources={"name": "", "type": "registry"},
+                status_id=StatusID.FAILURE,
+                operation="delete_context",
+            ),
+            lambda record_count: record_count >= 1,
+            "delete_context unauthorized",
+        )
+        self.assert_equal(len(records), 1)
+
+        # Grant sr_registry DELETE (maps to remove permission) - user can delete
+        self._post_acl(self._create_acl("", "REGISTRY", "LITERAL", "DELETE"))
+
+        result = self.sr_client.delete_context(ctx, auth=self.user_auth)
+        self.assert_equal(result.status_code, 204)
+
+        # Verify audit log shows successful delete
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(
+                record,
+                path=f"contexts/{ctx}",
+                resources={"name": "", "type": "registry"},
+                status_id=StatusID.SUCCESS,
+                operation="delete_context",
+            ),
+            lambda record_count: record_count >= 1,
+            "delete_context authorized",
+        )
+        self.assert_equal(len(records), 1)
+
+        # Context should no longer be visible
+        result = self.sr_client.get_contexts(auth=self.super_auth)
+        self.assert_equal(result.status_code, 200)
+        self.assert_not_in(ctx, result.json())
 
     @skip_fips_mode
     @cluster(num_nodes=5)

@@ -31,6 +31,7 @@ namespace cloud_topics::l1 {
 struct compaction_info_and_timestamp {
     metastore::compaction_info_response info;
     model::timestamp collected_at;
+    kafka::offset max_compactible_offset;
 };
 
 struct log_compaction_meta {
@@ -53,6 +54,9 @@ struct log_compaction_meta {
     // inflight compaction. Guaranteed to have a value if `state == inflight`.
     std::optional<ss::shard_id> inflight_shard{std::nullopt};
     intrusive_list_hook link;
+    // If `true`, we have been able to sample compaction info from the
+    // `metastore` previously.
+    bool has_seen_reconciled_data{false};
 };
 
 using log_compaction_meta_ptr = ss::lw_shared_ptr<log_compaction_meta>;

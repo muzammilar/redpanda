@@ -10,15 +10,12 @@
 package cloud
 
 import (
-	"errors"
 	"fmt"
-	"os"
 
-	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/containerutil"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/profile"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/oauth"
-	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/oauth/authtoken"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/oauth/providers/auth0"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/out"
 	"github.com/spf13/afero"
@@ -72,15 +69,20 @@ token and client ID is always synced.
 			p := yAct.Profile(yAct.CurrentProfile)
 			authAct, authVir, clearedProfile, _, err := oauth.LoadFlow(cmd.Context(), fs, cfg, auth0.NewClient(cfg.DevOverrides()), noBrowser, true)
 			if err != nil {
-				fmt.Printf("Unable to login to Redpanda Cloud (%v).\n", err)
-				if e := (*authtoken.BadClientTokenError)(nil); errors.As(err, &e) && authVir != nil && authVir.HasClientCredentials() {
-					fmt.Println(`You may need to clear your client ID and secret with 'rpk cloud logout --clear-credentials',
-and then re-specify the client credentials next time you log in.`)
+				errMsg := "Unable to login to Redpanda Cloud.\n\n"
+				if authVir != nil {
+					errMsg += oauth.DiagnoseAuthCredentials(authVir, err)
 				} else {
-					fmt.Println(`You may need to clear your credentials with 'rpk cloud logout --clear-credentials', and login again`)
+					errMsg += "You may need to clear your credentials with 'rpk cloud logout --clear-credentials', and login again"
 				}
-				os.Exit(1)
+				out.Die(errMsg)
 			}
+
+			// Warn user if using client credentials without --save
+			if authVir.HasClientCredentials() && !save && authAct.ClientSecret == "" {
+				fmt.Println("Note: Client secret not saved; use --save to persist credentials for automatic token refresh.")
+			}
+
 			if authVir.HasClientCredentials() && save {
 				authAct.ClientSecret = authVir.ClientSecret
 				err = yAct.Write(fs)
@@ -135,7 +137,7 @@ rpk will talk to a localhost:9092 cluster until you swap to a different profile.
 			// unless the user used --no-profile.
 			if noProfile {
 				// The current profile is seemingly pointing to a container cluster.
-				if p.Name == common.ContainerProfileName {
+				if p.Name == containerutil.ContainerProfileName {
 					fmt.Printf("You are talking to a localhost 'rpk container' cluster (rpk profile name: %q)\n", p.Name)
 					fmt.Println("To talk to a cloud cluster, use 'rpk cloud cluster select'.")
 					return
@@ -156,7 +158,7 @@ rpk will talk to a localhost:9092 cluster until you swap to a different profile.
 				return
 			}
 
-			if p.Name == common.ContainerProfileName {
+			if p.Name == containerutil.ContainerProfileName {
 				fmt.Printf("You are talking to a localhost 'rpk container' cluster (rpk profile name: %q)\n", p.Name)
 			} else {
 				fmt.Printf("You are talking to a self hosted cluster (rpk profile name: %q)\n", p.Name)

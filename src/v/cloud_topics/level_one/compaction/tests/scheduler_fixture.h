@@ -42,13 +42,23 @@ private:
     mutable underlying_t _topic_metadata;
 };
 
+class fake_offset_provider : public l1::max_compactible_offset_provider {
+public:
+    ss::future<> fill_max_compactible_offsets(
+      chunked_hash_map<model::ntp, kafka::offset>&) const final {
+        co_return;
+    }
+};
+
 class SchedulerTestFixture : public l1::l1_reader_fixture {
 public:
     ss::future<> SetUpAsync() override { co_await start_scheduler(); }
 
     ss::future<> start_scheduler() {
         auto info_collector = l1::log_info_collector(
-          &_metastore, std::make_unique<fake_topic_metadata_provider>());
+          &_metastore,
+          std::make_unique<fake_topic_metadata_provider>(),
+          std::make_unique<fake_offset_provider>());
         // not `std::make_unique` because private `compaction_scheduler` c-tor.
         scheduler = std::unique_ptr<l1::compaction_scheduler>(
           new l1::compaction_scheduler(std::move(info_collector)));
@@ -65,6 +75,8 @@ public:
           ss::sharded_parameter([this] { return &_metastore; }),
           ss::sharded_parameter(
             [this] { return &scheduler->_committer.local(); }),
+          nullptr,
+          ss::default_scheduling_group(),
           nullptr);
         co_await scheduler->_worker_manager._workers.invoke_on_all(
           &l1::compaction_worker::start);

@@ -12,10 +12,12 @@
 #include "lsm/db/version_set.h"
 
 #include "absl/container/btree_set.h"
+#include "base/vlog.h"
 #include "container/chunked_vector.h"
 #include "lsm/core/exceptions.h"
 #include "lsm/core/internal/files.h"
 #include "lsm/core/internal/keys.h"
+#include "lsm/core/internal/logger.h"
 #include "lsm/core/internal/merging_iterator.h"
 #include "lsm/core/internal/two_level_iterator.h"
 #include "lsm/db/file_utils.h"
@@ -26,17 +28,17 @@
 #include <seastar/coroutine/as_future.hh>
 
 #include <exception>
+#include <memory>
 
 namespace lsm::db {
 
 namespace {
 
 using internal::operator""_level;
-using internal::operator""_file_id;
 
 // An internal iterator. For a given version/level pair, yields information
 // about the files in the level. For a given entry, key() is the largest key
-// that occurs in teh file, and value()  is an 16-byte value containing the file
+// that occurs in the file, and value()  is an 16-byte value containing the file
 // number and file size, both encoded using 64bit fixed encoding.
 //
 // NOTE: It's up to the user of this class to ensure the files pointer is kept
@@ -110,6 +112,49 @@ private:
     chunked_vector<ss::lw_shared_ptr<file_meta_data>>* _files;
     uint32_t _index;
     iobuf _value_buf;
+};
+
+// An iterator that keeps a `version` pointer reference alive.
+//
+// This is needed because we use versions that are still alive as
+// knowledge of whether a version is safe to GC. Some cases, like L0 iteration,
+// can use file iterators directly, so in those cases we need some kind of
+// reference to keep L0 files alive.
+class version_lifetime_iterator : public internal::iterator {
+public:
+    explicit version_lifetime_iterator(ss::lw_shared_ptr<version> version)
+      : _version(std::move(version)) {}
+
+    bool valid() const override { return false; }
+
+    ss::future<> seek_to_first() override { return ss::now(); }
+
+    ss::future<> seek_to_last() override { return ss::now(); }
+
+    ss::future<> seek(internal::key_view) override { return ss::now(); }
+
+    ss::future<> next() override {
+        throw invalid_argument_exception(
+          "next() called on version lifetime iterator");
+    }
+
+    ss::future<> prev() override {
+        throw invalid_argument_exception(
+          "prev() called on version lifetime iterator");
+    }
+
+    internal::key_view key() override {
+        throw invalid_argument_exception(
+          "key() called on version lifetime iterator");
+    }
+
+    iobuf value() override {
+        throw invalid_argument_exception(
+          "value() called on version lifetime iterator");
+    }
+
+private:
+    ss::lw_shared_ptr<version> _version;
 };
 
 } // namespace
@@ -235,11 +280,20 @@ ss::future<> version::add_iterators(
     // For levels > 0, we can use a concatenating iterator that sequentially
     // walks through the non-overlapping files in the level, opening them
     // lazily.
+    int non_empty_levels = 0;
     for (const auto& level : std::span(_vset->_options->levels).subspan(1)) {
         if (_files[level.number].empty()) {
             continue;
         }
+        ++non_empty_levels;
         iters->push_back(create_concatenating_iterator(level.number));
+    }
+    // L0 readers don't capture a reference to the version, but other levels do
+    // capture a reference. If we only collected L0 files then we need to add a
+    // dummy iterator to capture the reference.
+    if (non_empty_levels == 0) {
+        iters->push_back(
+          std::make_unique<version_lifetime_iterator>(shared_from_this()));
     }
 }
 
@@ -428,11 +482,17 @@ ss::future<> version::for_each_overlapping(
   internal::key_view target,
   absl::FunctionRef<ss::future<ss::stop_iteration>(
     internal::level, ss::lw_shared_ptr<file_meta_data>)> fn) {
+    // NOTE: it is critical to use user keys to find overlapping files, since
+    // the internal keys include sequence numbers and result in incorrect file
+    // bound overlap checks.
+    auto user_key = target.user_key();
     // Search level-0 from newest to oldest
     chunked_vector<ss::lw_shared_ptr<file_meta_data>> tmp;
     tmp.reserve(_files[0_level].size());
     for (const auto& file : _files[0_level]) {
-        if (target >= file->smallest && target <= file->largest) {
+        if (
+          user_key >= file->smallest.user_key()
+          && user_key <= file->largest.user_key()) {
             tmp.push_back(file);
         }
     }
@@ -457,10 +517,13 @@ ss::future<> version::for_each_overlapping(
         if (files.empty()) {
             continue;
         }
+        // We binary search on the internal key not user key because
+        // if there is a key split across files we need to skip newer
+        // key versions.
         size_t index = find_file(files, target);
         if (index < files.size()) {
             const auto& file = files[index];
-            if (target < file->smallest) {
+            if (user_key < file->smallest.user_key()) {
                 // All of file is past any data for the key
             } else {
                 auto stop = co_await fn(level, file);
@@ -475,15 +538,16 @@ ss::future<> version::for_each_overlapping(
 fmt::iterator version::format_to(fmt::iterator it) const {
     // For example:
     //   --- level 1 ---
-    //   17:234['a' .. 'e']
-    //   20:31['a' .. 'e']
+    //   0-17:234['a' .. 'e']
+    //   3-20:31['a' .. 'e']
     for (size_t level = 0; level < _files.size(); ++level) {
         it = fmt::format_to(it, "--- level {} ---\n", level);
         for (const auto& file : _files[level]) {
             it = fmt::format_to(
               it,
-              "{}:{}['{}' .. '{}']\n",
-              file->handle,
+              "{}-{}:{}['{}' .. '{}']\n",
+              file->handle.epoch,
+              file->handle.id,
               file->file_size,
               file->smallest,
               file->largest);
@@ -503,21 +567,22 @@ version_set::version_set(
     set_current(ss::make_lw_shared<version>(version::ctor{}, this));
 }
 
-void version_set::reuse_file_id(internal::file_id id) {
-    if (id + 1_file_id == _next_file_id) {
-        _next_file_id = id;
-    }
-}
-
 void version_set::set_current(ss::lw_shared_ptr<version> new_version) {
+    vlog(log.trace, "installing_new_version version=\n{}", *new_version);
     weak_intrusive_list<version>::push_front(&_current, std::move(new_version));
 }
 
-ss::future<> version_set::log_and_apply(version_edit edit) {
+ss::lw_shared_ptr<version_edit> version_set::new_edit() {
+    auto new_edit = ss::make_lw_shared<version_edit>(this, *_options);
+    _live_edits.push_back(*new_edit);
+    return new_edit;
+}
+
+ss::future<> version_set::log_and_apply(ss::lw_shared_ptr<version_edit> edit) {
     auto v = ss::make_lw_shared<version>(version::ctor{}, this);
     {
         version_set::builder builder(this, _current);
-        builder.apply(edit);
+        builder.apply(*edit);
         builder.save_to(v.get());
     }
     finalize(v.get());
@@ -528,14 +593,17 @@ ss::future<> version_set::log_and_apply(version_edit edit) {
 
     // Invariant: Between the two we must have a seqno, either data exists or
     // we're writing the first data which must have a seqno
-    auto updated_seqno = std::max(_last_seqno, edit._last_seqno).value();
+    auto updated_seqno = std::max(_last_seqno, edit->_last_seqno).value();
     auto m = manifest{
       .version = v,
       .next_file_id = _next_file_id,
       .last_seqno = updated_seqno,
       .epoch = _options->database_epoch,
     };
-    co_await write_manifest(std::move(m));
+    auto fut = co_await ss::coroutine::as_future(write_manifest(std::move(m)));
+    if (fut.failed()) {
+        std::rethrow_exception(fut.get_exception());
+    }
     // Now that the new version is persisted successfully, install the new
     // version
     set_current(std::move(v));
@@ -553,7 +621,42 @@ ss::future<> version_set::recover() {
     _last_seqno = m->last_seqno;
 }
 
+ss::future<bool> version_set::refresh() {
+    auto m = co_await read_manifest();
+    if (!m) {
+        co_return false;
+    }
+
+    if (m->next_file_id < _next_file_id) {
+        throw corruption_exception(
+          "manifest next_file_id {} is less than current {}",
+          m->next_file_id(),
+          _next_file_id());
+    }
+    if (_last_seqno.has_value() && m->last_seqno < _last_seqno.value()) {
+        throw corruption_exception(
+          "manifest last_seqno {} is less than current {}",
+          m->last_seqno(),
+          _last_seqno.value()());
+    }
+
+    if (m->next_file_id == _next_file_id && m->last_seqno == _last_seqno) {
+        co_return false;
+    }
+
+    finalize(m->version.get());
+    set_current(std::move(m->version));
+    _next_file_id = m->next_file_id;
+    _last_seqno = m->last_seqno;
+    co_return true;
+}
+
 void version_set::finalize(version* v) {
+    if (_options->readonly) {
+        // No need to compute any compaction states, as we won't run compaction
+        // in read-only mode.
+        return;
+    }
     // Precompute the best level for the next compaction
     internal::level best_level = 0_level;
     double best_score = static_cast<double>(v->_files[0_level].size())
@@ -662,7 +765,7 @@ std::optional<compaction> version_set::pick_compaction() {
         vassert(
           level() + 1 < _options->levels.size(),
           "cannot compact the bottom-most level");
-        c.emplace(compaction(_options, level));
+        c.emplace(compaction(_options, new_edit(), level));
         // Pick the first file that comes after _compact_pointer[level]
         for (const auto& f : _current->_files[level]) {
             const auto& key = _compact_pointer[level];
@@ -678,7 +781,7 @@ std::optional<compaction> version_set::pick_compaction() {
         }
     } else if (seek_compaction) {
         level = _current->_file_to_compact_level;
-        c.emplace(compaction(_options, level));
+        c.emplace(compaction(_options, new_edit(), level));
         c->_inputs[which::input_level].push_back(*_current->_file_to_compact);
     } else {
         return std::nullopt;
@@ -740,7 +843,8 @@ std::optional<compaction> version_set::pick_compaction() {
     // to be applied so that if the compaction fails, we will try a different
     // key range next time.
     _compact_pointer[level] = largest;
-    c->_edit.set_compact_pointer(level, largest);
+    c->_edit->set_compact_pointer(level, largest);
+    vlog(log.trace, "picked_compaction compaction={}", *c);
     return c;
 }
 
@@ -757,8 +861,11 @@ version_set::make_input_iterator(compaction* c) {
         if (inputs.empty()) {
             continue;
         }
-        if (inputs == c->_inputs.front() && c->level() == 0_level) {
+        if (&inputs == &c->_inputs.front() && c->level() == 0_level) {
             for (auto& file : inputs) {
+                // NOTE: in version::add_iterators we have to ensure that L0
+                // only iterators keep a ref to their version, in this case we
+                // rely on compaction for that.
                 list.push_back(
                   co_await _table_cache->create_iterator(
                     file->handle, file->file_size));
@@ -794,6 +901,14 @@ chunked_hash_set<internal::file_handle> version_set::get_live_files() {
         }
     }
     return all_files;
+}
+
+internal::file_id version_set::min_uncommitted_file_id() const {
+    auto min = _next_file_id;
+    for (auto& e : _live_edits) {
+        min = std::min(min, e._min_allocated_id);
+    }
+    return min;
 }
 
 bool compaction::is_trivial_move() const {
@@ -857,6 +972,28 @@ bool compaction::should_stop_before(internal::key_view key) {
     } else {
         return false;
     }
+}
+
+fmt::iterator compaction::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
+      "level={} input_level_files={{{}}} "
+      "output_level_files={{{}}} grandparents={{{}}}",
+      _level,
+      fmt::join(
+        std::views::transform(
+          _inputs[which::input_level],
+          [](const auto& file) { return file->handle; }),
+        ","),
+      fmt::join(
+        std::views::transform(
+          _inputs[which::output_level],
+          [](const auto& file) { return file->handle; }),
+        ","),
+      fmt::join(
+        std::views::transform(
+          _grandparents, [](const auto& file) { return file->handle; }),
+        ","));
 }
 
 } // namespace lsm::db

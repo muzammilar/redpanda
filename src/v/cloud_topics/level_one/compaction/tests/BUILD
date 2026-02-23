@@ -46,6 +46,7 @@ redpanda_cc_gtest(
         "//src/v/compaction:key_offset_map",
         "//src/v/compaction:reducer",
         "//src/v/compaction/tests:simple_reducer",
+        "//src/v/config",
         "//src/v/container:chunked_circular_buffer",
         "//src/v/container:chunked_vector",
         "//src/v/kafka/server/tests:kafka_test_utils",
@@ -91,6 +92,23 @@ redpanda_cc_gtest(
         "//src/v/cluster",
         "//src/v/model",
         "//src/v/model/tests:random",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "log_collector_test",
+    timeout = "short",
+    srcs = [
+        "log_collector_test.cc",
+    ],
+    deps = [
+        "//src/v/cloud_topics/level_one/compaction:log_collector",
+        "//src/v/cluster",
+        "//src/v/config",
+        "//src/v/model",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
         "@seastar",

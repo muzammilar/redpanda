@@ -17,6 +17,7 @@
 #include "model/record.h"
 #include "model/timeout_clock.h"
 
+#include <seastar/core/abort_source.hh>
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/lowres_clock.hh>
@@ -87,11 +88,28 @@ public:
     virtual size_t materialize_max_bytes() const = 0;
 
     /// Cache materialized record batch
-    virtual void cache_put(const model::ntp&, const model::record_batch& b) = 0;
+    virtual void
+    cache_put(const model::topic_id_partition&, const model::record_batch& b)
+      = 0;
 
     /// Retrieve materialized record batch from cache
     virtual std::optional<model::record_batch>
-    cache_get(const model::ntp&, model::offset o) = 0;
+    cache_get(const model::topic_id_partition&, model::offset o) = 0;
+
+    /// Retrieve current cluster epoch
+    virtual ss::future<std::optional<cloud_topics::cluster_epoch>>
+    get_current_epoch(ss::abort_source* as) = 0;
+
+    /// Wait until a batch at or beyond \p offset has been added to the cache
+    /// for \p tidp, or until timeout/abort. \p last_known seeds a newly
+    /// created monitor so that already-committed offsets resolve immediately.
+    virtual ss::future<> cache_wait(
+      const model::topic_id_partition&,
+      model::offset offset,
+      model::offset last_known,
+      model::timeout_clock::time_point deadline,
+      std::optional<std::reference_wrapper<ss::abort_source>> as)
+      = 0;
 };
 
 } // namespace cloud_topics

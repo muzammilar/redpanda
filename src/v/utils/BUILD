@@ -675,3 +675,28 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "detailed_error",
+    hdrs = [
+        "detailed_error.h",
+    ],
+    deps = [
+        "//src/v/base",
+        "@fmt",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "offset_monitor",
+    hdrs = [
+        "offset_monitor.h",
+    ],
+    deps = [
+        "//src/v/base",
+        "//src/v/model",
+        "@abseil-cpp//absl/container:btree",
+        "@seastar",
+    ],
+)

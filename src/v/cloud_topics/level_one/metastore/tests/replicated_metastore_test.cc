@@ -8,12 +8,20 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "cloud_storage/remote_label.h"
+#include "cloud_topics/level_one/metastore/manifest_io.h"
+#include "cloud_topics/level_one/metastore/metastore_manifest.h"
 #include "cloud_topics/level_one/metastore/replicated_metastore.h"
+#include "cloud_topics/level_one/metastore/tests/state_utils.h"
 #include "cloud_topics/tests/cluster_fixture.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "lsm/io/cloud_persistence.h"
+#include "lsm/io/memory_persistence.h"
+#include "lsm/lsm.h"
 #include "model/fundamental.h"
 #include "model/namespace.h"
+#include "serde/rw/rw.h"
 
 using namespace cloud_topics::l1;
 
@@ -25,17 +33,96 @@ MATCHER_P2(MatchesRange, base, last, "") {
 }
 
 } // namespace
+
+enum class metastore_backend { simple, lsm };
+
 class ReplicatedMetastoreTest
   : public cloud_topics::cluster_fixture
-  , public ::testing::Test {
+  , public ::testing::TestWithParam<metastore_backend> {
 public:
     static constexpr size_t num_brokers = 3;
+
+    bool is_lsm_backend() const { return GetParam() == metastore_backend::lsm; }
+
+    cloud_topics::test_fixture_cfg fixture_cfg() const {
+        return {
+          .use_lsm_metastore = is_lsm_backend(),
+          // Skip flushing since tests may exercise flushing.
+          .skip_flush_loop = true,
+        };
+    }
     void SetUp() override {
         for (size_t i = 0; i < num_brokers; i++) {
-            add_node();
+            add_node(fixture_cfg());
         }
         wait_for_all_members(5s).get();
     }
+
+    // For simple_stm, this returns the state directly.
+    // For lsm_stm, this reconstructs state from the database.
+    state get_stm_state(model::partition_id pid) {
+        if (!is_lsm_backend()) {
+            auto stm = get_l1_stm(pid);
+            if (!stm) {
+                return {};
+            }
+            return stm->state().copy();
+        }
+        auto lsm_stm = get_l1_lsm_stm(pid);
+        if (!lsm_stm) {
+            return {};
+        }
+        auto* remote
+          = &get_node_application(model::node_id{0})->cloud_io.local();
+        return lsm_state_to_state(lsm_stm->state(), remote);
+    }
+
+private:
+    // Build the state by loading the cloud database and then replaying the
+    // rows in the volatile buffer.
+    state
+    lsm_state_to_state(const lsm_state& lsm_st, cloud_io::remote* remote) {
+        // Create a database using cloud metadata persistence pointing at the
+        // LSM state's domain prefix in the bucket.
+        auto domain_prefix = cloud_storage_clients::object_key{
+          fmt::format("{}", lsm_st.domain_uuid)};
+        auto meta_persist = lsm::io::open_cloud_metadata_persistence(
+                              remote, bucket_name, domain_prefix)
+                              .get();
+        auto db = lsm::database::open(
+                    {.database_epoch = 0},
+                    lsm::io::persistence{
+                      .data = lsm::io::make_memory_data_persistence(),
+                      .metadata = std::move(meta_persist),
+                    })
+                    .get();
+
+        // Apply volatile buffer rows to the database.
+        if (!lsm_st.volatile_buffer.empty()) {
+            auto wb = db.create_write_batch();
+            auto max_persisted = db.max_persisted_seqno();
+            for (const auto& vol_row : lsm_st.volatile_buffer) {
+                if (max_persisted && vol_row.seqno <= *max_persisted) {
+                    // Already applied, skip.
+                    continue;
+                }
+                if (vol_row.row.value.empty()) {
+                    wb.remove(vol_row.row.key, vol_row.seqno);
+                } else {
+                    wb.put(
+                      vol_row.row.key, vol_row.row.value.copy(), vol_row.seqno);
+                }
+            }
+            db.apply(std::move(wb)).get();
+        }
+
+        // Extract state from database snapshot
+        auto result = snapshot_to_state(db);
+        db.close().get();
+        return result;
+    }
+
+public:
     model::topic_id_partition make_tp(int i) {
         return model::topic_id_partition::from(
           fmt::format("deadbeef-aaaa-0000-0000-000000000000/{}", i));
@@ -120,9 +207,9 @@ public:
     }
 };
 
-TEST_F(ReplicatedMetastoreTest, TestMissingMetastore) {
+TEST_P(ReplicatedMetastoreTest, TestMissingMetastore) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
     auto obj_builder = meta.object_builder().get().value();
     auto& tp_fe = get_node_application(model::node_id{0})
                     ->controller->get_topics_frontend()
@@ -156,9 +243,9 @@ TEST_F(ReplicatedMetastoreTest, TestMissingMetastore) {
     ASSERT_TRUE(oid.has_value());
 }
 
-TEST_F(ReplicatedMetastoreTest, TestAddNotFinished) {
+TEST_P(ReplicatedMetastoreTest, TestAddNotFinished) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
     auto tp = make_tp(0);
     auto obj_builder = meta.object_builder().get().value();
     auto oid = obj_builder->get_or_create_object_for(tp).value();
@@ -178,9 +265,9 @@ TEST_F(ReplicatedMetastoreTest, TestAddNotFinished) {
     ASSERT_EQ(commit_res.error(), metastore::errc::invalid_request);
 }
 
-TEST_F(ReplicatedMetastoreTest, TestBuilderRemovedObjects) {
+TEST_P(ReplicatedMetastoreTest, TestBuilderRemovedObjects) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore m(app.get_sharded_l1_metastore_router()->local());
+    auto& m = app.get_sharded_replicated_metastore()->local();
     auto tp = make_tp(0);
     auto ob = m.object_builder().get().value();
 
@@ -217,9 +304,9 @@ TEST_F(ReplicatedMetastoreTest, TestBuilderRemovedObjects) {
 
 // Regression test, where removing an object from the builder left some
 // metadata behind, which would result in a failure.
-TEST_F(ReplicatedMetastoreTest, TestBuilderRemoveObjectRemovesPartition) {
+TEST_P(ReplicatedMetastoreTest, TestBuilderRemoveObjectRemovesPartition) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore m(app.get_sharded_l1_metastore_router()->local());
+    auto& m = app.get_sharded_replicated_metastore()->local();
     auto tp1 = make_tp(0);
     auto tp2 = make_tp(1);
     auto ob = m.object_builder().get().value();
@@ -254,9 +341,9 @@ TEST_F(ReplicatedMetastoreTest, TestBuilderRemoveObjectRemovesPartition) {
     ASSERT_TRUE(commit_res.has_value());
 }
 
-TEST_F(ReplicatedMetastoreTest, TestBasicAdd) {
+TEST_P(ReplicatedMetastoreTest, TestBasicAdd) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     constexpr auto partitions_count = 100;
     ASSERT_NO_FATAL_FAILURE(
@@ -267,9 +354,7 @@ TEST_F(ReplicatedMetastoreTest, TestBasicAdd) {
     size_t state_partitions_count = 0;
     size_t state_extents_count = 0;
     for (int i = 0; i < 3; ++i) {
-        auto l1_stm = get_l1_stm(model::partition_id{i});
-        ASSERT_TRUE(l1_stm != nullptr);
-        auto& l1_state = l1_stm->state();
+        auto l1_state = get_stm_state(model::partition_id{i});
         ASSERT_EQ(l1_state.topic_to_state.size(), 1);
 
         auto& p_states = l1_state.topic_to_state.begin()->second.pid_to_state;
@@ -331,9 +416,9 @@ TEST_F(ReplicatedMetastoreTest, TestBasicAdd) {
     }
 }
 
-TEST_F(ReplicatedMetastoreTest, TestBasicCompact) {
+TEST_P(ReplicatedMetastoreTest, TestBasicCompact) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     constexpr auto partitions_count = 100;
     ASSERT_NO_FATAL_FAILURE(
@@ -361,9 +446,7 @@ TEST_F(ReplicatedMetastoreTest, TestBasicCompact) {
     size_t state_partitions_count = 0;
     size_t state_extents_count = 0;
     for (int i = 0; i < 3; ++i) {
-        auto l1_stm = get_l1_stm(model::partition_id{i});
-        ASSERT_TRUE(l1_stm != nullptr);
-        auto& l1_state = l1_stm->state();
+        auto l1_state = get_stm_state(model::partition_id{i});
         ASSERT_EQ(l1_state.topic_to_state.size(), 1);
 
         auto& p_states = l1_state.topic_to_state.begin()->second.pid_to_state;
@@ -425,17 +508,17 @@ TEST_F(ReplicatedMetastoreTest, TestBasicCompact) {
     }
 }
 
-TEST_F(ReplicatedMetastoreTest, TestMissingNTP) {
+TEST_P(ReplicatedMetastoreTest, TestMissingNTP) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
     auto offsets = meta.get_offsets(make_tp(0)).get();
     ASSERT_FALSE(offsets.has_value());
     ASSERT_EQ(offsets.error(), metastore::errc::missing_ntp);
 }
 
-TEST_F(ReplicatedMetastoreTest, TestNotLeader) {
+TEST_P(ReplicatedMetastoreTest, TestNotLeader) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
     auto tp = make_tp(0);
 
     auto meta_pid
@@ -514,9 +597,7 @@ TEST_F(ReplicatedMetastoreTest, TestNotLeader) {
 
     // Check the validity of the resulting state -- that it's contiguous with
     // no gaps or overlap.
-    auto l1_stm = get_l1_stm(*meta_pid);
-    ASSERT_TRUE(l1_stm != nullptr);
-    auto& l1_state = l1_stm->state();
+    auto l1_state = get_stm_state(*meta_pid);
     ASSERT_EQ(l1_state.topic_to_state.size(), 1);
 
     auto& p_states = l1_state.topic_to_state.begin()->second.pid_to_state;
@@ -533,9 +614,9 @@ TEST_F(ReplicatedMetastoreTest, TestNotLeader) {
     }
 }
 
-TEST_F(ReplicatedMetastoreTest, TestInvalidTermRequest) {
+TEST_P(ReplicatedMetastoreTest, TestInvalidTermRequest) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     std::unique_ptr<metastore::object_metadata_builder> objs;
     ASSERT_NO_FATAL_FAILURE(create_initial_objects(meta, 100, o{99}, &objs));
@@ -556,9 +637,9 @@ TEST_F(ReplicatedMetastoreTest, TestInvalidTermRequest) {
     ASSERT_EQ(add_res.error(), metastore::errc::invalid_request);
 }
 
-TEST_F(ReplicatedMetastoreTest, TestGetTermForOffset) {
+TEST_P(ReplicatedMetastoreTest, TestGetTermForOffset) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     auto tp = make_tp(0);
 
@@ -614,9 +695,9 @@ TEST_F(ReplicatedMetastoreTest, TestGetTermForOffset) {
     ASSERT_EQ(term_missing.error(), metastore::errc::missing_ntp);
 }
 
-TEST_F(ReplicatedMetastoreTest, TestGetEndOffsetForTerm) {
+TEST_P(ReplicatedMetastoreTest, TestGetEndOffsetForTerm) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     auto tp = make_tp(0);
 
@@ -672,9 +753,9 @@ TEST_F(ReplicatedMetastoreTest, TestGetEndOffsetForTerm) {
     ASSERT_EQ(end_missing.error(), metastore::errc::missing_ntp);
 }
 
-TEST_F(ReplicatedMetastoreTest, TestSetStartOffset) {
+TEST_P(ReplicatedMetastoreTest, TestSetStartOffset) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     // Create initial objects for testing
     ASSERT_NO_FATAL_FAILURE(add_initial_objects(meta, 3, 99).get());
@@ -707,8 +788,7 @@ TEST_F(ReplicatedMetastoreTest, TestSetStartOffset) {
 
     // Test setting below the start.
     auto set_start_invalid = meta.set_start_offset(tp, o{0}).get();
-    ASSERT_FALSE(set_start_invalid.has_value());
-    ASSERT_EQ(set_start_invalid.error(), metastore::errc::invalid_request);
+    ASSERT_TRUE(set_start_invalid.has_value());
     ASSERT_NO_FATAL_FAILURE(assert_get_offsets(o{50}, o{100}));
 
     // Test setting start offset for missing ntp
@@ -729,9 +809,9 @@ TEST_F(ReplicatedMetastoreTest, TestSetStartOffset) {
     ASSERT_EQ(term_res.value(), model::term_id{0});
 }
 
-TEST_F(ReplicatedMetastoreTest, TestBasicRemoveTopics) {
+TEST_P(ReplicatedMetastoreTest, TestBasicRemoveTopics) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     static constexpr auto topics_count = 10000;
     add_objects_for_topics(meta, topics_count, 99).get();
@@ -770,16 +850,14 @@ TEST_F(ReplicatedMetastoreTest, TestBasicRemoveTopics) {
         ASSERT_EQ(offsets.error(), metastore::errc::missing_ntp);
     }
     for (int i = 0; i < 3; ++i) {
-        auto l1_stm = get_l1_stm(model::partition_id{i});
-        ASSERT_TRUE(l1_stm != nullptr);
-        auto& l1_state = l1_stm->state();
+        auto l1_state = get_stm_state(model::partition_id{i});
         EXPECT_TRUE(l1_state.topic_to_state.empty());
     }
 }
 
-TEST_F(ReplicatedMetastoreTest, TestRemoveTopicsWithShuffleLoop) {
+TEST_P(ReplicatedMetastoreTest, TestRemoveTopicsWithShuffleLoop) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     static constexpr auto topics_count = 1000;
     add_objects_for_topics(meta, topics_count, 99).get();
@@ -836,17 +914,15 @@ TEST_F(ReplicatedMetastoreTest, TestRemoveTopicsWithShuffleLoop) {
 
     // Verify metastore state is clean across all partitions.
     for (int i = 0; i < 3; ++i) {
-        auto l1_stm = get_l1_stm(model::partition_id{i});
-        ASSERT_TRUE(l1_stm != nullptr);
-        auto& l1_state = l1_stm->state();
+        auto l1_state = get_stm_state(model::partition_id{i});
         EXPECT_TRUE(l1_state.topic_to_state.empty())
           << "Partition " << i << " still has topics";
     }
 }
 
-TEST_F(ReplicatedMetastoreTest, TestGetCompactionInfos) {
+TEST_P(ReplicatedMetastoreTest, TestGetCompactionInfos) {
     auto& app = get_ct_app(model::node_id{0});
-    replicated_metastore meta(app.get_sharded_l1_metastore_router()->local());
+    auto& meta = app.get_sharded_replicated_metastore()->local();
 
     constexpr auto partitions_count = 100;
     ASSERT_NO_FATAL_FAILURE(
@@ -899,3 +975,158 @@ TEST_F(ReplicatedMetastoreTest, TestGetCompactionInfos) {
         }
     }
 }
+
+TEST_P(ReplicatedMetastoreTest, TestBasicFlushAndRestore) {
+    if (GetParam() == metastore_backend::simple) {
+        GTEST_SKIP() << "Flush/restore not supported with simple backend";
+    }
+    auto& app = get_ct_app(model::node_id{0});
+    auto& meta = app.get_sharded_replicated_metastore()->local();
+
+    // Add some objects to the metastore.
+    constexpr auto partitions_count = 100;
+    ASSERT_NO_FATAL_FAILURE(
+      add_initial_objects(meta, partitions_count, 99).get());
+
+    // Verify the objects were added.
+    for (int i = 0; i < partitions_count; ++i) {
+        auto tp = make_tp(i);
+        auto offsets = meta.get_offsets(tp).get();
+        ASSERT_TRUE(offsets.has_value()) << "Partition " << i << " missing";
+        ASSERT_EQ(offsets->next_offset, o{100});
+    }
+
+    // Flush the metastore to cloud storage.
+    auto flush_res = meta.flush().get();
+    ASSERT_TRUE(flush_res.has_value()) << fmt::to_string(flush_res.error());
+
+    // Store the cluster UUID before shutting down.
+    auto cluster_uuid = get_node_application(model::node_id{0})
+                          ->storage.local()
+                          .get_cluster_uuid();
+    ASSERT_TRUE(cluster_uuid.has_value());
+
+    // Shut down and wipe all nodes.
+    for (size_t i = 0; i < num_brokers; i++) {
+        auto n = model::node_id(i);
+        instance(n)->shutdown();
+        std::filesystem::remove_all(instance(n)->data_dir);
+        remove_node_application(model::node_id(i));
+    }
+
+    // Restart all nodes.
+    // NOTE: the added nodes get the same node IDs 0, 1, 2.
+    for (size_t i = 0; i < num_brokers; i++) {
+        add_node(fixture_cfg());
+    }
+    wait_for_all_members(5s).get();
+
+    // Restore from the saved cluster UUID.
+    auto& new_app = get_ct_app(model::node_id{0});
+    auto& new_meta = new_app.get_sharded_replicated_metastore()->local();
+    cloud_storage::remote_label rl(*cluster_uuid);
+    auto restore_res = new_meta.restore(rl).get();
+    ASSERT_TRUE(restore_res.has_value()) << fmt::to_string(restore_res.error());
+
+    // Verify the objects are accessible after restore.
+    for (int i = 0; i < partitions_count; ++i) {
+        auto tp = make_tp(i);
+        auto offsets = new_meta.get_offsets(tp).get();
+        ASSERT_TRUE(offsets.has_value()) << "Partition " << i << " missing";
+        ASSERT_EQ(offsets->next_offset, o{100});
+    }
+}
+
+// Test that restore returns an error when the manifest doesn't exist.
+TEST_P(ReplicatedMetastoreTest, TestRestoreManifestNotFound) {
+    if (GetParam() == metastore_backend::simple) {
+        GTEST_SKIP() << "Restore not supported with simple backend";
+    }
+    auto& app = get_ct_app(model::node_id{0});
+    auto& meta = app.get_sharded_replicated_metastore()->local();
+
+    // Attempt to restore from a non-existent cluster UUID. The manifest should
+    // be not found and we should create a new topic.
+    auto fake_cluster_uuid = model::cluster_uuid{uuid_t::create()};
+    cloud_storage::remote_label rl(fake_cluster_uuid);
+    auto restore_res = meta.restore(rl).get();
+    ASSERT_TRUE(restore_res.has_value());
+}
+
+// Test that restore creates the metastore topic with the correct number of
+// partitions matching the number of domains in the manifest.
+TEST_P(ReplicatedMetastoreTest, TestRestoreCreatesCorrectPartitionCount) {
+    if (GetParam() == metastore_backend::simple) {
+        GTEST_SKIP() << "Restore not supported with simple backend";
+    }
+    auto& app = get_ct_app(model::node_id{0});
+    auto& meta = app.get_sharded_replicated_metastore()->local();
+
+    // Wait for the metastore topic to be created by background initialization.
+    // This helps ensure that there won't be a background recreation of the
+    // metastore topic after we delete it below.
+    for (const auto& node_id : instance_ids()) {
+        auto& tp_state = get_node_application(node_id)
+                           ->controller->get_topics_state()
+                           .local();
+        RPTEST_REQUIRE_EVENTUALLY(10s, [&tp_state] {
+            return tp_state.contains(model::l1_metastore_nt);
+        });
+    }
+
+    // Delete the existing metastore topic.
+    auto& tp_fe = get_node_application(model::node_id{0})
+                    ->controller->get_topics_frontend()
+                    .local();
+    tp_fe.dispatch_delete_topics({model::l1_metastore_nt}, 10s).get();
+    for (const auto& node_id : instance_ids()) {
+        auto& tp_state = get_node_application(node_id)
+                           ->controller->get_topics_state()
+                           .local();
+        RPTEST_REQUIRE_EVENTUALLY(10s, [&tp_state] {
+            return !tp_state.contains(model::l1_metastore_nt);
+        });
+    }
+
+    // Create a manifest with 10 domains and uplaod it.
+    constexpr int expected_partitions = 10;
+    metastore_manifest manifest;
+    manifest.partitioning_strategy = "murmur";
+    for (int i = 0; i < expected_partitions; ++i) {
+        manifest.domains.push_back(domain_uuid{uuid_t::create()});
+    }
+
+    auto* remote = &get_node_application(model::node_id{0})->cloud_io.local();
+    manifest_io mio(*remote, bucket_name);
+    auto fake_cluster_uuid = model::cluster_uuid{uuid_t::create()};
+    cloud_storage::remote_label rl(fake_cluster_uuid);
+    auto upload_res
+      = mio.upload_metastore_manifest(rl, std::move(manifest)).get();
+    ASSERT_TRUE(upload_res.has_value());
+
+    // Restore from the uploaded manifest. Retry until leaders are elected.
+    auto deadline = ss::lowres_clock::now() + 30s;
+    while (ss::lowres_clock::now() < deadline) {
+        auto restore_res = meta.restore(rl).get();
+        if (restore_res.has_value()) {
+            break;
+        }
+        ss::sleep(100ms).get();
+    }
+
+    // Verify the metastore topic was created with the correct partition count.
+    auto& tp_state = get_node_application(model::node_id{0})
+                       ->controller->get_topics_state()
+                       .local();
+    auto cfg = tp_state.get_topic_cfg(model::l1_metastore_nt);
+    ASSERT_TRUE(cfg.has_value());
+    ASSERT_EQ(cfg->partition_count, expected_partitions);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  MetastoreBackends,
+  ReplicatedMetastoreTest,
+  testing::Values(metastore_backend::simple, metastore_backend::lsm),
+  [](const testing::TestParamInfo<metastore_backend>& info) {
+      return info.param == metastore_backend::simple ? "Simple" : "LSM";
+  });

@@ -24,13 +24,14 @@ SEASTAR_THREAD_TEST_CASE(test_post_subject_versions_version_response) {
       R"({"type":"record","name":"test","fields":[{"type":"string","name":"field1"},{"type":"com.acme.Referenced","name":"int"}]})",
       pps::schema_type::avro,
       {{{"com.acme.Referenced"},
-        pps::subject{"childSubject"},
+        pps::context_subject_reference::unqualified("childSubject"),
         pps::schema_version{1}}},
       {}};
     const pps::subject sub{"imported-ref"};
 
     pps::get_subject_versions_version_response response{.stored_schema{
-      .schema{pps::subject{"imported-ref"}, schema_def.copy()},
+      .schema{
+        pps::context_subject::unqualified("imported-ref"), schema_def.copy()},
       .version{2},
       .id{12},
       .deleted{false}}};

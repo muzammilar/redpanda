@@ -1,12 +1,14 @@
 load("//bazel:build.bzl", "redpanda_cc_binary")
-load("//bazel:test.bzl", "redpanda_cc_gtest")
+load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_gtest", "redpanda_test_cc_library")
 
 redpanda_cc_binary(
     name = "db_bench",
+    testonly = True,
     srcs = [
         "db_bench.cc",
     ],
     deps = [
+        ":immutable_tree",
         "//src/v/base",
         "//src/v/bytes:iobuf",
         "//src/v/lsm/core:compression",
@@ -166,6 +168,7 @@ redpanda_cc_gtest(
     deps = [
         "//src/v/base",
         "//src/v/bytes:iobuf",
+        "//src/v/lsm/core:exceptions",
         "//src/v/lsm/core/internal:keys",
         "//src/v/lsm/core/internal:options",
         "//src/v/lsm/db:impl",
@@ -173,6 +176,8 @@ redpanda_cc_gtest(
         "//src/v/lsm/io:memory_persistence",
         "//src/v/lsm/sst:builder",
         "//src/v/random:generators",
+        "//src/v/ssx:clock",
+        "//src/v/ssx:time",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
         "@seastar",
@@ -197,5 +202,50 @@ redpanda_cc_gtest(
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
         "@seastar",
+    ],
+)
+
+redpanda_test_cc_library(
+    name = "immutable_tree",
+    hdrs = ["immutable_tree.h"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "immutable_tree_test",
+    timeout = "short",
+    srcs = [
+        "immutable_tree_test.cc",
+    ],
+    deps = [
+        ":immutable_tree",
+        "//src/v/base",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_bench(
+    name = "flush_task_rpbench",
+    srcs = ["flush_task_bench.cc"],
+    deps = [
+        "//src/v/base",
+        "//src/v/bytes:iobuf",
+        "//src/v/lsm/core/internal:files",
+        "//src/v/lsm/core/internal:keys",
+        "//src/v/lsm/core/internal:options",
+        "//src/v/lsm/db:flush_task",
+        "//src/v/lsm/db:memtable",
+        "//src/v/lsm/db:table_cache",
+        "//src/v/lsm/db:version_set",
+        "//src/v/lsm/io:disk_persistence",
+        "//src/v/lsm/sst:block_cache",
+        "//src/v/random:generators",
+        "@seastar",
+        "@seastar//:benchmark",
     ],
 )

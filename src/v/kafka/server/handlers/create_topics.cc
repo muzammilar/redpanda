@@ -88,24 +88,14 @@ bool is_supported(std::string_view name) {
        topic_property_max_compaction_lag_ms,
        topic_property_remote_allow_gaps,
        topic_property_message_timestamp_before_max_ms,
-       topic_property_message_timestamp_after_max_ms});
+       topic_property_message_timestamp_after_max_ms,
+       topic_property_redpanda_storage_mode});
 
     if (std::any_of(
           supported_configs.begin(),
           supported_configs.end(),
           [name](std::string_view p) { return name == p; })) {
         return true;
-    }
-
-    /*
-     * check development features below. if a development feature is not
-     * enabled, the system should behave as if the feature does not exist.
-     */
-
-    if (config::shard_local_cfg().cloud_topics_enabled()) {
-        if (name == topic_property_cloud_topic_enabled) {
-            return true;
-        }
     }
 
     return false;
@@ -131,9 +121,9 @@ using validators = make_validator_types<
   write_caching_configs_validator,
   iceberg_config_validator,
   iceberg_invalid_record_action_validator,
-  cloud_topic_config_validator,
   iceberg_target_lag_ms_validator,
-  min_max_compaction_lag_ms_validator>;
+  min_max_compaction_lag_ms_validator,
+  storage_mode_config_validator>;
 
 static void
 append_topic_configs(request_context& ctx, create_topics_response& response) {
@@ -400,13 +390,19 @@ ss::future<response_ptr> create_topics_handler::handle(
     // Record the number of partition mutations in each requested topic,
     // calulcating throttle delay if necessary
     const auto now = quota_manager::clock::now();
+    const auto principal = ctx.connection()->get_principal();
     auto quota_exceeded_it = co_await ssx::partition(
-      begin, valid_range_end, [&ctx, &response, now](const creatable_topic& t) {
+      begin,
+      valid_range_end,
+      [&ctx, &response, now, &principal](const creatable_topic& t) {
           /// Capture before next scheduling point below
           auto& response_ref = response;
           return ctx.quota_mgr()
             .record_partition_mutations(
-              ctx.header().client_id, t.num_partitions, now)
+              principal.name_view(),
+              ctx.header().client_id,
+              t.num_partitions,
+              now)
             .then([&response_ref](std::chrono::milliseconds delay) {
                 response_ref.data.throttle_time_ms = std::max(
                   response_ref.data.throttle_time_ms, delay);

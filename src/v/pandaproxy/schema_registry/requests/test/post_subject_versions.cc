@@ -13,6 +13,7 @@
 #include "pandaproxy/schema_registry/types.h"
 
 #include <seastar/testing/thread_test_case.hh>
+#include <seastar/util/defer.hh>
 
 #include <fmt/ostream.h>
 
@@ -25,13 +26,16 @@ using parse_result
   = pps::post_subject_versions_request_handler<>::rjson_parse_result;
 
 SEASTAR_THREAD_TEST_CASE(test_post_subject_versions_parser) {
+    pps::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { pps::enable_qualified_subjects::reset_local(); });
     const ss::sstring escaped_schema_def{
       R"({\"type\":\"record\",\"name\":\"test\",\"fields\":[{\"type\":\"string\",\"name\":\"field1\"},{\"type\":\"com.acme.Referenced\",\"name\":\"int\"}]})"};
     const pps::schema_definition expected_schema_def{
       R"({"type":"record","name":"test","fields":[{"type":"string","name":"field1"},{"type":"com.acme.Referenced","name":"int"}]})",
       pps::schema_type::avro,
       {{.name{"com.acme.Referenced"},
-        .sub{pps::subject{"childSubject"}},
+        .sub{pps::context_subject::unqualified("childSubject")},
         .version{pps::schema_version{1}}}},
       {}};
 
@@ -49,7 +53,7 @@ SEASTAR_THREAD_TEST_CASE(test_post_subject_versions_parser) {
     }
   ]
 })"};
-    const pps::subject sub{"test_subject"};
+    const auto sub = pps::context_subject::unqualified("test_subject");
     const parse_result expected{
       {sub, expected_schema_def.share()}, std::nullopt, std::nullopt};
 
@@ -81,7 +85,11 @@ SEASTAR_THREAD_TEST_CASE(test_post_subject_versions_parser) {
 }
 
 BOOST_AUTO_TEST_CASE(test_post_subject_versions_serde_metadata) {
-    const pps::subject sub{"test_subject"};
+    pps::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { pps::enable_qualified_subjects::reset_local(); });
+
+    const auto sub = pps::context_subject::unqualified("test_subject");
     {
         constexpr std::string_view no_metadata{
           R"({

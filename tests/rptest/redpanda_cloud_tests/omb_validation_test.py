@@ -179,8 +179,8 @@ class OMBValidationTest(RedpandaCloudTest):
             )
         config_profile = install_pack["config_profiles"][self.config_profile_name]
 
-        self.num_brokers: int = config_profile["nodes_count"]
-        self.tier_limits: ThroughputTierInfo = not_none(self.redpanda.get_tier())
+        self.num_brokers: int = len(self.redpanda.pods)
+        self.tier_limits: ThroughputTierInfo = not_none(self.redpanda.get_scaled_tier())
         self.tier_machine_info = get_machine_info(config_profile["machine_type"])
         self.rpk = RpkTool(self.redpanda)
 
@@ -429,8 +429,6 @@ class OMBValidationTest(RedpandaCloudTest):
             # wait for the swarm to report that all producers have started (sent at least 1 message)
             s.wait_for_all_started()
 
-        assert_no_rejected()
-
         # Now wait for up to five minutes to hit our target connection count: even though all producers
         # have started, it's possible that the connections haven't hit their target yet because some
         # brokers haven't been produced to by some clients: at 1 message/sec it can take some time
@@ -473,14 +471,10 @@ class OMBValidationTest(RedpandaCloudTest):
             f"swarm startup complete in {time_before_body - time_before_swarm} (expected: {warm_up_time_s})"
         )
 
-        assert_no_rejected()
-
         # run the OMB portion of the benchmark and ensure it succeeded
         benchmark.start()
         omb_seconds = benchmark.benchmark_time_mins() * 60
         benchmark.wait(timeout_sec=omb_seconds + 300)
-
-        assert_no_rejected()
 
         body_runtime = time() - time_before_body
 
@@ -504,6 +498,8 @@ class OMBValidationTest(RedpandaCloudTest):
             self.logger.debug(f"Metrics for swarm {i}: {metrics}")
 
         benchmark.check_succeed()
+
+        assert_no_rejected()
 
         # now check that the swarm producers were also reasonably successful
         # they may not be _completely_ successful because of:

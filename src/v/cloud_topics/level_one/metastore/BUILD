@@ -21,6 +21,47 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "metastore_manifest",
+    hdrs = [
+        "metastore_manifest.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":domain_uuid",
+        "//src/v/base",
+        "//src/v/container:chunked_vector",
+        "//src/v/serde",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "manifest_io",
+    srcs = [
+        "manifest_io.cc",
+    ],
+    hdrs = [
+        "manifest_io.h",
+    ],
+    implementation_deps = [
+        "//src/v/cloud_storage_clients",
+        "//src/v/serde",
+        "//src/v/ssx:future_util",
+        "//src/v/utils:retry_chain_node",
+        "@fmt",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":metastore_manifest",
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage:remote_label",
+        "//src/v/model",
+        "//src/v/utils:detailed_error",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "garbage_collector",
     srcs = [
         "garbage_collector.cc",
@@ -64,6 +105,7 @@ redpanda_cc_library(
         ":generated_level_one_rpc",
         ":rpc_types",
         "//src/v/base",
+        "//src/v/cloud_storage:remote_label",
         "//src/v/cluster",
         "//src/v/model",
         "//src/v/rpc",
@@ -78,6 +120,7 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":metastore_manifest",
         ":offset_interval_set",
         "//src/v/base",
         "//src/v/cloud_topics/level_one/common:object_id",
@@ -117,8 +160,13 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":manifest_io",
         ":metastore",
         "//src/v/base",
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage_clients",
+        "//src/v/model",
+        "//src/v/storage",
         "@seastar",
     ],
 )
@@ -130,6 +178,7 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":domain_uuid",
         ":offset_interval_set",
         ":state_update",
         "//src/v/cloud_topics/level_one/common:object_id",
@@ -198,6 +247,7 @@ redpanda_cc_library(
     hdrs = [
         "state.h",
     ],
+    visibility = ["//visibility:public"],
     deps = [
         ":offset_interval_set",
         "//src/v/base",
@@ -217,6 +267,23 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "state_update_utils",
+    srcs = [
+        "state_update_utils.cc",
+    ],
+    hdrs = [
+        "state_update_utils.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":offset_interval_set",
+        ":state",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/model",
+    ],
+)
+
+redpanda_cc_library(
     name = "state_update",
     srcs = [
         "state_update.cc",
@@ -230,6 +297,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":state",
+        ":state_update_utils",
         "//src/v/base",
         "//src/v/container:chunked_hash_map",
         "//src/v/container:chunked_vector",
@@ -277,6 +345,30 @@ redpanda_cc_library(
         "//src/v/base",
         "//src/v/ssx:work_queue",
         "//src/v/utils:named_type",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "flush_loop",
+    srcs = [
+        "flush_loop.cc",
+    ],
+    hdrs = [
+        "flush_loop.h",
+    ],
+    implementation_deps = [
+        ":metastore",
+        "//src/v/base",
+        "//src/v/cloud_topics:logger",
+        "//src/v/config",
+        "//src/v/ssx:semaphore",
+        "//src/v/ssx:time",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "//src/v/ssx:actor",
         "@seastar",
     ],
 )

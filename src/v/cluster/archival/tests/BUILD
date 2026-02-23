@@ -58,6 +58,7 @@ redpanda_cc_btest(
     deps = [
         "//src/v/cloud_storage",
         "//src/v/cloud_storage:types",
+        "//src/v/cloud_storage_clients",
         "//src/v/cluster",
         "//src/v/config",
         "//src/v/http/tests:utils",
@@ -93,7 +94,6 @@ redpanda_cc_gtest(
         "//src/v/storage",
         "//src/v/storage/tests:disk_log_builder",
         "//src/v/test_utils:gtest",
-        "//src/v/test_utils:scoped_config",
         "//src/v/utils:available_promise",
         "@googletest//:gtest",
         "@seastar",

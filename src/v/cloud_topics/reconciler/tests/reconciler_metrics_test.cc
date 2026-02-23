@@ -20,6 +20,9 @@
 #include "model/tests/randoms.h"
 #include "test_utils/metrics.h"
 
+#include <seastar/core/manual_clock.hh>
+#include <seastar/core/scheduling.hh>
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -36,25 +39,40 @@ class ReconcilerMetricsTest : public testing::Test {
 public:
     ReconcilerMetricsTest() { _reconciler.setup_metrics_for_tests(); }
 
-    ss::shared_ptr<fake_source> add_source() {
+    ss::shared_ptr<fake_source> add_source(
+      std::optional<model::topic> tp = std::nullopt,
+      std::optional<model::topic_id> tid = std::nullopt) {
+        if (!tid.has_value()) {
+            tid = model::create_topic_id();
+        }
         auto ntp = model::random_ntp();
-        auto tid = model::create_topic_id();
-        auto tidp = model::topic_id_partition(tid, ntp.tp.partition);
+        if (tp.has_value()) {
+            ntp.tp.topic = tp.value();
+        }
+
+        auto tidp = model::topic_id_partition(tid.value(), ntp.tp.partition);
         auto src = ss::make_shared<fake_source>(ntp, tidp);
         _reconciler.attach_source(src);
         return src;
     }
 
-    void reconcile() { _reconciler.reconcile().get(); }
+    void reconcile() {
+        // Advance the clock to ensure all topics are due for reconciliation.
+        ss::manual_clock::advance(std::chrono::hours(1));
+        _reconciler.reconcile().get();
+    }
 
     unreliable_io& io() { return _io; }
     unreliable_metastore& metastore() { return _metastore; }
-    reconciler::reconciler& reconciler() { return _reconciler; }
+    reconciler::reconciler<ss::manual_clock>& reconciler() {
+        return _reconciler;
+    }
 
 private:
     unreliable_io _io;
     unreliable_metastore _metastore;
-    reconciler::reconciler _reconciler{&_io, &_metastore};
+    reconciler::reconciler<ss::manual_clock> _reconciler{
+      &_io, &_metastore, ss::default_scheduling_group()};
 };
 
 using ::testing::Gt;
@@ -127,8 +145,11 @@ TEST_F(ReconcilerMetricsTest, ThroughputCounters) {
     EXPECT_THAT(get_object_upload_failed(), Optional(0));
     EXPECT_THAT(get_empty_objects_skipped(), Optional(0));
 
-    auto src1 = add_source();
-    auto src2 = add_source();
+    const model::topic tp{"tapioca"};
+    const model::topic_id tid = model::topic_id::create();
+
+    auto src1 = add_source(tp, tid);
+    auto src2 = add_source(tp, tid);
 
     src1->add_batch({.count = 10});
     src1->add_batch({.count = 10});
@@ -211,11 +232,14 @@ TEST_F(ReconcilerMetricsTest, HistogramMetrics) {
     EXPECT_GT(metastore_add_objects_duration.sample_count, 0);
 }
 
-// This test depends on the simple metastore packing all sources into one
-// object.
+// This test depends on the simple metastore packing all sources of the same
+// topic into one object.
 TEST_F(ReconcilerMetricsTest, ObjectMetrics) {
-    auto src1 = add_source();
-    auto src2 = add_source();
+    const model::topic tp{"tapioca"};
+    const model::topic_id tid = model::topic_id::create();
+
+    auto src1 = add_source(tp, tid);
+    auto src2 = add_source(tp, tid);
 
     src1->add_batch({.count = 10});
     src2->add_batch({.count = 5});

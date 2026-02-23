@@ -17,17 +17,21 @@
 #include "bytes/iobuf_parser.h"
 #include "bytes/iostream.h"
 #include "bytes/streambuf.h"
-#include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/logger.h"
+#include "cloud_storage_clients/multipart_upload.h"
 #include "cloud_storage_clients/s3_error.h"
+#include "cloud_storage_clients/upstream.h"
 #include "cloud_storage_clients/util.h"
 #include "cloud_storage_clients/xml_sax_parser.h"
 #include "config/configuration.h"
 #include "config/node_config.h"
 #include "config/types.h"
+#include "container/chunked_hash_map.h"
 #include "hashing/secure.h"
 #include "http/client.h"
 #include "http/utils.h"
+#include "json/istreamwrapper.h"
+#include "json/reader.h"
 #include "utils/base64.h"
 
 #include <seastar/core/abort_source.hh>
@@ -47,6 +51,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
 
+#include <charconv>
 #include <exception>
 #include <utility>
 #include <variant>
@@ -384,8 +389,128 @@ request_creator::make_delete_objects_request(
     return {std::move(header), make_iobuf_input_stream(std::move(body))};
 }
 
+result<std::tuple<http::client::request_header, ss::input_stream<char>>>
+request_creator::make_gcs_batch_delete_request(
+  const plain_bucket_name& name, const chunked_vector<object_key>& keys) {
+    // Google Cloud Storage Batch API
+    // https://cloud.google.com/storage/docs/batch
+    //
+    // POST /batch/storage/v1 HTTP/1.1
+    // Host: storage.googleapis.com
+    // Content-Type: multipart/mixed; boundary=<boundary>
+    // Authorization: Bearer <token>  # added by 'add_auth'
+    // Content-Length: <...>
+    //
+    // Body structure:
+    // --<boundary>
+    // Content-Type: application/http
+    // Content-ID: <id>
+    //
+    // DELETE /storage/v1/b/<bucket>/o/<object> HTTP/1.1
+    //
+    // --<boundary>
+    // ... (repeat for each object)
+    // --<boundary>--
+    //
+    // Note: GCS batch API requires path-only URLs in subrequests
+    // Max 100 requests per batch, max 10MB payload
+
+    // Generate unique boundary
+    auto boundary = fmt::format("batch_{}", uuid_t::create());
+
+    // Build the multipart body
+    iobuf body;
+    iobuf_ostreambuf obuf(body);
+    std::ostream out(&obuf);
+
+    auto encoded_bucket = http::uri_encode(name(), http::uri_encode_slash::yes);
+
+    for (size_t i = 0; i < keys.size(); ++i) {
+        const auto& key = keys[i];
+
+        auto encoded_key = http::uri_encode(
+          key().string(), http::uri_encode_slash::yes);
+
+        // Boundary line
+        fmt::print(out, "--{}\r\n", boundary);
+
+        http::client::request_header part_header{};
+        part_header.insert(
+          boost::beast::http::field::content_type, "application/http");
+        part_header.insert(
+          boost::beast::http::field::content_transfer_encoding, "binary");
+        part_header.insert(
+          boost::beast::http::field::content_id, fmt::to_string(i));
+
+        http::client::request_header subrequest_header{};
+        subrequest_header.method(boost::beast::http::verb::delete_);
+        subrequest_header.target(
+          fmt::format("/storage/v1/b/{}/o/{}", encoded_bucket, encoded_key));
+
+        // NOTE: Per docs.cloud.google.com/storage/docs/batch#http:
+        // if you provide an [Auth] header for a specific nested request, then
+        // that header applies only to the request that specified it. If you
+        // provide an [Auth] header for the outer request, then that header
+        // applies to all of the nested requests unless they override it with an
+        // [Auth] header of their own.
+
+        // part header
+
+        for (const auto& f : part_header) {
+            fmt::print(out, "{}: {}\r\n", f.name_string(), f.value());
+        }
+        fmt::print(out, "\r\n");
+
+        // subrequest header
+
+        fmt::print(
+          out,
+          "{} {} HTTP/1.1\r\n",
+          subrequest_header.method_string(),
+          subrequest_header.target());
+
+        for (const auto& f : subrequest_header) {
+            fmt::print(out, "{}: {}\r\n", f.name_string(), f.value());
+        }
+        fmt::print(out, "\r\n");
+    }
+
+    // Final boundary marker
+    fmt::print(out, "--{}--\r\n", boundary);
+
+    if (!out.good()) {
+        throw std::runtime_error(fmt_with_ctx(
+          fmt::format,
+          "failed to create GCS batch delete request, state: {}",
+          out.rdstate()));
+    }
+
+    // Create the main request header
+    http::client::request_header header{};
+    header.method(boost::beast::http::verb::post);
+    // GCS batch endpoint uses a fixed path, not bucket-specific
+    header.target("/batch/storage/v1");
+    header.insert(boost::beast::http::field::host, "storage.googleapis.com");
+    header.insert(
+      boost::beast::http::field::content_type,
+      fmt::format("multipart/mixed; boundary={}", boundary));
+    header.insert(
+      boost::beast::http::field::content_length,
+      fmt::format("{}", body.size_bytes()));
+
+    auto ec = _apply_credentials->add_auth(header);
+    if (ec) {
+        return ec;
+    }
+
+    // Convert iobuf to input_stream
+    auto stream = make_iobuf_input_stream(std::move(body));
+
+    return {std::move(header), std::move(stream)};
+}
+
 std::string request_creator::make_host(const plain_bucket_name& name) const {
-    switch (_ap_style) {
+    switch (_ap_style.value()) {
     case s3_url_style::virtual_host:
         // Host: bucket-name.s3.region-code.amazonaws.com
         return fmt::format("{}.{}", name(), _ap());
@@ -397,7 +522,7 @@ std::string request_creator::make_host(const plain_bucket_name& name) const {
 
 std::string request_creator::make_target(
   const plain_bucket_name& name, const object_key& key) const {
-    switch (_ap_style) {
+    switch (_ap_style.value()) {
     case s3_url_style::virtual_host:
         // Target: /homepage.html
         return fmt::format("/{}", key().string());
@@ -506,6 +631,142 @@ ss::future<ResultT> parse_rest_error_response(
       ""));
 }
 
+namespace {
+struct gcs_error_handler
+  : public rapidjson::BaseReaderHandler<rapidjson::UTF8<>, gcs_error_handler> {
+    enum class state : uint8_t { init, in_error, in_message, found };
+    state st = state::init;
+    std::optional<ss::sstring> message;
+    bool Key(const char* str, rapidjson::SizeType len, bool) {
+        std::string_view k{str, len};
+        if (st == state::init && k == "error") {
+            st = state::in_error;
+        } else if (st == state::in_error && k == "message") {
+            st = state::in_message;
+        }
+        return true;
+    }
+
+    bool String(const char* str, rapidjson::SizeType len, bool) {
+        if (st == state::in_message) {
+            message.emplace(str, len);
+            st = state::found;
+        }
+        return true;
+    }
+
+    bool EndObject(rapidjson::SizeType) {
+        if (st == state::in_error) {
+            st = state::init;
+        }
+        return true;
+    }
+};
+
+ss::sstring parse_gcs_error_reason(iobuf body) {
+    iobuf_istreambuf ibuf(body);
+    std::istream stream(&ibuf);
+    json::IStreamWrapper wrapper(stream);
+    json::Reader reader;
+    gcs_error_handler handler;
+    auto res = reader.Parse(wrapper, handler);
+    if (res && handler.message.has_value()) {
+        return std::move(handler.message).value();
+    } else {
+        return "Unknown";
+    }
+};
+} // namespace
+
+/// Parse GCS batch delete response using multipart parsing utilities
+/// GCS batch responses follow the multipart/mixed format similar to ABS
+static cloud_storage_clients::client::delete_objects_result
+parse_gcs_batch_delete_response(
+  iobuf buf,
+  std::string_view boundary,
+  const chunked_vector<object_key>& keys) {
+    cloud_storage_clients::client::delete_objects_result result;
+
+    // Parse multipart response - split by boundary
+    auto boundary_delim = ssx::sformat("--{}", boundary);
+    util::multipart_response_parser parts{std::move(buf), boundary_delim};
+
+    constexpr auto convert_content_id =
+      [](std::string_view raw) -> std::optional<size_t> {
+        constexpr std::string_view pfx = "response-";
+        std::optional<size_t> result{};
+        if (auto pos = raw.find(pfx); pos != raw.npos) {
+            raw = raw.substr(pos + pfx.size());
+            size_t v{};
+            auto res = std::from_chars(raw.data(), raw.data() + raw.size(), v);
+            // reject if from_chars found any junk on the end of the raw ID
+            if (res.ec == std::errc{} && res.ptr == raw.data() + raw.size()) {
+                result = v;
+            }
+        }
+        return result;
+    };
+
+    chunked_hash_set<size_t> content_ids_seen;
+    std::optional<iobuf> part;
+    while ((part = parts.get_part()).has_value()) {
+        iobuf_parser part_parser{std::move(part).value()};
+        auto mime = util::mime_header::from(part_parser);
+        auto maybe_content_id = mime.content_id<size_t>(convert_content_id);
+        if (!maybe_content_id.has_value()) {
+            vlog(
+              s3_log.debug,
+              "MIME header missing 'Content-ID' from batch response, skipping "
+              "part");
+            continue;
+        }
+        content_ids_seen.insert(maybe_content_id.value());
+        // having stripped off the leading MIME headers, we should have a
+        // complete HTTP response at the front of the parser
+        auto subrequest = util::multipart_subresponse::from(part_parser);
+
+        if (maybe_content_id.value() >= keys.size()) {
+            vlog(
+              s3_log.warn,
+              "batch_delete_response: Content-ID in response part {} out of "
+              "range, expected [{},{}): Error message: '{}'",
+              maybe_content_id.value(),
+              0,
+              keys.size(),
+              subrequest.error(parse_gcs_error_reason));
+            continue;
+        }
+
+        vlog(
+          s3_log.trace,
+          "batch_delete_response: Processing Content-ID {} (key: {})",
+          maybe_content_id,
+          keys[maybe_content_id.value()]);
+
+        if (auto maybe_error_message = subrequest.error(parse_gcs_error_reason);
+            maybe_error_message.has_value()) {
+            // Extract error message from response if available
+            // GCS error responses may contain error details in the body
+            result.undeleted_keys.push_back({
+              .key = keys[maybe_content_id.value()],
+              .reason = std::move(maybe_error_message).value(),
+            });
+        }
+    }
+
+    // Check for any keys that were not in the response
+    for (auto id : std::views::iota(0ul, keys.size())) {
+        if (!content_ids_seen.contains(id)) {
+            result.undeleted_keys.push_back({
+              .key = keys[id],
+              .reason = "Object missing from batch response",
+            });
+        }
+    }
+
+    return result;
+}
+
 /// Head response doesn't give us an XML encoded error object in
 /// the body. This method uses headers to generate an error object.
 template<class ResultT = void>
@@ -594,7 +855,7 @@ ss::future<result<T, error_outcome>> s3_client::send_request(
               key,
               bucket);
             outcome = error_outcome::authentication_failed;
-            if (auto p = _pool_ptr.get()) {
+            if (auto p = _upstream_ptr.get()) {
                 p->maybe_refresh_credentials();
             }
         } else {
@@ -623,32 +884,30 @@ ss::future<result<T, error_outcome>> s3_client::send_request(
 }
 
 s3_client::s3_client(
-  ss::weak_ptr<client_pool> pool_ptr,
+  ss::weak_ptr<upstream> upstream_ptr,
   const s3_configuration& conf,
   const net::base_transport::configuration& transport_conf,
   ss::shared_ptr<client_probe> probe,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
-  : client(std::move(pool_ptr))
+  : client(std::move(upstream_ptr))
   , _requestor(conf, std::move(apply_credentials))
   , _client(transport_conf, nullptr, probe)
   , _probe(std::move(probe)) {}
 
 s3_client::s3_client(
-  ss::weak_ptr<client_pool> pool_ptr,
+  ss::weak_ptr<upstream> upstream_ptr,
   const s3_configuration& conf,
   const net::base_transport::configuration& transport_conf,
   ss::shared_ptr<client_probe> probe,
   const ss::abort_source& as,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
-  : client(std::move(pool_ptr))
+  : client(std::move(upstream_ptr))
   , _requestor(conf, std::move(apply_credentials))
   , _client(transport_conf, &as, probe, conf.max_idle_time)
   , _probe(std::move(probe)) {}
 
 ss::future<result<client_self_configuration_output, error_outcome>>
 s3_client::self_configure() {
-    auto result = s3_self_configuration_result{
-      .url_style = s3_url_style::virtual_host};
     // Oracle cloud storage only supports path-style requests
     // (https://www.oracle.com/ca-en/cloud/storage/object-storage/faq/#category-amazon),
     // but self-configuration will misconfigure to virtual-host style due to a
@@ -666,8 +925,7 @@ s3_client::self_configure() {
     if (
       backend == model::cloud_storage_backend::oracle_s3_compat
       || backend == model::cloud_storage_backend::minio) {
-        result.url_style = s3_url_style::path;
-        co_return result;
+        co_return s3_self_configuration_result{.url_style = s3_url_style::path};
     }
 
     // Also handle possibly inferred backend.
@@ -675,8 +933,7 @@ s3_client::self_configure() {
     if (
       inferred_backend == model::cloud_storage_backend::oracle_s3_compat
       || inferred_backend == model::cloud_storage_backend::minio) {
-        result.url_style = s3_url_style::path;
-        co_return result;
+        co_return s3_self_configuration_result{.url_style = s3_url_style::path};
     }
 
     // Test virtual host style addressing, fall back to path if necessary.
@@ -688,10 +945,11 @@ s3_client::self_configure() {
     if (!bucket_config.value().has_value()) {
         vlog(
           s3_log.warn,
-          "Could not self-configure S3 Client, {} is not set. Defaulting to {}",
-          bucket_config.name(),
-          result.url_style);
-        co_return result;
+          "Could not self-configure S3 Client, {} is not set. Defaulting to "
+          "virtual_host",
+          bucket_config.name());
+        co_return s3_self_configuration_result{
+          .url_style = s3_url_style::virtual_host};
     }
 
     // TODO: Review this code. It is likely buggy when Remote Read Replicas are
@@ -703,12 +961,15 @@ s3_client::self_configure() {
 
     // Test virtual_host style.
     vassert(
-      _requestor._ap_style == s3_url_style::virtual_host,
-      "_ap_style should be virtual host by default before self configuration "
+      !_requestor._ap_style.has_value()
+        || _requestor._ap_style == s3_url_style::virtual_host,
+      "_ap_style should be unset or virtual host before self configuration "
       "begins");
+    _requestor._ap_style = s3_url_style::virtual_host;
     if (co_await self_configure_test(bucket)) {
-        // Virtual-host style request succeeded.
-        co_return result;
+        // Virtual host style request succeeded.
+        co_return s3_self_configuration_result{
+          .url_style = s3_url_style::virtual_host};
     }
 
     // fips mode can only work in virtual_host mode, so if the above test failed
@@ -720,10 +981,9 @@ s3_client::self_configure() {
 
     // Test path style.
     _requestor._ap_style = s3_url_style::path;
-    result.url_style = _requestor._ap_style;
     if (co_await self_configure_test(bucket)) {
         // Path style request succeeded.
-        co_return result;
+        co_return s3_self_configuration_result{.url_style = s3_url_style::path};
     }
 
     // Both addressing styles failed.
@@ -1238,4 +1498,546 @@ auto s3_client::delete_objects(
     co_return co_await send_request(
       do_delete_objects(bucket, keys, timeout), bucket, dummy);
 }
+
+bool s3_client::is_valid() const noexcept {
+    // If the upstream is gone (evicted) credentials may be stale so we consider
+    // the client no longer valid. maybe_refresh_credentials() would be a
+    // no-op.
+    return _upstream_ptr.get() != nullptr;
+}
+
+fmt::iterator s3_client::format_to(fmt::iterator it) const {
+    return fmt::format_to(it, "S3Client{{{}}}", _client.server_address());
+}
+
+gcs_client::gcs_client(
+  ss::weak_ptr<upstream> upstream_ptr,
+  const s3_configuration& conf,
+  const net::base_transport::configuration& transport_conf,
+  ss::shared_ptr<client_probe> probe,
+  ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
+  : s3_client(
+      std::move(upstream_ptr),
+      conf,
+      transport_conf,
+      std::move(probe),
+      std::move(apply_credentials)) {}
+
+gcs_client::gcs_client(
+  ss::weak_ptr<upstream> upstream_ptr,
+  const s3_configuration& conf,
+  const net::base_transport::configuration& transport_conf,
+  ss::shared_ptr<client_probe> probe,
+  const ss::abort_source& as,
+  ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
+  : s3_client(
+      std::move(upstream_ptr),
+      conf,
+      transport_conf,
+      std::move(probe),
+      as,
+      std::move(apply_credentials)) {}
+
+auto gcs_client::delete_objects(
+  const plain_bucket_name& bucket,
+  const chunked_vector<object_key>& keys,
+  ss::lowres_clock::duration timeout)
+  -> ss::future<result<delete_objects_result, error_outcome>> {
+    const object_key dummy{""};
+    co_return co_await send_request(
+      do_delete_objects(bucket, keys, timeout), bucket, dummy);
+}
+
+auto gcs_client::do_delete_objects(
+  const plain_bucket_name& bucket,
+  const chunked_vector<object_key>& keys,
+  ss::lowres_clock::duration timeout)
+  -> ss::future<client::delete_objects_result> {
+    auto request = _requestor.make_gcs_batch_delete_request(bucket, keys);
+    if (!request) {
+        co_return ss::coroutine::exception(
+          std::make_exception_ptr(std::system_error(request.error())));
+    }
+    auto& [header, body] = request.value();
+    vlog(s3_log.trace, "send GCS batch delete request:\n{}", header);
+
+    std::exception_ptr ex;
+    std::optional<delete_objects_result> result;
+    try {
+        auto response_stream = co_await _client.request(
+          std::move(header), body, timeout);
+
+        co_await response_stream->prefetch_headers();
+        vassert(response_stream->is_header_done(), "Header is not received");
+
+        const auto status = response_stream->get_headers().result();
+        // GCS batch API returns 200 OK for successful batch requests
+        // Individual subrequest failures are encoded in the multipart response
+        if (status != boost::beast::http::status::ok) {
+            const auto content_type = util::get_response_content_type(
+              response_stream->get_headers());
+            auto buf = co_await http::drain(std::move(response_stream));
+            co_await body.close();
+            co_return co_await parse_rest_error_response<delete_objects_result>(
+              content_type, status, std::move(buf));
+        }
+
+        // Extract boundary from Content-Type header
+        const auto& headers = response_stream->get_headers();
+        auto boundary = util::find_multipart_boundary(headers);
+        auto response_buf = co_await http::drain(std::move(response_stream));
+        if (!boundary.has_value()) {
+            throw std::runtime_error(boundary.error());
+        }
+        if (s3_log.is_enabled(ss::log_level::trace)) {
+            auto preview_bytes
+              = iobuf_const_parser(response_buf)
+                  .peek_bytes(
+                    std::min(response_buf.size_bytes(), size_t{1024}));
+            vlog(
+              s3_log.trace,
+              "GCS batch delete response: boundary='{}', body_size={}, "
+              "first_bytes='{}'",
+              boundary.value(),
+              response_buf.size_bytes(),
+              std::string_view(
+                reinterpret_cast<const char*>(preview_bytes.data()),
+                preview_bytes.size()));
+        }
+        result = parse_gcs_batch_delete_response(
+          std::move(response_buf), boundary.value(), keys);
+    } catch (...) {
+        ex = std::current_exception();
+    }
+
+    co_await body.close();
+
+    if (ex) {
+        std::rethrow_exception(ex);
+    }
+    co_return std::move(result).value();
+}
+
+fmt::iterator gcs_client::format_to(fmt::iterator it) const {
+    return fmt::format_to(it, "GCSClient{{{}}}", _client.server_address());
+}
+
+// Multipart upload implementations //
+
+result<http::client::request_header>
+request_creator::make_create_multipart_upload_request(
+  const plain_bucket_name& name, const object_key& key) {
+    // POST /{bucket}/{key}?uploads HTTP/1.1
+    // Host: s3.{region}.amazonaws.com
+    http::client::request_header header{};
+    auto host = make_host(name);
+    auto target = fmt::format("{}?uploads", make_target(name, key));
+    header.method(boost::beast::http::verb::post);
+    header.target(target);
+    header.insert(
+      boost::beast::http::field::user_agent, aws_header_values::user_agent);
+    header.insert(boost::beast::http::field::host, host);
+    header.insert(boost::beast::http::field::content_length, "0");
+    auto ec = _apply_credentials->add_auth(header);
+    if (ec) {
+        return ec;
+    }
+    util::url_encode_target(header);
+    return header;
+}
+
+result<http::client::request_header> request_creator::make_upload_part_request(
+  const plain_bucket_name& name,
+  const object_key& key,
+  size_t part_number,
+  const ss::sstring& upload_id,
+  size_t payload_size_bytes) {
+    // PUT /{bucket}/{key}?partNumber={part_number}&uploadId={upload_id}
+    // HTTP/1.1
+    http::client::request_header header{};
+    auto host = make_host(name);
+    auto target = fmt::format(
+      "{}?partNumber={}&uploadId={}",
+      make_target(name, key),
+      part_number,
+      upload_id);
+    header.method(boost::beast::http::verb::put);
+    header.target(target);
+    header.insert(
+      boost::beast::http::field::user_agent, aws_header_values::user_agent);
+    header.insert(boost::beast::http::field::host, host);
+    header.insert(
+      boost::beast::http::field::content_type, aws_header_values::text_plain);
+    header.insert(
+      boost::beast::http::field::content_length,
+      std::to_string(payload_size_bytes));
+    auto ec = _apply_credentials->add_auth(header);
+    if (ec) {
+        return ec;
+    }
+    util::url_encode_target(header);
+    return header;
+}
+
+result<std::tuple<http::client::request_header, ss::input_stream<char>>>
+request_creator::make_complete_multipart_upload_request(
+  const plain_bucket_name& name,
+  const object_key& key,
+  const ss::sstring& upload_id,
+  const std::vector<ss::sstring>& etags) {
+    // POST /{bucket}/{key}?uploadId={upload_id} HTTP/1.1
+    // Body: XML with list of parts
+    http::client::request_header header{};
+    auto host = make_host(name);
+    auto target = fmt::format(
+      "{}?uploadId={}", make_target(name, key), upload_id);
+
+    // Generate XML body
+    // <CompleteMultipartUpload>
+    //   <Part><PartNumber>1</PartNumber><ETag>"etag1"</ETag></Part>
+    //   <Part><PartNumber>2</PartNumber><ETag>"etag2"</ETag></Part>
+    // </CompleteMultipartUpload>
+    auto xml_body = iobuf::from(R"xml(<?xml version="1.0" encoding="UTF-8"?>
+<CompleteMultipartUpload>
+)xml");
+    for (size_t i = 0; i < etags.size(); ++i) {
+        xml_body.append_str(
+          fmt::format(
+            "  <Part><PartNumber>{}</PartNumber><ETag>{}</ETag></Part>\n",
+            i + 1,
+            etags[i]));
+    }
+    xml_body.append_str("</CompleteMultipartUpload>\n");
+
+    header.method(boost::beast::http::verb::post);
+    header.target(target);
+    header.insert(
+      boost::beast::http::field::user_agent, aws_header_values::user_agent);
+    header.insert(boost::beast::http::field::host, host);
+    header.insert(boost::beast::http::field::content_type, "application/xml");
+    header.insert(
+      boost::beast::http::field::content_length,
+      std::to_string(xml_body.size_bytes()));
+    auto ec = _apply_credentials->add_auth(header);
+    if (ec) {
+        return ec;
+    }
+    util::url_encode_target(header);
+
+    // Create input stream from XML body
+    auto body = make_iobuf_input_stream(std::move(xml_body));
+
+    return std::make_tuple(std::move(header), std::move(body));
+}
+
+result<http::client::request_header>
+request_creator::make_abort_multipart_upload_request(
+  const plain_bucket_name& name,
+  const object_key& key,
+  const ss::sstring& upload_id) {
+    // DELETE /{bucket}/{key}?uploadId={upload_id} HTTP/1.1
+    http::client::request_header header{};
+    auto host = make_host(name);
+    auto target = fmt::format(
+      "{}?uploadId={}", make_target(name, key), upload_id);
+    header.method(boost::beast::http::verb::delete_);
+    header.target(target);
+    header.insert(
+      boost::beast::http::field::user_agent, aws_header_values::user_agent);
+    header.insert(boost::beast::http::field::host, host);
+    header.insert(boost::beast::http::field::content_length, "0");
+    auto ec = _apply_credentials->add_auth(header);
+    if (ec) {
+        return ec;
+    }
+    util::url_encode_target(header);
+    return header;
+}
+
+ss::future<result<ss::shared_ptr<multipart_upload_state>, error_outcome>>
+s3_client::initiate_multipart_upload(
+  const plain_bucket_name& bucket,
+  const object_key& key,
+  size_t part_size,
+  ss::lowres_clock::duration timeout) {
+    // Validate part size
+    if (part_size < multipart_limits::min_s3_part_size) {
+        vlog(
+          s3_log.error,
+          "S3 part_size {} < minimum {}",
+          part_size,
+          multipart_limits::min_s3_part_size);
+        co_return error_outcome::fail;
+    }
+
+    if (part_size > multipart_limits::max_s3_part_size) {
+        vlog(
+          s3_log.warn,
+          "S3 part_size {} > maximum {} (continuing)",
+          part_size,
+          multipart_limits::max_s3_part_size);
+    }
+
+    // Create and return multipart state
+    // Caller will wrap this in a multipart_upload
+    auto state = ss::make_shared<s3_multipart_state>(
+      this, bucket, key, timeout);
+    co_return state;
+}
+
+// s3_multipart_state implementations //
+
+s3_multipart_state::s3_multipart_state(
+  s3_client* client,
+  plain_bucket_name bucket,
+  object_key key,
+  ss::lowres_clock::duration timeout)
+  : _client(client)
+  , _bucket(std::move(bucket))
+  , _key(std::move(key))
+  , _timeout(timeout) {}
+
+ss::future<> s3_multipart_state::initialize_multipart() {
+    vlog(
+      s3_log.debug,
+      "Initializing S3 multipart upload for {}/{}",
+      _bucket,
+      _key);
+
+    auto header = _client->_requestor.make_create_multipart_upload_request(
+      _bucket, _key);
+    if (!header) {
+        throw std::system_error(header.error());
+    }
+
+    vlog(
+      s3_log.trace, "send CreateMultipartUpload request:\n{}", header.value());
+
+    auto response_stream = co_await _client->_client.request(
+      std::move(header.value()), _timeout);
+
+    co_await response_stream->prefetch_headers();
+    vassert(response_stream->is_header_done(), "Header is not received");
+
+    const auto status = response_stream->get_headers().result();
+    if (status != boost::beast::http::status::ok) {
+        const auto content_type = util::get_response_content_type(
+          response_stream->get_headers());
+        auto buf = co_await http::drain(std::move(response_stream));
+        co_return co_await parse_rest_error_response(
+          content_type, status, std::move(buf));
+    }
+
+    // Parse XML response to extract UploadId
+    auto response_buf = co_await http::drain(std::move(response_stream));
+
+    try {
+        auto response_tree = util::iobuf_to_ptree(
+          std::move(response_buf), s3_log);
+        _upload_id = response_tree.get<ss::sstring>(
+          "InitiateMultipartUploadResult.UploadId");
+
+        _client->_probe->register_multipart_create();
+
+        vlog(
+          s3_log.debug,
+          "Initialized S3 multipart upload with upload_id: {}",
+          _upload_id);
+    } catch (const std::exception& ex) {
+        vlog(
+          s3_log.error,
+          "Failed to parse CreateMultipartUpload response: {}",
+          ex);
+        throw std::runtime_error(
+          fmt::format(
+            "Failed to parse UploadId from CreateMultipartUpload response: {}",
+            ex.what()));
+    }
+}
+
+ss::future<> s3_multipart_state::upload_part(size_t part_num, iobuf data) {
+    vassert(!_upload_id.empty(), "Multipart upload not initialized");
+
+    const size_t data_size = data.size_bytes();
+    vlog(
+      s3_log.debug,
+      "Uploading part {} (size: {}) for upload_id: {}",
+      part_num,
+      data_size,
+      _upload_id);
+
+    auto header = _client->_requestor.make_upload_part_request(
+      _bucket, _key, part_num, _upload_id, data_size);
+    if (!header) {
+        throw std::system_error(header.error());
+    }
+
+    vlog(s3_log.trace, "send UploadPart request:\n{}", header.value());
+
+    // Convert iobuf to input_stream
+    auto body = make_iobuf_input_stream(std::move(data));
+
+    auto response_stream = co_await _client->_client
+                             .request(std::move(header.value()), body, _timeout)
+                             .finally([&body] { return body.close(); });
+
+    co_await response_stream->prefetch_headers();
+    vassert(response_stream->is_header_done(), "Header is not received");
+
+    const auto status = response_stream->get_headers().result();
+    if (status != boost::beast::http::status::ok) {
+        const auto content_type = util::get_response_content_type(
+          response_stream->get_headers());
+        auto buf = co_await http::drain(std::move(response_stream));
+        co_return co_await parse_rest_error_response(
+          content_type, status, std::move(buf));
+    }
+
+    // Extract ETag from response headers
+    const auto& headers = response_stream->get_headers();
+    auto etag_it = headers.find(boost::beast::http::field::etag);
+    if (etag_it == headers.end()) {
+        co_await http::drain(std::move(response_stream));
+        throw std::runtime_error("UploadPart response missing ETag header");
+    }
+
+    ss::sstring etag(etag_it->value().data(), etag_it->value().size());
+    _etags.push_back(std::move(etag));
+
+    // Drain response
+    co_await http::drain(std::move(response_stream));
+
+    _client->_probe->register_multipart_upload();
+
+    vlog(
+      s3_log.debug, "Uploaded part {} with ETag: {}", part_num, _etags.back());
+}
+
+ss::future<> s3_multipart_state::complete_multipart_upload() {
+    vassert(!_upload_id.empty(), "Multipart upload not initialized");
+
+    vlog(
+      s3_log.debug,
+      "Completing S3 multipart upload {} with {} parts",
+      _upload_id,
+      _etags.size());
+
+    auto request = _client->_requestor.make_complete_multipart_upload_request(
+      _bucket, _key, _upload_id, _etags);
+    if (!request) {
+        throw std::system_error(request.error());
+    }
+
+    auto [header, body] = std::move(request.value());
+    vlog(s3_log.trace, "send CompleteMultipartUpload request:\n{}", header);
+
+    auto response_stream = co_await _client->_client
+                             .request(std::move(header), body, _timeout)
+                             .finally([&body] { return body.close(); });
+
+    co_await response_stream->prefetch_headers();
+    vassert(response_stream->is_header_done(), "Header is not received");
+
+    const auto status = response_stream->get_headers().result();
+    if (status != boost::beast::http::status::ok) {
+        const auto content_type = util::get_response_content_type(
+          response_stream->get_headers());
+        auto buf = co_await http::drain(std::move(response_stream));
+        co_return co_await parse_rest_error_response(
+          content_type, status, std::move(buf));
+    }
+
+    // AWS S3 can return errors embedded in a 200 OK response body for
+    // CompleteMultipartUpload. The response must be parsed to detect these.
+    // See:
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html
+    auto response_buf = co_await http::drain(std::move(response_stream));
+    auto response_tree = util::iobuf_to_ptree(std::move(response_buf), s3_log);
+    if (auto error_code = response_tree.get_optional<std::string>("Error.Code");
+        error_code) {
+        // Use std::string for ptree extraction since ss::sstring's stream
+        // extraction operator reads only until whitespace, which truncates
+        // multi-word error messages.
+        throw rest_error_response(
+          *error_code,
+          response_tree.get<std::string>("Error.Message", ""),
+          response_tree.get<std::string>("Error.RequestId", ""),
+          response_tree.get<std::string>("Error.Resource", ""));
+    }
+
+    _client->_probe->register_multipart_complete();
+
+    vlog(s3_log.debug, "Completed multipart upload {}", _upload_id);
+}
+
+ss::future<> s3_multipart_state::abort_multipart_upload() {
+    if (_upload_id.empty()) {
+        // Nothing to abort
+        vlog(s3_log.debug, "Abort called but multipart not initialized");
+        co_return;
+    }
+
+    vlog(s3_log.debug, "Aborting S3 multipart upload {}", _upload_id);
+
+    auto header = _client->_requestor.make_abort_multipart_upload_request(
+      _bucket, _key, _upload_id);
+    if (!header) {
+        // Log error but don't throw - abort should be best effort
+        vlog(
+          s3_log.warn,
+          "Failed to create abort request: {}",
+          header.error().message());
+        co_return;
+    }
+
+    vlog(
+      s3_log.trace, "send AbortMultipartUpload request:\n{}", header.value());
+
+    try {
+        auto response_stream = co_await _client->_client.request(
+          std::move(header.value()), _timeout);
+
+        co_await response_stream->prefetch_headers();
+        vassert(response_stream->is_header_done(), "Header is not received");
+
+        const auto status = response_stream->get_headers().result();
+        if (
+          status != boost::beast::http::status::no_content
+          && status != boost::beast::http::status::ok) {
+            vlog(
+              s3_log.warn,
+              "AbortMultipartUpload returned unexpected status: {}",
+              status);
+        }
+
+        // Drain response
+        co_await http::drain(std::move(response_stream));
+
+        _client->_probe->register_multipart_abort();
+
+        vlog(s3_log.debug, "Aborted multipart upload {}", _upload_id);
+    } catch (const std::exception& ex) {
+        // Log but don't throw - abort failures are non-fatal
+        vlog(
+          s3_log.warn,
+          "Failed to abort multipart upload {}: {}",
+          _upload_id,
+          ex);
+    }
+}
+
+ss::future<> s3_multipart_state::upload_as_single_object(iobuf data) {
+    vlog(
+      s3_log.debug,
+      "Using single put_object for small file (size: {})",
+      data.size_bytes());
+
+    const size_t data_size = data.size_bytes();
+    auto body = make_iobuf_input_stream(std::move(data));
+
+    // Use existing put_object implementation
+    co_await _client->do_put_object(
+      _bucket, _key, data_size, std::move(body), _timeout);
+}
+
 } // namespace cloud_storage_clients

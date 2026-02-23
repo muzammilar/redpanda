@@ -72,9 +72,8 @@ public:
       model::record_batch,
       raft::replicate_options) final;
 
-    ss::future<storage::translating_reader> make_reader(
-      kafka::log_reader_config cfg,
-      std::optional<model::timeout_clock::time_point>) final;
+    ss::future<storage::translating_reader>
+    make_reader(kafka::log_reader_config cfg) final;
 
     ss::future<std::vector<model::tx_range>> aborted_transactions(
       model::offset base,
@@ -94,6 +93,10 @@ public:
     result<partition_info> get_partition_info() const final;
 
     size_t estimate_size_between(kafka::offset, kafka::offset) const final;
+
+    size_t local_size_bytes() const override;
+    ss::future<std::optional<size_t>> cloud_size_bytes() const override;
+    model::offset offset_lag() const override;
 
 private:
     ss::lw_shared_ptr<cluster::partition> _partition;

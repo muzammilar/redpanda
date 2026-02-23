@@ -11,6 +11,7 @@
 
 #include "base/seastarx.h"
 #include "cloud_topics/level_one/common/object_id.h"
+#include "cloud_topics/level_one/metastore/metastore_manifest.h"
 #include "cloud_topics/level_one/metastore/offset_interval_set.h"
 #include "container/chunked_hash_map.h"
 #include "container/chunked_vector.h"
@@ -21,6 +22,10 @@
 #include <seastar/core/future.hh>
 
 #include <expected>
+
+namespace cloud_storage {
+struct remote_label;
+} // namespace cloud_storage
 
 namespace cloud_topics::l1 {
 
@@ -171,6 +176,14 @@ public:
     // Returns offsets (e.g. start, next) for the given partition.
     virtual ss::future<std::expected<offsets_response, errc>>
     get_offsets(const model::topic_id_partition&) = 0;
+
+    struct size_response {
+        // The total size of the partition in bytes.
+        size_t size;
+    };
+    // Returns the size of the partition in bytes.
+    virtual ss::future<std::expected<size_response, errc>>
+    get_size(const model::topic_id_partition&) = 0;
 
     struct add_response {
         // The actual next offsets for any topic partitions whose input objects
@@ -449,6 +462,10 @@ public:
 
     struct extent_metadata_response {
         extent_metadata_vec extents{};
+        // True when no more extents exist beyond this response (end of
+        // iteration). False when more extents may exist (hit max_num_extents
+        // limit).
+        bool end_of_stream{true};
     };
 
     // Returns a number of extents in the offset range `[start, end]`
@@ -472,6 +489,16 @@ public:
     get_extent_metadata_backwards(
       const model::topic_id_partition&, kafka::offset, kafka::offset, size_t)
       = 0;
+
+    // Flushes all metastore partitions to cloud storage.
+    virtual ss::future<std::expected<std::nullopt_t, errc>> flush() = 0;
+
+    // Restores metastore state from a previously flushed manifest in the given
+    // cluster's cloud storage. This downloads the metastore topic manifest,
+    // ensures the metastore topic exists with the correct number of partitions,
+    // and restores each partition's domain to its corresponding domain_uuid.
+    virtual ss::future<std::expected<std::nullopt_t, errc>>
+    restore(const cloud_storage::remote_label&) = 0;
 };
 
 } // namespace cloud_topics::l1

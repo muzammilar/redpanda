@@ -100,9 +100,9 @@ def data_dependency():
     http_archive(
         name = "libxml2",
         build_file = "//bazel/thirdparty:libxml2.BUILD",
-        sha256 = "f52638e4d67135c49f676d1c8fcc4f9f35afb7ec9bfb4aee743e2e86d56e006b",
-        strip_prefix = "libxml2-2.14.5",
-        url = "https://vectorized-public.s3.us-west-2.amazonaws.com/dependencies/libxml2-v2.14.5.tar.gz",
+        sha256 = "546ab74561c040df210c88dbd3c652bf509d826954ab2002c8973f1fa8d10130",
+        strip_prefix = "libxml2-2.14.6",
+        url = "https://vectorized-public.s3.us-west-2.amazonaws.com/dependencies/libxml2-v2.14.6.tar.gz",
     )
 
     http_archive(
@@ -138,9 +138,9 @@ def data_dependency():
     http_archive(
         name = "openssl",
         build_file = "//bazel/thirdparty:openssl.BUILD",
-        sha256 = "967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99",
-        strip_prefix = "openssl-3.5.4",
-        url = "https://vectorized-public.s3.amazonaws.com/dependencies/openssl-3.5.4.tar.gz",
+        sha256 = "b28c91532a8b65a1f983b4c28b7488174e4a01008e29ce8e69bd789f28bc2a89",
+        strip_prefix = "openssl-3.5.5",
+        url = "https://vectorized-public.s3.amazonaws.com/dependencies/openssl-3.5.5.tar.gz",
     )
 
     http_archive(
@@ -167,12 +167,13 @@ def data_dependency():
         url = "https://github.com/redpanda-data/CRoaring/archive/c433d1c70c10fb2e40f049e019e2abbcafa6e69d.tar.gz",
     )
 
+    # branch: v26.1.x
     http_archive(
         name = "seastar",
         build_file = "//bazel/thirdparty:seastar.BUILD",
-        sha256 = "29c95e2ec964e63d18f6dc37938daab642fa4197887f6c5a66e95b2ee439e295",
-        strip_prefix = "seastar-804949ce1b428e17ec920bdf17f94cc4ebc6104f",
-        url = "https://github.com/redpanda-data/seastar/archive/804949ce1b428e17ec920bdf17f94cc4ebc6104f.tar.gz",
+        sha256 = "b697dbed6afd966feae8bf58a3a3af704cb74ef4ee699c70506533948b23c740",
+        strip_prefix = "seastar-7780db6428357bca114d405ee2c7c24c52db6901",
+        url = "https://github.com/redpanda-data/seastar/archive/7780db6428357bca114d405ee2c7c24c52db6901.tar.gz",
     )
 
     http_archive(

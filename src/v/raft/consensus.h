@@ -296,9 +296,8 @@ public:
 
     std::optional<state_machine_manager>& stm_manager() { return _stm_manager; }
 
-    ss::future<model::record_batch_reader> make_reader(
-      storage::local_log_reader_config,
-      std::optional<clock_type::time_point> = std::nullopt);
+    ss::future<model::record_batch_reader>
+      make_reader(storage::local_log_reader_config);
 
     model::offset get_latest_configuration_offset() const;
     model::offset committed_offset() const { return _commit_index; }
@@ -363,6 +362,24 @@ public:
 
     ss::future<> step_down(std::string_view ctx) {
         return _op_lock.with([this, ctx] {
+            do_step_down(fmt::format("external_stepdown - {}", ctx));
+            if (_leader_id) {
+                _leader_id = std::nullopt;
+                trigger_leadership_notification();
+            }
+        });
+    }
+    ss::future<> step_down_in_term(model::term_id term, std::string_view ctx) {
+        return _op_lock.with([this, term, ctx] {
+            if (_term != term) {
+                vlog(
+                  _ctxlog.trace,
+                  "[{}] Skipping leader step down in term {}, current term: {}",
+                  ctx,
+                  term,
+                  _term);
+                return;
+            }
             do_step_down(fmt::format("external_stepdown - {}", ctx));
             if (_leader_id) {
                 _leader_id = std::nullopt;

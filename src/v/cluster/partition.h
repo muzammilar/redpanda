@@ -100,10 +100,9 @@ public:
      * the minimum of the max offset requested and the committed index of the
      * underlying raft group.
      */
-    ss::future<model::record_batch_reader> make_local_reader(
-      storage::local_log_reader_config config,
-      std::optional<model::timeout_clock::time_point> debounce_deadline
-      = std::nullopt);
+    ss::future<model::record_batch_reader>
+    make_local_reader(storage::local_log_reader_config config);
+
     ss::future<result<model::offset, std::error_code>>
     sync_kafka_start_offset_override(model::timeout_clock::duration timeout);
 
@@ -268,9 +267,8 @@ public:
     model::offset next_cloud_offset() const;
 
     /// Create a reader that will fetch data from remote storage
-    ss::future<storage::translating_reader> make_cloud_reader(
-      cloud_storage::cloud_log_reader_config config,
-      std::optional<model::timeout_clock::time_point> deadline = std::nullopt);
+    ss::future<storage::translating_reader>
+    make_cloud_reader(cloud_storage::cloud_log_reader_config config);
 
     std::optional<model::offset> kafka_start_offset_override() const;
 
@@ -375,7 +373,8 @@ public:
 
     ss::future<result<model::offset>> set_writes_disabled(
       partition_properties_stm::writes_disabled disable,
-      model::timeout_clock::time_point deadline);
+      model::timeout_clock::time_point deadline,
+      model::revision_id revision_id);
 
     using flush_hook = ss::noncopyable_function<ss::future<errc>(
       model::offset,

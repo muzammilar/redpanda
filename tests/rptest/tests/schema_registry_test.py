@@ -7,6 +7,7 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+import copy
 import http.client
 import json
 import random
@@ -289,6 +290,19 @@ message Test3 {
   google.protobuf.Timestamp timestamp = 1;
 }"""
 
+validate_proto_def = """
+syntax = "proto3";
+
+import "buf/validate/validate.proto";
+
+message TestValidate {
+  buf.validate.FieldRules field_rules = 1;
+  buf.validate.StringRules string_rules = 2;
+  buf.validate.Int32Rules int32_rules = 3;
+  buf.validate.MessageRules message_rules = 4;
+  buf.validate.TimestampRules timestamp_rules = 5;
+}"""
+
 json_number_schema_def = '{"type":"number"}'
 
 validation_schemas = dict(
@@ -555,6 +569,13 @@ schema_proto_b64 = (
     "AAUSAwMCBwoMCgUEAAIAARIDAwgJCgwKBQQAAgADEgMDDA1iBnByb3RvMw=="
 )
 
+schema_proto2_def = """
+syntax = "proto3";
+
+message ProtoType2 {
+  string s = 2;
+}"""
+
 schema_avro_def = (
     '{"type":"record","name":"myrecord","fields":[{"name":"f1","type":"string"}]}'
 )
@@ -565,6 +586,17 @@ syntax = "proto3";
 import "schema_proto.proto";
 message Dependee {
   ProtoType p =  1;
+}"""
+
+schema_proto_dependee2_def = """
+syntax = "proto3";
+
+import "schema_proto.proto";
+import "schema_proto2.proto";
+
+message Dependee {
+    ProtoType p1 = 1;
+    ProtoType2 p2 = 2;
 }"""
 
 schema_avro_dependee_def = """
@@ -579,7 +611,7 @@ schema_avro_dependee_def = """
     ]
 }"""
 
-soft_deleted_schemas = {
+base_schemas = {
     "proto": {
         "subject": "schema_proto",
         "schema": schema_proto_def,
@@ -595,6 +627,14 @@ soft_deleted_schemas = {
         "schema": schema_avro_def,
         "type": "AVRO",
     },
+}
+
+base2_schemas = {
+    "proto": {
+        "subject": "schema_proto2",
+        "schema": schema_proto2_def,
+        "type": "PROTOBUF",
+    }
 }
 
 not_dependent_schemas = {
@@ -640,6 +680,18 @@ dependent_schemas = {
         "type": "AVRO",
         "id": 6,
     },
+}
+
+multi_dependent_schemas = {
+    "proto": {
+        "subject": "schema_proto_multi_dependee_schema",
+        "schema": schema_proto_dependee2_def,
+        "references": [
+            {"name": "schema_proto.proto", "subject": "schema_proto", "version": 1},
+            {"name": "schema_proto2.proto", "subject": "schema_proto2", "version": 1},
+        ],
+        "type": "PROTOBUF",
+    }
 }
 
 log_config = LoggingConfig(
@@ -831,6 +883,11 @@ def get_normalize_dataset(type: SchemaType) -> TestNormalizeDataset:
     assert False, f"Unsupported schema {type=}"
 
 
+class ReferenceFormat(str, Enum):
+    NONE = ""
+    QUALIFIED = "qualified"
+
+
 class SchemaRegistryRedpandaClient:
     """
     A client for acessing the schema registry.
@@ -987,23 +1044,52 @@ class SchemaRegistryRedpandaClient:
             "GET", "schemas/types", headers=headers, tls_enabled=tls_enabled, **kwargs
         )
 
-    def get_schemas_ids_id(self, id, format=None, headers=HTTP_GET_HEADERS, **kwargs):
-        format_arg = f"?format={format}" if format is not None else ""
+    def get_schemas_ids_id(
+        self, id, format=None, subject=None, headers=HTTP_GET_HEADERS, **kwargs
+    ):
+        params = []
+        if format is not None:
+            params.append(f"format={format}")
+        if subject is not None:
+            params.append(f"subject={subject}")
+        query_string = f"?{'&'.join(params)}" if params else ""
         return self.request(
-            "GET", f"schemas/ids/{id}{format_arg}", headers=headers, **kwargs
+            "GET", f"schemas/ids/{id}{query_string}", headers=headers, **kwargs
         )
 
-    def get_schemas_ids_id_versions(self, id, headers=HTTP_GET_HEADERS, **kwargs):
+    def get_schemas_ids_id_schema(
+        self, id, format=None, subject=None, headers=HTTP_GET_HEADERS, **kwargs
+    ):
+        params = []
+        if format is not None:
+            params.append(f"format={format}")
+        if subject is not None:
+            params.append(f"subject={subject}")
+        query_string = f"?{'&'.join(params)}" if params else ""
         return self.request(
-            "GET", f"schemas/ids/{id}/versions", headers=headers, **kwargs
+            "GET", f"schemas/ids/{id}/schema{query_string}", headers=headers, **kwargs
+        )
+
+    def get_schemas_ids_id_versions(
+        self, id, subject=None, headers=HTTP_GET_HEADERS, **kwargs
+    ):
+        query_string = f"?subject={subject}" if subject is not None else ""
+        return self.request(
+            "GET", f"schemas/ids/{id}/versions{query_string}", headers=headers, **kwargs
         )
 
     def get_schemas_ids_id_subjects(
-        self, id, deleted=False, headers=HTTP_GET_HEADERS, **kwargs
+        self, id, deleted=False, subject=None, headers=HTTP_GET_HEADERS, **kwargs
     ):
+        query_params = []
+        if deleted:
+            query_params.append("deleted=true")
+        if subject is not None:
+            query_params.append(f"subject={subject}")
+        query_string = f"?{'&'.join(query_params)}" if query_params else ""
         return self.request(
             "GET",
-            f"schemas/ids/{id}/subjects{'?deleted=true' if deleted else ''}",
+            f"schemas/ids/{id}/subjects{query_string}",
             headers=headers,
             **kwargs,
         )
@@ -1065,11 +1151,19 @@ class SchemaRegistryRedpandaClient:
         )
 
     def get_subjects_subject_versions_version(
-        self, subject, version, format=None, headers=HTTP_GET_HEADERS, **kwargs
+        self,
+        subject,
+        version,
+        format=None,
+        reference_format: ReferenceFormat | None = None,
+        headers=HTTP_GET_HEADERS,
+        **kwargs,
     ):
         params = {}
         if format is not None:
             params["format"] = format
+        if reference_format and reference_format != ReferenceFormat.NONE:
+            params["referenceFormat"] = reference_format.value
         return self.request(
             "GET",
             f"subjects/{subject}/versions/{version}",
@@ -1207,6 +1301,14 @@ class SchemaRegistryRedpandaClient:
             **kwargs,
         )
 
+    def get_contexts(self, headers: Headers = HTTP_GET_HEADERS, **kwargs: Any):
+        return self.request("GET", "contexts", headers=headers, **kwargs)
+
+    def delete_context(
+        self, context: str, headers: Headers = HTTP_DELETE_HEADERS, **kwargs: Any
+    ):
+        return self.request("DELETE", f"contexts/{context}", headers=headers, **kwargs)
+
     def create_acl(
         self,
         principal,
@@ -1243,11 +1345,15 @@ class SchemaRegistryEndpoints(RedpandaTest):
         context: TestContext,
         schema_registry_config: SchemaRegistryConfig = SchemaRegistryConfig(),
         num_brokers: int = 3,
+        extra_rp_conf: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
+        merged_rp_conf = {"auto_create_topics_enabled": False}
+        if extra_rp_conf:
+            merged_rp_conf.update(extra_rp_conf)
         super(SchemaRegistryEndpoints, self).__init__(
             context,
-            extra_rp_conf={"auto_create_topics_enabled": False},
+            extra_rp_conf=merged_rp_conf,
             resource_settings=ResourceSettings(num_cpus=1),
             log_config=log_config,
             pandaproxy_config=PandaproxyConfig(),
@@ -1262,6 +1368,11 @@ class SchemaRegistryEndpoints(RedpandaTest):
 
     def assert_in(self, member, container, msg=None):
         assert member in container, msg or f"{member!r} not found in {container!r}"
+
+    def assert_not_in(self, member, container, msg=None):
+        assert member not in container, (
+            msg or f"{member!r} unexpectedly found in {container!r}"
+        )
 
     def _get_rpk_tools(self):
         return RpkTool(self.redpanda)
@@ -3512,7 +3623,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         # Test setup. Insert and soft-delete schemas to be referencedby
 
         for name in ["proto", "json", "avro"]:
-            schema = soft_deleted_schemas[name]
+            schema = base_schemas[name]
             result_raw = self.sr_client.post_subjects_subject_versions(
                 subject=schema["subject"],
                 data=json.dumps(
@@ -3747,6 +3858,27 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                 )
 
         test_runner(test_subjects_subject_versions_version_schema)
+
+    @cluster(num_nodes=1)
+    def test_qualified_subjects_flag_off(self):
+        """
+        With enable_qualified_subjects off (default), the qualified syntax is not parsed, and all
+        subjects are treated as if they are in the default context.
+        """
+
+        # Register a schema with qualified-looking subject name
+        # Flag OFF: treated as literal subject name in default context
+        # Flag ON: would create a separate .ctx context
+        qualified_subject = ":.ctx:my-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=qualified_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Verify only the default context exists (no .ctx context was created)
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), ["."])
 
 
 class SchemaRegistryModeNotMutableTest(SchemaRegistryEndpoints):
@@ -4966,6 +5098,1655 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
         )
         self.assert_equal(result_raw.status_code, 200)
         self.assert_equal(result_raw.json()["id"], 2)
+
+
+class SchemaRegistryContextTest(SchemaRegistryEndpoints):
+    """
+    Tests for context-qualified subject functionality.
+
+    These tests verify that Schema Registry correctly handles context-qualified
+    subjects (e.g., ":.ctx:subject") for isolation, references, config, and mode.
+    """
+
+    def __init__(self, context: TestContext, **kwargs: Any):
+        schema_registry_config = SchemaRegistryConfig()
+        schema_registry_config.mode_mutability = True
+        super().__init__(
+            context,
+            schema_registry_config=schema_registry_config,
+            extra_rp_conf={"schema_registry_enable_qualified_subjects": True},
+            **kwargs,
+        )
+
+    @cluster(num_nodes=1)
+    def test_contexts(self):
+        """Verify context-aware endpoints work with qualified subjects."""
+
+        schema_data = json.dumps({"schema": schema1_def})
+        compat_schema_data = json.dumps({"schema": schema2_def})
+        ctx_subject = ":.ctx1:sub1"
+
+        # Register in context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=schema_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Lookup in context
+        result = self.sr_client.post_subjects_subject(
+            subject=ctx_subject, data=schema_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Compatibility check in context
+        result = self.sr_client.post_compatibility_subject_version(
+            subject=ctx_subject, version="latest", data=compat_schema_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["is_compatible"], True)
+
+        # List versions in context
+        result = self.sr_client.get_subjects_subject_versions(subject=ctx_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), [1])
+
+        # Get specific version in context
+        result = self.sr_client.get_subjects_subject_versions_version(
+            subject=ctx_subject, version=1
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["version"], 1)
+
+        # Get schema only for specific version in context
+        result = self.sr_client.get_subjects_subject_versions_version_schema(
+            subject=ctx_subject, version=1
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Get referenced-by in context (empty list, no references)
+        result = self.sr_client.get_subjects_subject_versions_version_referenced_by(
+            subject=ctx_subject, version=1
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), [])
+
+        # Delete specific version in context
+        result = self.sr_client.delete_subject_version(subject=ctx_subject, version=1)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), 1)
+
+        # Delete subject in context (cleanup)
+        result = self.sr_client.delete_subject(subject=ctx_subject, permanent=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+    @cluster(num_nodes=1)
+    def test_context_isolation(self):
+        """Verify contexts are isolated: independent IDs, no cross-context lookups."""
+
+        # Register in default context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)
+
+        # Register same schema in .ctx1 - should get id=1 (independent counter)
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:sub1", data=json.dumps({"schema": schema2_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)
+
+        # Lookup schema in different context - should fail
+        result = self.sr_client.post_subjects_subject(
+            subject=":.ctx2:sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_context_references(self):
+        """Test schema references work with context-qualified subjects."""
+        # Test all schema types using existing test data
+        for schema_type in ["proto", "avro", "json"]:
+            base = base_schemas[schema_type]
+            dependent = dependent_schemas[schema_type]
+            ref_name = dependent["references"][0]["name"]
+
+            ctx = f"ctx-{schema_type}"
+            ctx_ref_subject = f":.{ctx}:base"
+            ctx_main_subject = f":.{ctx}:dependent"
+
+            # Register base schema in context
+            ref_data = json.dumps(
+                {"schema": base["schema"], "schemaType": base["type"]}
+            )
+            result = self.sr_client.post_subjects_subject_versions(
+                subject=ctx_ref_subject, data=ref_data
+            )
+            self.assert_equal(result.status_code, requests.codes.ok)
+
+            # Register dependent schema with in-context reference
+            main_data = json.dumps(
+                {
+                    "schema": dependent["schema"],
+                    "schemaType": dependent["type"],
+                    "references": [
+                        {"name": ref_name, "subject": ctx_ref_subject, "version": 1}
+                    ],
+                }
+            )
+            result = self.sr_client.post_subjects_subject_versions(
+                subject=ctx_main_subject, data=main_data
+            )
+            self.assert_equal(result.status_code, requests.codes.ok)
+
+            # Verify referenced-by works with context subjects
+            result = self.sr_client.get_subjects_subject_versions_version_referenced_by(
+                subject=ctx_ref_subject, version=1
+            )
+            self.assert_equal(result.status_code, requests.codes.ok)
+            self.assert_equal(len(result.json()), 1)
+
+        # Test cross-context references
+        base = base_schemas["proto"]
+        dependent = dependent_schemas["proto"]
+        cross_ref_subject = ":.ctx-cross-ref:base"
+        cross_main_subject = ":.ctx-cross-main:dependent"
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=cross_ref_subject,
+            data=json.dumps({"schema": base["schema"], "schemaType": base["type"]}),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=cross_main_subject,
+            data=json.dumps(
+                {
+                    "schema": dependent["schema"],
+                    "schemaType": dependent["type"],
+                    "references": [
+                        {
+                            "name": dependent["references"][0]["name"],
+                            "subject": cross_ref_subject,
+                            "version": 1,
+                        }
+                    ],
+                }
+            ),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+    @cluster(num_nodes=1)
+    def test_context_config(self):
+        """Test context-level config operations."""
+
+        ctx = "test-ctx"
+        ctx_prefix = f":.{ctx}:"
+        ctx_subject = f"{ctx_prefix}test-sub"
+
+        # Register a schema in the context first
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Set context-level config (empty subject = context-level)
+        result = self.sr_client.set_config_subject(
+            subject=ctx_prefix,
+            data=json.dumps({"compatibility": "NONE"}),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Get context-level config
+        result = self.sr_client.get_config_subject(subject=ctx_prefix)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "NONE")
+
+        # Subject-level config should fall back to context-level
+        result = self.sr_client.get_config_subject(subject=ctx_subject, fallback=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "NONE")
+
+        # Default context should not be affected by context-level config
+        result = self.sr_client.get_config()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "BACKWARD")
+
+        # Set subject-level config (different from context-level)
+        result = self.sr_client.set_config_subject(
+            subject=ctx_subject,
+            data=json.dumps({"compatibility": "FULL"}),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Subject should now have FULL (not context's NONE)
+        result = self.sr_client.get_config_subject(subject=ctx_subject, fallback=False)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "FULL")
+
+        # Delete subject-level config
+        result = self.sr_client.delete_config_subject(subject=ctx_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Subject should fall back to context-level NONE
+        result = self.sr_client.get_config_subject(subject=ctx_subject, fallback=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "NONE")
+
+        # Delete the context-level config
+        result = self.sr_client.delete_config_subject(subject=ctx_prefix)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Subject should fall back to default BACKWARD
+        result = self.sr_client.get_config_subject(subject=ctx_subject, fallback=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "BACKWARD")
+
+    @cluster(num_nodes=1)
+    def test_default_context(self):
+        """Test that qualified subject syntax works for the default context."""
+        schema_data = json.dumps({"schema": schema1_def})
+
+        # Register in default context with unqualified subject
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="default-ctx-subject", data=schema_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)
+
+        # Look up in default context with qualified subject
+        result = self.sr_client.post_subjects_subject(
+            subject=":.:default-ctx-subject", data=schema_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)
+
+        # Set the compatibility level with qualified subject
+        result = self.sr_client.set_config_subject(
+            subject=":.:", data=json.dumps({"compatibility": "FULL"})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibility"], "FULL")
+
+        # Look up the compatibility level of default context
+        result = self.sr_client.get_config()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "FULL")
+
+        # Delete the compatibility level with qualified subject
+        result = self.sr_client.delete_config_subject(subject=":.:")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "FULL")
+
+        # Look up the compatibility level of default context
+        result = self.sr_client.get_config()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["compatibilityLevel"], "BACKWARD")
+
+        # Set the mode with qualified subject
+        result = self.sr_client.set_mode_subject(
+            subject=":.:", data=json.dumps({"mode": "READONLY"}), force=True
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READONLY")
+
+        # Look up the mode of default context
+        result = self.sr_client.get_mode()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READONLY")
+
+        # Delete the mode with qualified subject
+        result = self.sr_client.delete_mode_subject(subject=":.:")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READONLY")
+
+        # Look up the mode of default context
+        result = self.sr_client.get_mode()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READWRITE")
+
+    @cluster(num_nodes=1)
+    def test_context_mode(self):
+        """Test context-level mode operations."""
+
+        ctx = "test-ctx"
+        ctx_prefix = f":.{ctx}:"
+        ctx_subject = f"{ctx_prefix}test-sub"
+
+        # Register a schema in the context first
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Set context-level mode (empty subject = context-level)
+        result = self.sr_client.set_mode_subject(
+            subject=ctx_prefix,
+            data=json.dumps({"mode": "READONLY"}),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Get context-level mode
+        result = self.sr_client.get_mode_subject(subject=ctx_prefix)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READONLY")
+
+        # Subject-level mode should fall back to context-level
+        result = self.sr_client.get_mode_subject(subject=ctx_subject, fallback=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READONLY")
+
+        # Default context should not be affected by context-level mode
+        result = self.sr_client.get_mode()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READWRITE")
+
+        # Set subject-level mode (different from context-level)
+        result = self.sr_client.set_mode_subject(
+            subject=ctx_subject,
+            data=json.dumps({"mode": "READWRITE"}),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Subject should now have READWRITE (not context's READONLY)
+        result = self.sr_client.get_mode_subject(subject=ctx_subject, fallback=False)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READWRITE")
+
+        # Delete subject-level mode
+        result = self.sr_client.delete_mode_subject(subject=ctx_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Subject should fall back to context-level READONLY
+        result = self.sr_client.get_mode_subject(subject=ctx_subject, fallback=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READONLY")
+
+        # Delete the context-level mode
+        result = self.sr_client.delete_mode_subject(subject=ctx_prefix)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Subject should fall back to default READWRITE
+        result = self.sr_client.get_mode_subject(subject=ctx_subject, fallback=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["mode"], "READWRITE")
+
+    @cluster(num_nodes=1)
+    def test_context_record_persistence(self):
+        # First, register a schema in the default context (no CONTEXT record)
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="default-ctx-sub", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Verify no CONTEXT record was written for default context
+        time.sleep(1)  # Give some time for logs to be flushed
+        assert not self.redpanda.search_log_any("Writing CONTEXT record for ctx=\\."), (
+            "CONTEXT record should not be written for default context"
+        )
+
+        # Now register a schema in a non-default context
+        ctx = ".test-context"
+        ctx_subject = f":{ctx}:test-sub"
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=json.dumps({"schema": schema2_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Verify context was persisted (CONTEXT record written and consumed)
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_in(".", result.json())
+        self.assert_in(ctx, result.json())
+
+    @cluster(num_nodes=1)
+    def test_context_unqualified_references(self):
+        base_schema = schema_proto_def
+        dependent_schema = schema_proto_dependee_def
+
+        ctx = ".unqual-ref-ctx"
+
+        # 1. Register base schema in a non-default context
+        base_subject = f":{ctx}:base-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=base_subject,
+            data=json.dumps({"schema": base_schema, "schemaType": "PROTOBUF"}),
+        )
+        self.assert_equal(result.status_code, 200)
+
+        # 2. Register dependent schema in SAME context with UNQUALIFIED reference
+        # The reference "base-subject" should resolve to ":.unqual-ref-ctx:base-subject"
+        dependent_subject = f":{ctx}:dependent-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=dependent_subject,
+            data=json.dumps(
+                {
+                    "schema": dependent_schema,
+                    "schemaType": "PROTOBUF",
+                    "references": [
+                        {
+                            "name": "schema_proto.proto",
+                            "subject": "base-subject",  # UNQUALIFIED - should inherit context
+                            "version": 1,
+                        }
+                    ],
+                }
+            ),
+        )
+        self.assert_equal(result.status_code, 200)
+
+        # 3. Verify the referenced-by relationship exists
+        result = self.sr_client.get_subjects_subject_versions_version_referenced_by(
+            subject=base_subject, version=1
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json(), [2])  # dependent_subject v1 has schema id 2
+
+        # 4. Test that unqualified references in DEFAULT context don't find
+        # schemas from other contexts
+        default_dependent_subject = "default-ctx-dependent"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=default_dependent_subject,
+            data=json.dumps(
+                {
+                    "schema": dependent_schema,
+                    "schemaType": "PROTOBUF",
+                    "references": [
+                        {
+                            "name": "schema_proto.proto",
+                            "subject": "base-subject",  # UNQUALIFIED - resolves to default context
+                            "version": 1,
+                        }
+                    ],
+                }
+            ),
+        )
+        # Should fail because "base-subject" doesn't exist in default context
+        self.assert_equal(result.status_code, 422)
+
+        # 5. Test qualified cross-context reference works
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=default_dependent_subject,
+            data=json.dumps(
+                {
+                    "schema": dependent_schema,
+                    "schemaType": "PROTOBUF",
+                    "references": [
+                        {
+                            "name": "schema_proto.proto",
+                            "subject": base_subject,  # QUALIFIED - explicit context
+                            "version": 1,
+                        }
+                    ],
+                }
+            ),
+        )
+        self.assert_equal(result.status_code, 200)
+
+    @cluster(num_nodes=1)
+    def test_context_list_delete(self):
+        """Test GET /contexts and DELETE /contexts/{context} endpoints."""
+
+        # Initially, only the default context should be listed
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), ["."])
+
+        # Register a schema in a custom context
+        ctx = ".test-ctx"
+        ctx_subject = f":{ctx}:test-sub"
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Now both contexts should be listed
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_in(".", result.json())
+        self.assert_in(ctx, result.json())
+
+        # Try to delete the custom context (should fail - not empty)
+        result = self.sr_client.delete_context(ctx)
+        self.assert_equal(result.status_code, 422)
+        self.assert_equal(result.json()["error_code"], 42211)
+
+        # Soft-delete the subject
+        result = self.sr_client.delete_subject(subject=ctx_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Try to delete context again (should still fail - has soft-deleted subjects)
+        result = self.sr_client.delete_context(ctx)
+        self.assert_equal(result.status_code, 422)
+        self.assert_equal(result.json()["error_code"], 42211)
+
+        # Permanently delete the subject
+        result = self.sr_client.delete_subject(subject=ctx_subject, permanent=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Now delete the context (should succeed)
+        result = self.sr_client.delete_context(ctx)
+        self.assert_equal(result.status_code, 204)
+
+        # Only default context should remain
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), ["."])
+
+        # Try to delete the default context (should fail with 422)
+        # Use URL-encoded dot (%2E) since "." has special meaning in URL paths
+        result = self.sr_client.delete_context("%2E")
+        self.assert_equal(result.status_code, 422)
+
+        # Try to delete a non-existent context (should fail with 404)
+        result = self.sr_client.delete_context(".nonexistent")
+        self.assert_equal(result.status_code, 404)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_by_id_with_subject(self):
+        """Test GET /schemas/ids/{id} with subject query parameter for context lookup."""
+
+        # === SETUP ===
+        # Register in default context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        default_id1 = result.json()["id"]  # ID 1
+
+        # Register another schema in default context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub2", data=json.dumps({"schema": schema2_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register in ctx1 context (same subject name, different context)
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_id1 = result.json()["id"]  # ID 1 in ctx1
+
+        # Register unique subject only in ctx1 (for cross-context search test)
+        # This subject name does NOT exist in default context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:unique-sub", data=json.dumps({"schema": schema3_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_unique_id = result.json()["id"]  # ID 2 in ctx1
+
+        # Register a third schema in ctx1 to create an ID that doesn't exist in default
+        # (for testing "ID only exists in non-default context")
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:ctx-only-sub",
+            data=json.dumps({"schema": simple_proto_def, "schemaType": "PROTOBUF"}),
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_only_id = result.json()["id"]  # ID 3 in ctx1, no ID 3 in default
+
+        # === Test: Subject portion empty (sub().empty()) ===
+        self.logger.info("Testing: Subject portion empty")
+
+        # 1a. No subject param at all - uses default context
+        result = self.sr_client.get_schemas_ids_id(id=default_id1)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # 1b. Context-only param ":.ctx1:" - uses ctx1, no subject restriction
+        result = self.sr_client.get_schemas_ids_id(id=ctx1_id1, subject=":.ctx1:")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # 1c. Explicit default context-only ":.:" - uses default, no subject restriction
+        result = self.sr_client.get_schemas_ids_id(id=default_id1, subject=":.:")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # === Test: Non-default context (qualified, no cross-context search) ===
+        self.logger.info("Testing: Non-default context")
+
+        # 2a. Non-default context - schema found
+        result = self.sr_client.get_schemas_ids_id(id=ctx1_id1, subject=":.ctx1:sub1")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # 2b. Non-default context - wrong subject for ID (no fallback for non-default ctx)
+        result = self.sr_client.get_schemas_ids_id(
+            id=ctx1_id1, subject=":.ctx1:wrong-sub"
+        )
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+        # 2c. Non-default context - context doesn't exist
+        result = self.sr_client.get_schemas_ids_id(
+            id=default_id1, subject=":.nonexistent:sub1"
+        )
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+        # === Test: Default context (implicit or explicit), schema found ===
+        self.logger.info("Testing: Default context, schema found")
+
+        # 3a. Unqualified subject exists in default context
+        result = self.sr_client.get_schemas_ids_id(id=default_id1, subject="sub1")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # 3b. Explicit default context (:.:) - same behavior as unqualified
+        result = self.sr_client.get_schemas_ids_id(id=default_id1, subject=":.:sub1")
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # === Test: Cross-context search ===
+        self.logger.info("Testing: Cross-context search")
+
+        # 4a. Unqualified subject "unique-sub" not in default, but exists in ctx1
+        # Should find it via cross-context search
+        result = self.sr_client.get_schemas_ids_id(
+            id=ctx1_unique_id, subject="unique-sub"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema3_def)
+
+        # 4b. Explicit default context (:.:) also triggers cross-context search
+        result = self.sr_client.get_schemas_ids_id(
+            id=ctx1_unique_id, subject=":.:unique-sub"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema3_def)
+
+        # === Test: Fallback without subject restriction ===
+        self.logger.info("Testing: Fallback without subject restriction")
+
+        # 5a. Subject "nonexistent-sub" doesn't exist anywhere, but ID exists in default
+        # Should fallback to returning schema without subject check
+        result = self.sr_client.get_schemas_ids_id(
+            id=default_id1, subject="nonexistent-sub"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        # === ERROR CASES ===
+        self.logger.info("Testing error cases")
+
+        # 6a. Schema ID doesn't exist at all
+        result = self.sr_client.get_schemas_ids_id(id=99999)
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+        # 6b. Schema ID exists only in ctx1, no subject param (looks in default only)
+        # ctx1_only_id (ID 3) only exists in ctx1, not in default context (which only has IDs 1-2)
+        result = self.sr_client.get_schemas_ids_id(id=ctx1_only_id)
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_by_id_schema_endpoint(self):
+        """Test GET /schemas/ids/{id}/schema returns the same schema as GET /schemas/ids/{id}["schema"]."""
+
+        # Register a schema
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="test-sub", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        schema_id = result.json()["id"]
+
+        # Verify /schema endpoint returns raw schema matching the nested ["schema"] field
+        result_full = self.sr_client.get_schemas_ids_id(id=schema_id)
+        result_schema = self.sr_client.get_schemas_ids_id_schema(id=schema_id)
+
+        self.assert_equal(result_full.status_code, requests.codes.ok)
+        self.assert_equal(result_schema.status_code, requests.codes.ok)
+        self.assert_equal(
+            result_schema.json(), json.loads(result_full.json()["schema"])
+        )
+
+        # Test with subject parameter as well
+        result_full = self.sr_client.get_schemas_ids_id(
+            id=schema_id, subject="test-sub"
+        )
+        result_schema = self.sr_client.get_schemas_ids_id_schema(
+            id=schema_id, subject="test-sub"
+        )
+
+        self.assert_equal(result_full.status_code, requests.codes.ok)
+        self.assert_equal(result_schema.status_code, requests.codes.ok)
+        self.assert_equal(
+            result_schema.json(), json.loads(result_full.json()["schema"])
+        )
+
+        # Test error case - schema not found
+        result_schema = self.sr_client.get_schemas_ids_id_schema(id=99999)
+        self.assert_equal(result_schema.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_versions_with_subject(self):
+        """Test GET /schemas/ids/{id}/versions with subject query parameter for context lookup.
+
+        Extended search (resolve_schema_id_extended) is already covered by
+        test_get_schema_by_id_with_subject; here we only verify the param
+        is wired up and the response format is correct.
+        """
+
+        # Register schema1 in default context under sub1 and sub2
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        default_schema1_id = result.json()["id"]
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub2", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register schema1 in ctx1 context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_schema1_id = result.json()["id"]
+
+        # Without subject param - returns versions from default context
+        result = self.sr_client.get_schemas_ids_id_versions(id=default_schema1_id)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        versions = result.json()
+        self.assert_equal(len(versions), 2)
+        subject_versions = {(v["subject"], v["version"]) for v in versions}
+        self.assert_equal(subject_versions, {("sub1", 1), ("sub2", 1)})
+
+        # With context-only param ":.ctx1:" - returns versions from ctx1
+        result = self.sr_client.get_schemas_ids_id_versions(
+            id=ctx1_schema1_id, subject=":.ctx1:"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        versions = result.json()
+        self.assert_equal(len(versions), 1)
+        self.assert_equal(versions[0]["subject"], ":.ctx1:sub1")
+        self.assert_equal(versions[0]["version"], 1)
+
+        # Error case - schema ID not found in specified context
+        result = self.sr_client.get_schemas_ids_id_versions(
+            id=ctx1_schema1_id, subject=":.nonexistent:"
+        )
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_subjects_with_subject(self):
+        """Test GET /schemas/ids/{id}/subjects with subject query parameter for context lookup.
+
+        Extended search (resolve_schema_id_extended) is already covered by
+        test_get_schema_versions_with_subject; here we only verify the param
+        is wired up and the response format is correct.
+        """
+
+        # Register schema1 in default context under sub1 and sub2
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        default_schema1_id = result.json()["id"]
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub2", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register schema1 in ctx1 context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_schema1_id = result.json()["id"]
+
+        # Without subject param - returns subjects from default context
+        result = self.sr_client.get_schemas_ids_id_subjects(id=default_schema1_id)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(set(result.json()), {"sub1", "sub2"})
+
+        # With context-only param ":.ctx1:" - returns subjects from ctx1
+        result = self.sr_client.get_schemas_ids_id_subjects(
+            id=ctx1_schema1_id, subject=":.ctx1:"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), [":.ctx1:sub1"])
+
+        # Error case - schema ID not found in specified context
+        result = self.sr_client.get_schemas_ids_id_subjects(
+            id=ctx1_schema1_id, subject=":.nonexistent:"
+        )
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+    def _get_schema_count_by_context(self):
+        """
+        Query schema_count metrics and return a dict of context -> count.
+        Only reports contexts that have schemas (count > 0).
+        """
+        samples = self.redpanda.metrics_samples(
+            sample_patterns=["schema_count"],
+            metrics_endpoint=MetricsEndpoint.METRICS,
+            nodes=[random.choice(self.redpanda.nodes)],
+        )
+
+        self.logger.info(f"Got metrics samples: {samples}")
+
+        if "schema_count" not in samples:
+            return {}
+
+        metrics = samples["schema_count"]
+
+        context_counts = {}
+
+        for sample in metrics.samples:
+            if "context" in sample.labels:
+                context = sample.labels["context"]
+                context_counts[context] = context_counts.get(context, 0) + sample.value
+
+        return context_counts
+
+    def _refresh_cache(self):
+        for n in self.redpanda.nodes:
+            self.sr_client.get_subjects(hostname=n.account.hostname)
+
+    def _schemas_in_context(self, context: str, expected_count: int):
+        counts = self._get_schema_count_by_context()
+        self.logger.info(
+            f'Counts in context "{context}": {counts.get(context, 0)}, expected: {expected_count}'
+        )
+        return expected_count == counts.get(context, 0)
+
+    @cluster(num_nodes=3)
+    def test_schema_count_context_labels(self):
+        """
+        Test that schema_count metric includes context labels and correctly
+        tracks schemas per context.
+        """
+        # Check metrics - should see 2 schemas in default context "."
+        self.logger.info("Testing schema_count metric with context labels")
+
+        # Initially should have no schemas in any context
+        counts = self._get_schema_count_by_context()
+        self.logger.info(f"Initial counts: {counts}")
+        assert len(counts) == 0 or all(c == 0 for c in counts.values()), (
+            f"Expected no schemas initially, got {counts}"
+        )
+
+        # Create schemas in default context (unqualified subjects)
+        schema1 = json.dumps({"schema": schema1_def})
+        schema2 = json.dumps({"schema": schema2_def})
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-1", data=schema1
+        )
+        assert result.status_code == requests.codes.ok
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-2", data=schema2
+        )
+        assert result.status_code == requests.codes.ok
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._schemas_in_context(".", 2),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for two schemas in default context",
+        )
+
+        # Create schemas in custom context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:my-subject-1", data=schema1
+        )
+        assert result.status_code == requests.codes.ok
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:my-subject-2", data=schema2
+        )
+        assert result.status_code == requests.codes.ok
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._schemas_in_context(".prod", 2),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for two schemas in .prod context",
+        )
+
+        # Check metrics - should see schemas in both contexts
+        counts = self._get_schema_count_by_context()
+        self.logger.info(f"Counts after prod context: {counts}")
+        assert "." in counts, f"Default context '.' not found in {counts}"
+        assert counts["."] == 2, (
+            f"Expected 2 schemas in default context, got {counts['.']}"
+        )
+        assert ".prod" in counts, f"Context '.prod' not found in {counts}"
+        assert counts[".prod"] == 2, (
+            f"Expected 2 schemas in .prod context, got {counts['.prod']}"
+        )
+
+        # Create schema in another context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.dev:test-subject", data=schema1
+        )
+        assert result.status_code == requests.codes.ok
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._schemas_in_context(".dev", 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one schema in .dev context",
+        )
+
+        # Check metrics - should see schemas in all three contexts
+        counts = self._get_schema_count_by_context()
+        self.logger.info(f"Counts after dev context: {counts}")
+        assert counts["."] == 2
+        assert counts[".prod"] == 2
+        assert ".dev" in counts, f"Context '.dev' not found in {counts}"
+        assert counts[".dev"] == 1, (
+            f"Expected 1 schema in .dev context, got {counts['.dev']}"
+        )
+
+    @cluster(num_nodes=3)
+    def test_schema_count_context_labels_empty_contexts(self):
+        """
+        Test that empty contexts (no schemas) are not reported in metrics.
+        """
+        self.logger.info("Testing empty context behavior")
+
+        # Create a context by creating and then deleting all schemas
+        schema1 = json.dumps({"schema": schema1_def})
+
+        # Create schema in a context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.temp:subject-1", data=schema1
+        )
+        assert result.status_code == requests.codes.ok
+
+        self._refresh_cache()
+
+        # Verify it shows up in metrics
+        wait_until(
+            lambda: self._schemas_in_context(".temp", 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one schema in .temp context",
+        )
+
+        # Delete the subject
+        result = self.sr_client.delete_subject(subject=":.temp:subject-1")
+        assert result.status_code == requests.codes.ok
+
+        # Permanently delete it
+        result = self.sr_client.delete_subject(
+            subject=":.temp:subject-1", params={"permanent": "true"}
+        )
+        assert result.status_code == requests.codes.ok
+
+        self._refresh_cache()
+
+        # Context should now have 0 schemas
+        wait_until(
+            lambda: self._schemas_in_context(".temp", 0),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one schema in .temp context",
+        )
+
+    @cluster(num_nodes=3)
+    def test_schema_count_context_labels_after_restart(self):
+        """
+        Test that schema_count metrics are correctly recomputed after restart.
+        """
+        self.logger.info("Testing schema_count metrics after restart")
+
+        # Create schemas in multiple contexts
+        schema1 = json.dumps({"schema": schema1_def})
+        schema2 = json.dumps({"schema": schema2_def})
+
+        # Default context
+        self.sr_client.post_subjects_subject_versions(
+            subject="default-subject", data=schema1
+        )
+
+        # Custom contexts
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:prod-subject-1", data=schema1
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:prod-subject-2", data=schema2
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.dev:dev-subject", data=schema1
+        )
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._schemas_in_context(".", 1)
+            and self._schemas_in_context(".prod", 2)
+            and self._schemas_in_context(".dev", 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for schemas to be registered in all contexts",
+        )
+
+        # Get counts before restart
+        counts_before = self._get_schema_count_by_context()
+        self.logger.info(f"Counts before restart: {counts_before}")
+
+        # Restart all nodes
+        self.logger.info("Restarting all nodes")
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._schemas_in_context(".", 1)
+            and self._schemas_in_context(".prod", 2)
+            and self._schemas_in_context(".dev", 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for schemas to be registered in all contexts post restart",
+        )
+
+        # Get counts after restart
+        counts_after = self._get_schema_count_by_context()
+        self.logger.info(f"Counts after restart: {counts_after}")
+
+        # Verify counts are the same
+        assert counts_after["."] == 1, (
+            f"Default context count changed after restart: {counts_before['.']} -> {counts_after['.']}"
+        )
+        assert counts_after[".prod"] == 2, (
+            f".prod context count changed after restart: {counts_before['.prod']} -> {counts_after['.prod']}"
+        )
+        assert counts_after[".dev"] == 1, (
+            f".dev context count changed after restart: {counts_before['.dev']} -> {counts_after['.dev']}"
+        )
+
+    def _get_subject_count_by_context(self):
+        """
+        Query subject_count metrics and return a dict of (context, deleted) -> count.
+        """
+        samples = self.redpanda.metrics_samples(
+            sample_patterns=["subject_count"],
+            metrics_endpoint=MetricsEndpoint.METRICS,
+            nodes=[random.choice(self.redpanda.nodes)],
+        )
+
+        self.logger.info(f"Subject count samples: {samples}")
+
+        if "subject_count" not in samples:
+            return {}
+
+        metrics = samples["subject_count"]
+
+        context_counts = {}
+        for sample in metrics.samples:
+            if "context" in sample.labels:
+                context = sample.labels["context"]
+                deleted = sample.labels["deleted"]
+                key = (context, deleted)
+                context_counts[key] = context_counts.get(key, 0) + sample.value
+
+        return context_counts
+
+    def _subjects_in_context(self, context: str, deleted: bool, expected_count: int):
+        counts = self._get_subject_count_by_context()
+        key = (context, "true" if deleted else "false")
+        self.logger.info(
+            f'Counts for context="{context}", deleted="{deleted}": {counts.get(key, 0)}, expected: {expected_count}'
+        )
+        return expected_count == counts.get(key, 0)
+
+    @cluster(num_nodes=3)
+    def test_subject_count_context_labels(self):
+        """
+        Test that subject_count metric includes both context and deleted labels.
+        """
+        self.logger.info("Testing subject_count metric with context and deleted labels")
+
+        # Initially should have no subjects
+        counts = self._get_subject_count_by_context()
+        self.logger.info(f"Initial counts: {counts}")
+
+        # Create subjects in default context
+        schema1 = json.dumps({"schema": schema1_def})
+        schema2 = json.dumps({"schema": schema2_def})
+
+        self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-1", data=schema1
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-2", data=schema2
+        )
+
+        self._refresh_cache()
+
+        # Check metrics - should see 2 not-deleted subjects in default context
+        wait_until(
+            lambda: self._subjects_in_context(".", False, 2),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for two not-deleted subjects in default context",
+        )
+
+        # Create subjects in custom contexts
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:subject-1", data=schema1
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:subject-2", data=schema2
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.dev:subject-1", data=schema1
+        )
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._subjects_in_context(".prod", False, 2)
+            and self._subjects_in_context(".dev", False, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for subjects in .prod and .dev contexts",
+        )
+
+        # Soft delete a subject in default context
+        self.sr_client.delete_subject(subject="default-subject-1")
+
+        self._refresh_cache()
+
+        # Check metrics - should move from not-deleted to deleted
+        wait_until(
+            lambda: self._subjects_in_context(".", False, 1)
+            and self._subjects_in_context(".", True, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one deleted and one not-deleted subject in default context",
+        )
+
+        # Revive the deleted subject
+        self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-1", data=schema1
+        )
+
+        self._refresh_cache()
+        wait_until(
+            lambda: self._subjects_in_context(".", False, 2),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for two not-deleted subjects in default context after reviving",
+        )
+
+    @cluster(num_nodes=3)
+    def test_subject_count_permanent_delete(self):
+        """
+        Test that permanent delete decrements the subject count correctly.
+        """
+        self.logger.info("Testing subject_count with permanent delete")
+
+        schema1 = json.dumps({"schema": schema1_def})
+
+        # Create a subject
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.temp:subject-1", data=schema1
+        )
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one not-deleted subject in .temp context",
+        )
+
+        # Soft delete it
+        self.sr_client.delete_subject(subject=":.temp:subject-1")
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 0)
+            and self._subjects_in_context(".temp", True, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one deleted subject in .temp context",
+        )
+
+        # Permanently delete it
+        self.sr_client.delete_subject(
+            subject=":.temp:subject-1", params={"permanent": "true"}
+        )
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 0)
+            and self._subjects_in_context(".temp", True, 0),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for zero subjects in .temp context after permanent delete",
+        )
+
+    @cluster(num_nodes=3)
+    def test_subject_soft_delete_versions(self):
+        """
+        Test that verifies that a subject shows up in deleted after
+        all of the versions are soft deleted
+        """
+
+        schema1 = json.dumps({"schema": schema1_def})
+        schema2 = json.dumps({"schema": schema2_def})
+
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.temp:subject-1", data=schema1
+        )
+
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.temp:subject-1", data=schema2
+        )
+
+        version_schema_1 = self.sr_client.post_subjects_subject(
+            subject=":.temp:subject-1", data=schema1
+        ).json()["version"]
+        version_schema_2 = self.sr_client.post_subjects_subject(
+            subject=":.temp:subject-1", data=schema2
+        ).json()["version"]
+
+        self.logger.info(
+            f"Registered schema1 with version {version_schema_1} and schema2 with version {version_schema_2}"
+        )
+
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 1)
+            and self._subjects_in_context(".temp", True, 0),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one not-deleted subjects in .temp context",
+        )
+
+        # Now delete version 1 and verify that we don't see the subject as deleted
+        self.sr_client.delete_subject_version(
+            subject=":.temp:subject-1", version=version_schema_1
+        )
+
+        self._refresh_cache()
+
+        subjects = self.sr_client.get_subjects(deleted=False).json()
+        self.logger.info(f"Non-deleted Subjects: {subjects}")
+        self.assert_in(":.temp:subject-1", subjects)
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 1)
+            and self._subjects_in_context(".temp", True, 0),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one not-deleted subjects in .temp context post soft delete",
+        )
+
+        # Now delete version 2 and verify that the subject is now reported as deleted
+        self.sr_client.delete_subject_version(
+            subject=":.temp:subject-1", version=version_schema_2
+        )
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 0)
+            and self._subjects_in_context(".temp", True, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one deleted subjects in .temp context",
+        )
+
+        # Now resurrect verison 2 and verify we now see the subject back in the context
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.temp:subject-1", data=schema2
+        )
+        self._refresh_cache()
+
+        wait_until(
+            lambda: self._subjects_in_context(".temp", False, 1)
+            and self._subjects_in_context(".temp", True, 0),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for one not-deleted subjects in .temp context post resurrection",
+        )
+
+    @cluster(num_nodes=3)
+    def test_subject_count_context_after_restart(self):
+        """
+        Verifies that after restart that the subject count metrics are correct
+        for both deleted and undeleted subjects across contexts.
+        """
+        self.logger.info("Testing subject_count metrics after restart")
+
+        schema1 = json.dumps({"schema": schema1_def})
+        schema2 = json.dumps({"schema": schema2_def})
+
+        # Create subjects in default context
+        self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-1", data=schema1
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject="default-subject-2", data=schema2
+        )
+
+        # Create subjects in .prod context
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:prod-subject-1", data=schema1
+        )
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.prod:prod-subject-2", data=schema2
+        )
+
+        # Create subjects in .dev context
+        self.sr_client.post_subjects_subject_versions(
+            subject=":.dev:dev-subject-1", data=schema1
+        )
+
+        self._refresh_cache()
+
+        # Verify initial state - all subjects should be undeleted
+        wait_until(
+            lambda: self._subjects_in_context(".", False, 2)
+            and self._subjects_in_context(".prod", False, 2)
+            and self._subjects_in_context(".dev", False, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for subjects to be registered in all contexts",
+        )
+
+        # Soft delete one subject in each context
+        self.sr_client.delete_subject(subject="default-subject-1")
+        self.sr_client.delete_subject(subject=":.prod:prod-subject-1")
+
+        self._refresh_cache()
+
+        # Verify we have both deleted and undeleted subjects
+        wait_until(
+            lambda: self._subjects_in_context(".", False, 1)
+            and self._subjects_in_context(".", True, 1)
+            and self._subjects_in_context(".prod", False, 1)
+            and self._subjects_in_context(".prod", True, 1)
+            and self._subjects_in_context(".dev", False, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for deleted subjects in contexts",
+        )
+
+        # Get counts before restart
+        counts_before = self._get_subject_count_by_context()
+        self.logger.info(f"Counts before restart: {counts_before}")
+
+        # Restart all nodes
+        self.logger.info("Restarting all nodes")
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+
+        self._refresh_cache()
+
+        # Verify counts are restored after restart
+        wait_until(
+            lambda: self._subjects_in_context(".", False, 1)
+            and self._subjects_in_context(".", True, 1)
+            and self._subjects_in_context(".prod", False, 1)
+            and self._subjects_in_context(".prod", True, 1)
+            and self._subjects_in_context(".dev", False, 1),
+            timeout_sec=30,
+            retry_on_exc=True,
+            err_msg="Timed out waiting for subjects to be restored after restart",
+        )
+
+        # Get counts after restart
+        counts_after = self._get_subject_count_by_context()
+        self.logger.info(f"Counts after restart: {counts_after}")
+
+        # Verify counts match before and after restart
+        assert counts_after[(".", "false")] == 1, (
+            f"Default context undeleted count changed after restart: "
+            f"{counts_before.get(('.', 'false'), 0)} -> {counts_after.get(('.', 'false'), 0)}"
+        )
+        assert counts_after[(".", "true")] == 1, (
+            f"Default context deleted count changed after restart: "
+            f"{counts_before.get(('.', 'true'), 0)} -> {counts_after.get(('.', 'true'), 0)}"
+        )
+        assert counts_after[(".prod", "false")] == 1, (
+            f".prod context undeleted count changed after restart: "
+            f"{counts_before.get(('.prod', 'false'), 0)} -> {counts_after.get(('.prod', 'false'), 0)}"
+        )
+        assert counts_after[(".prod", "true")] == 1, (
+            f".prod context deleted count changed after restart: "
+            f"{counts_before.get(('.prod', 'true'), 0)} -> {counts_after.get(('.prod', 'true'), 0)}"
+        )
+        assert counts_after[(".dev", "false")] == 1, (
+            f".dev context undeleted count changed after restart: "
+            f"{counts_before.get(('.dev', 'false'), 0)} -> {counts_after.get(('.dev', 'false'), 0)}"
+        )
+
+    def _post_new_schema(self, subject: str, schema: str, context: str | None = None):
+        subject = subject if context is None else f":.{context}:{subject}"
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=subject, data=schema
+        )
+
+        self.logger.info(f"result: {result}, {result.text}")
+
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+    @cluster(num_nodes=1)
+    def test_context_reference_format(self):
+        """
+        This test verifies the behavior of the new paramater to
+        GET /subjects/{subject}/versions/{version} that will make unqualified references
+        qualified.
+        """
+        schema_type = "proto"
+
+        base = base_schemas[schema_type]
+        base2 = base2_schemas[schema_type]
+        multi_dependent = multi_dependent_schemas[schema_type]
+
+        ctx = f"ctx-{schema_type}"
+        base_subject = "base"
+        base2_subject = "base2"
+        multi_dependent_subject = "multi-dependent"
+
+        base_data = json.dumps({"schema": base["schema"], "schemaType": base["type"]})
+        base2_data = json.dumps(
+            {"schema": base2["schema"], "schemaType": base2["type"]}
+        )
+
+        self._post_new_schema(subject=base_subject, schema=base_data)
+        self._post_new_schema(subject=base2_subject, schema=base2_data)
+
+        self._post_new_schema(subject=base_subject, schema=base_data, context=ctx)
+        self._post_new_schema(subject=base2_subject, schema=base2_data, context=ctx)
+
+        multi_dependent_default = {
+            "schema": multi_dependent["schema"],
+            "schemaType": multi_dependent["type"],
+            "references": copy.deepcopy(multi_dependent["references"]),
+        }
+        multi_dependent_default["references"][0]["subject"] = base_subject
+        multi_dependent_default["references"][1]["subject"] = base2_subject
+
+        multi_dependent_default_json = json.dumps(multi_dependent_default)
+
+        multi_dependent_context = {
+            "schema": multi_dependent["schema"],
+            "schemaType": multi_dependent["type"],
+            "references": copy.deepcopy(multi_dependent["references"]),
+        }
+        multi_dependent_context["references"][0]["subject"] = f":.{ctx}:{base_subject}"
+        multi_dependent_context["references"][1]["subject"] = base2_subject
+
+        multi_dependent_context_json = json.dumps(multi_dependent_context)
+
+        self._post_new_schema(
+            subject=multi_dependent_subject, schema=multi_dependent_default_json
+        )
+        self._post_new_schema(
+            subject=multi_dependent_subject,
+            schema=multi_dependent_context_json,
+            context=ctx,
+        )
+
+        result = self.sr_client.get_subjects_subject_versions_version(
+            subject=multi_dependent_subject,
+            version=1,
+            reference_format=ReferenceFormat.NONE,
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        result_json = result.json()
+        self.logger.info(f"result_json: {result_json}")
+        self.assert_equal(len(result_json["references"]), 2)
+        self.assert_equal(result_json["references"][0]["subject"], base_subject)
+        self.assert_equal(result_json["references"][1]["subject"], base2_subject)
+
+        result = self.sr_client.get_subjects_subject_versions_version(
+            subject=multi_dependent_subject,
+            version=1,
+            reference_format=ReferenceFormat.QUALIFIED,
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        result_json = result.json()
+        self.logger.info(f"result_json: {result_json}")
+        self.assert_equal(len(result_json["references"]), 2)
+        self.assert_equal(result_json["references"][0]["subject"], base_subject)
+        self.assert_equal(result_json["references"][1]["subject"], base2_subject)
+
+        result = self.sr_client.get_subjects_subject_versions_version(
+            subject=f":.{ctx}:{multi_dependent_subject}",
+            version=1,
+            reference_format=ReferenceFormat.NONE,
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        result_json = result.json()
+        self.logger.info(f"result_json: {result_json}")
+        self.assert_equal(len(result_json["references"]), 2)
+        self.assert_equal(
+            result_json["references"][0]["subject"], f":.{ctx}:{base_subject}"
+        )
+        self.assert_equal(result_json["references"][1]["subject"], base2_subject)
+
+        result = self.sr_client.get_subjects_subject_versions_version(
+            subject=f":.{ctx}:{multi_dependent_subject}",
+            version=1,
+            reference_format=ReferenceFormat.QUALIFIED,
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        result_json = result.json()
+        self.logger.info(f"result_json: {result_json}")
+        self.assert_equal(len(result_json["references"]), 2)
+        self.assert_equal(
+            result_json["references"][0]["subject"], f":.{ctx}:{base_subject}"
+        )
+        self.assert_equal(
+            result_json["references"][1]["subject"], f":.{ctx}:{base2_subject}"
+        )
+
+    @cluster(num_nodes=1)
+    def test_reregister_schema_returns_correct_context_definition(self):
+        """
+        Regression test for context-aware schema definition lookup.
+
+        When re-registering an existing schema, the response should contain
+        the schema definition from the correct context, not from the schema
+        with the same schema ID in the default context.
+        """
+        # Register schema A in .ctx1 - gets ID 1
+        ctx1_subject = ":.ctx1:test-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx1_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)
+
+        # Register different schema B in default context - also gets ID 1
+        default_subject = "test-subject"
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=default_subject, data=json.dumps({"schema": schema2_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["id"], 1)  # Same numeric ID, different context
+
+        # Re-register schema A in .ctx1 (should return existing)
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx1_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # The returned schema should be schema1_def (from .ctx1), NOT schema2_def
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+    @cluster(num_nodes=1)
+    def test_context_reference_detection_blocks_deletion(self):
+        """
+        Regression test for context-aware reference detection.
+
+        Schema references within a non-default context should be correctly
+        detected by both the referenced_by API and deletion prevention logic.
+        """
+        ctx = "reftest"
+        base_subject = f":.{ctx}:base"
+        dependent_subject = f":.{ctx}:dependent"
+
+        # Register base schema in context
+        base_data = json.dumps({"schema": simple_proto_def, "schemaType": "PROTOBUF"})
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=base_subject, data=base_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register dependent schema that references base
+        dependent_data = json.dumps(
+            {
+                "schema": imported_proto_def,
+                "schemaType": "PROTOBUF",
+                "references": [
+                    {"name": "simple", "subject": base_subject, "version": 1}
+                ],
+            }
+        )
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=dependent_subject, data=dependent_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        dependent_id = result.json()["id"]
+
+        # Part A: referenced_by API should return the dependent schema's ID
+        result = self.sr_client.get_subjects_subject_versions_version_referenced_by(
+            subject=base_subject, version=1
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        referenced_by = result.json()
+        self.assert_equal(
+            len(referenced_by),
+            1,
+            f"Expected 1 reference, got {len(referenced_by)}",
+        )
+        self.assert_equal(referenced_by[0], dependent_id)
+
+        # Part B: Deletion of base should be blocked (schema is referenced)
+        result = self.sr_client.delete_subject(subject=base_subject)
+        self.assert_equal(
+            result.status_code,
+            requests.codes.unprocessable_entity,
+            "Expected deletion to be blocked due to reference",
+        )
+        self.assert_equal(result.json()["error_code"], 42206)
+
+        # Part C: Delete dependent first, then base should succeed
+        result = self.sr_client.delete_subject(subject=dependent_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Now base can be deleted
+        result = self.sr_client.delete_subject(subject=base_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
 
 
 class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
@@ -6420,6 +8201,12 @@ class SchemaRegistryConfluentClient(SchemaRegistryEndpoints):
         result = self.sr_client.register_schema(well_known_subject, well_known_schema)
         assert result == 3, f"Result: {result}"
 
+        validate_subject = "topic_4-key"
+        validate_schema = Schema(validate_proto_def, "PROTOBUF")
+
+        result = self.sr_client.register_schema(validate_subject, validate_schema)
+        assert result == 4, f"Result: {result}"
+
         result = self.sr_client.get_schema(1)
         assert result == simple_schema, f"Result: {result}"
 
@@ -6428,6 +8215,9 @@ class SchemaRegistryConfluentClient(SchemaRegistryEndpoints):
 
         result = self.sr_client.get_schema(3)
         assert result == well_known_schema, f"Result: {result}"
+
+        result = self.sr_client.get_schema(4)
+        assert result == validate_schema, f"Result: {result}"
 
 
 # dataset for SchemaRegistryCompatibilityModes: schemas is a list of 3 schemas compatible for `mode`, `antimode` is a suitable mode that will make the compat check for schemas fail
@@ -7091,6 +8881,301 @@ class SchemaRegistryACLTest(SchemaRegistryEndpoints):
         # Verify ACL no longer exists eventually
         self.await_acl_count(0)
 
+    @cluster(num_nodes=3)
+    def test_group_acl_creation(self):
+        """
+        Test that Group principal ACLs can be created
+        """
+        # Create Group ACLs with various configurations
+        group_acls = [
+            self._create_test_acl(
+                principal="Group:developers",
+                resource="dev-subject",
+                resource_type="SUBJECT",
+                operation="READ",
+                permission="ALLOW",
+            ),
+            self._create_test_acl(
+                principal="Group:admins",
+                resource="*",
+                resource_type="REGISTRY",
+                operation="ALL",
+                permission="ALLOW",
+            ),
+            self._create_test_acl(
+                principal="Group:blocked",
+                resource="secret-subject",
+                resource_type="SUBJECT",
+                operation="WRITE",
+                permission="DENY",
+            ),
+        ]
+
+        # POST should succeed
+        response = self.sr_client.post_security_acls(group_acls)
+        self.assert_equal(
+            response.status_code, 201, f"Failed to create Group ACLs: {response.text}"
+        )
+
+        # Verify ACLs were created
+        self.await_acl_count(3)
+
+        # GET and verify principals
+        response = self.sr_client.get_security_acls()
+        self.assert_equal(response.status_code, 200)
+        acls = response.json()
+
+        principals = {acl["principal"] for acl in acls}
+        self.assert_in("Group:developers", principals)
+        self.assert_in("Group:admins", principals)
+        self.assert_in("Group:blocked", principals)
+
+        # Verify ACL details
+        for acl in acls:
+            if acl["principal"] == "Group:developers":
+                self.assert_equal(acl["resource"], "dev-subject")
+                self.assert_equal(acl["resource_type"], "SUBJECT")
+                self.assert_equal(acl["operation"], "READ")
+                self.assert_equal(acl["permission"], "ALLOW")
+            elif acl["principal"] == "Group:admins":
+                self.assert_equal(acl["resource"], "*")
+                self.assert_equal(acl["resource_type"], "REGISTRY")
+                self.assert_equal(acl["operation"], "ALL")
+            elif acl["principal"] == "Group:blocked":
+                self.assert_equal(acl["resource"], "secret-subject")
+                self.assert_equal(acl["permission"], "DENY")
+
+    @cluster(num_nodes=3)
+    def test_group_acl_query_filtering(self):
+        """Test querying ACLs with Group principal filters"""
+
+        # Create mix of User and Group ACLs
+        acls = [
+            self._create_test_acl(
+                principal="User:alice", resource="alice-subject", operation="WRITE"
+            ),
+            self._create_test_acl(
+                principal="Group:developers",
+                resource="dev-subject",
+                operation="READ",
+            ),
+            self._create_test_acl(
+                principal="Group:developers",
+                resource="dev-registry",
+                resource_type="REGISTRY",
+                operation="DESCRIBE",
+            ),
+            self._create_test_acl(
+                principal="Group:admins",
+                resource="*",
+                resource_type="REGISTRY",
+                operation="ALL",
+            ),
+        ]
+
+        response = self.sr_client.post_security_acls(acls)
+        self.assert_equal(response.status_code, 201)
+        self.await_acl_count(4)
+
+        # Query for Group:developers ACLs only
+        response = self.sr_client.get_security_acls(
+            params={"principal": "Group:developers"}
+        )
+        self.assert_equal(response.status_code, 200)
+        filtered_acls = response.json()
+        self.assert_equal(len(filtered_acls), 2)
+
+        for acl in filtered_acls:
+            self.assert_equal(acl["principal"], "Group:developers")
+
+        # Query for all Group principals
+        response = self.sr_client.get_security_acls()
+        self.assert_equal(response.status_code, 200)
+        all_acls = response.json()
+
+        group_acls = [acl for acl in all_acls if acl["principal"].startswith("Group:")]
+        self.assert_equal(len(group_acls), 3)
+
+        # Query for specific resource
+        response = self.sr_client.get_security_acls(params={"resource": "dev-subject"})
+        self.assert_equal(response.status_code, 200)
+        resource_acls = response.json()
+        self.assert_equal(len(resource_acls), 1)  # Group:developers
+
+    @cluster(num_nodes=3)
+    def test_group_acl_deletion(self):
+        """Test deleting Group ACLs with various filter combinations"""
+
+        # Create multiple Group ACLs
+        acls = [
+            self._create_test_acl(
+                principal="Group:team_a", resource="subject_a", operation="READ"
+            ),
+            self._create_test_acl(
+                principal="Group:team_a", resource="subject_b", operation="WRITE"
+            ),
+            self._create_test_acl(
+                principal="Group:team_b", resource="subject_a", operation="READ"
+            ),
+        ]
+
+        response = self.sr_client.post_security_acls(acls)
+        self.assert_equal(response.status_code, 201)
+        self.await_acl_count(3)
+
+        # Delete all team_a ACLs using principal filter
+        delete_filter = [{"principal": "Group:team_a"}]
+
+        response = self.sr_client.delete_security_acls(delete_filter)
+        self.assert_equal(response.status_code, 200)
+        deleted = response.json()
+        self.assert_equal(len(deleted), 2)
+
+        # Verify only team_b ACL remains
+
+        self.await_acl_count(1)
+
+        response = self.sr_client.get_security_acls()
+        self.assert_equal(response.status_code, 200)
+        remaining = response.json()
+        self.logger.info(f"Remaining: {remaining}")
+        self.assert_equal(remaining[0]["principal"], "Group:team_b")
+
+    @cluster(num_nodes=3)
+    def test_mixed_user_and_group_acls(self):
+        """Test Schema Registry with both User and Group ACLs"""
+
+        mixed_acls = [
+            self._create_test_acl(
+                principal="User:alice", resource="user-subject", operation="WRITE"
+            ),
+            self._create_test_acl(
+                principal="Group:readers",
+                resource="shared-subject",
+                operation="READ",
+            ),
+            self._create_test_acl(
+                principal="User:bob", resource="shared-subject", operation="WRITE"
+            ),
+            self._create_test_acl(
+                principal="Group:admins",
+                resource="*",
+                resource_type="REGISTRY",
+                operation="ALL",
+            ),
+        ]
+
+        # Create all ACLs
+        response = self.sr_client.post_security_acls(mixed_acls)
+        self.assert_equal(response.status_code, 201)
+        self.await_acl_count(4)
+
+        # Verify all ACLs exist
+        response = self.sr_client.get_security_acls()
+        self.assert_equal(response.status_code, 200)
+        acls = response.json()
+
+        principals = {acl["principal"] for acl in acls}
+        self.assert_equal(len(principals), 4)
+        self.assert_in("User:alice", principals)
+        self.assert_in("User:bob", principals)
+        self.assert_in("Group:readers", principals)
+        self.assert_in("Group:admins", principals)
+
+        # Verify resource distribution
+        subject_acls = [acl for acl in acls if acl["resource_type"] == "SUBJECT"]
+        registry_acls = [acl for acl in acls if acl["resource_type"] == "REGISTRY"]
+        self.assert_equal(len(subject_acls), 3)
+        self.assert_equal(len(registry_acls), 1)
+
+    @cluster(num_nodes=3)
+    def test_group_acl_validation(self):
+        """Test validation rules specific to Group principals"""
+
+        # Test wildcard group (should fail)
+        wildcard_group_acl = [self._create_test_acl(principal="Group:*")]
+        response = self.sr_client.post_security_acls(wildcard_group_acl)
+        self.assert_equal(
+            response.status_code,
+            400,
+            f"Wildcard group should fail but got {response.status_code}: {response.text}",
+        )
+        self.assert_in("wildcard", response.text.lower())
+
+        # Test empty group name (should fail)
+        empty_group_acl = [self._create_test_acl(principal="Group:")]
+        response = self.sr_client.post_security_acls(empty_group_acl)
+        self.assert_equal(
+            response.status_code,
+            400,
+            f"Empty group should fail but got {response.status_code}",
+        )
+
+        # Test valid group names with special characters
+        valid_groups = [
+            "Group:my-team",
+            "Group:team_123",
+            "Group:UPPERCASE_GROUP",
+            "Group:mixed_Case-123",
+        ]
+
+        for group in valid_groups:
+            acl = [
+                self._create_test_acl(
+                    principal=group, resource=f"test-{group.replace(':', '-')}"
+                )
+            ]
+            response = self.sr_client.post_security_acls(acl)
+            self.assert_equal(
+                response.status_code,
+                201,
+                f"Valid group {group} should be accepted but got {response.status_code}: {response.text}",
+            )
+
+    @cluster(num_nodes=3)
+    @matrix(scale=[1, 100])
+    def test_group_acl_scale(self, scale):
+        """Test Group ACL operations at scale"""
+
+        # Create N Group ACLs
+        acls = [
+            self._create_test_acl(
+                principal=f"Group:team_{i}",
+                resource=f"subject_{i}",
+                operation="READ",
+            )
+            for i in range(scale)
+        ]
+
+        # Test creation performance
+        response = self.sr_client.post_security_acls(acls)
+        self.assert_equal(
+            response.status_code,
+            201,
+            f"Failed to create {scale} Group ACLs: {response.text}",
+        )
+
+        # Verify all created
+        self.await_acl_count(scale)
+
+        # Test query performance
+        response = self.sr_client.get_security_acls()
+        self.assert_equal(response.status_code, 200)
+        all_acls = response.json()
+        self.assert_equal(len(all_acls), scale)
+
+        # Verify all are Group principals
+        for acl in all_acls:
+            assert acl["principal"].startswith("Group:team_"), (
+                f"Unexpected principal: {acl['principal']}"
+            )
+
+        # Test deletion performance
+        response = self.sr_client.delete_security_acls(acls)
+        self.assert_equal(response.status_code, 200)
+        deleted = response.json()
+        self.assert_equal(len(deleted), scale)
+
 
 class ACLTestEndpoint:
     """Base class for ACL-protected endpoints"""
@@ -7678,44 +9763,12 @@ class GetStatusReady(ACLTestEndpoint):
         return {"name": "", "type": "registry"}
 
 
-class SchemaRegistryAclAuthzTest(SchemaRegistryEndpoints):
+class SchemaRegistryAclAuthzTestBase(SchemaRegistryEndpoints):
     """
-    Verify that schema registry endpoints are protected by the correct ACL resource and operation.
+    Base class providing shared ACL test infrastructure (setup, helpers) without test methods.
     """
 
-    ENDPOINTS = [
-        GetConfigEndpoint,
-        PutConfigEndpoint,
-        GetConfigSubjectEndpoint,
-        PutConfigSubjectEndpoint,
-        DeleteConfigSubject,
-        GetMode,
-        PutMode,
-        GetModeSubject,
-        PutModeSubject,
-        DeleteModeSubject,
-        PostSubjectVersions,
-        GetSchemasIdsIdVersions,
-        GetSchemasIdsIdSubjects,
-        GetSubjectVersions,
-        PostSubject,
-        GetSubjectVersionsVersion,
-        GetSubjectVersionsVersionSchema,
-        GetSubjectVersionsVersionReferencedBy,
-        DeleteSubject,
-        DeleteSubjectVersion,
-        CompatibilitySubjectVersion,
-        # Tested separately:
-        # GET_SCHEMAS_TYPES             - no ACLs required
-        # SCHEMA_REGISTRY_STATUS_READY  - no ACLs required
-        # GET_SCHEMAS_IDS_ID            - custom ACL handling
-        # GET_SUBJECTS                  - custom ACL handling
-        # GET_SECURITY_ACLS             - kafka cluster ACL required
-        # POST_SECURITY_ACLS            - kafka cluster ACL required
-        # DELETE_SECURITY_ACLS          - kafka cluster ACL required
-    ]
-
-    def __init__(self, context):
+    def __init__(self, context, extra_rp_conf: dict | None = None, **kwargs):
         security = SecurityConfig()
         security.enable_sasl = True
         security.endpoint_authn_method = "sasl"
@@ -7724,11 +9777,13 @@ class SchemaRegistryAclAuthzTest(SchemaRegistryEndpoints):
         schema_registry_config.authn_method = "http_basic"
         schema_registry_config.mode_mutability = True
 
-        super(SchemaRegistryAclAuthzTest, self).__init__(
+        super().__init__(
             context,
             security=security,
             num_brokers=1,
             schema_registry_config=schema_registry_config,
+            extra_rp_conf=extra_rp_conf,
+            **kwargs,
         )
 
         superuser = self.redpanda.SUPERUSER_CREDENTIALS
@@ -7815,6 +9870,44 @@ class SchemaRegistryAclAuthzTest(SchemaRegistryEndpoints):
         self.redpanda.set_cluster_config(
             {"schema_registry_enable_authorization": "True"}
         )
+
+
+class SchemaRegistryAclAuthzTest(SchemaRegistryAclAuthzTestBase):
+    """
+    Verify that schema registry endpoints are protected by the correct ACL resource and operation.
+    """
+
+    ENDPOINTS = [
+        GetConfigEndpoint,
+        PutConfigEndpoint,
+        GetConfigSubjectEndpoint,
+        PutConfigSubjectEndpoint,
+        DeleteConfigSubject,
+        GetMode,
+        PutMode,
+        GetModeSubject,
+        PutModeSubject,
+        DeleteModeSubject,
+        PostSubjectVersions,
+        GetSchemasIdsIdVersions,
+        GetSchemasIdsIdSubjects,
+        GetSubjectVersions,
+        PostSubject,
+        GetSubjectVersionsVersion,
+        GetSubjectVersionsVersionSchema,
+        GetSubjectVersionsVersionReferencedBy,
+        DeleteSubject,
+        DeleteSubjectVersion,
+        CompatibilitySubjectVersion,
+        # Tested separately:
+        # GET_SCHEMAS_TYPES             - no ACLs required
+        # SCHEMA_REGISTRY_STATUS_READY  - no ACLs required
+        # GET_SCHEMAS_IDS_ID            - custom ACL handling
+        # GET_SUBJECTS                  - custom ACL handling
+        # GET_SECURITY_ACLS             - kafka cluster ACL required
+        # POST_SECURITY_ACLS            - kafka cluster ACL required
+        # DELETE_SECURITY_ACLS          - kafka cluster ACL required
+    ]
 
     def _get_endpoint_by_name(self, name: str) -> ACLTestEndpoint:
         for endpoint in self.ENDPOINTS:
@@ -8117,6 +10210,77 @@ class SchemaRegistryAclAuthzTest(SchemaRegistryEndpoints):
         self.assert_equal(result.status_code, 200)
         self.assert_equal(result.json(), [])
 
+    @cluster(num_nodes=1)
+    def test_context_acl_prefix_authorization(self):
+        """
+        Test that prefix-based ACLs can authorize access to all subjects
+        within a context. Verifies that ACL on ':.staging:' (prefix) grants
+        access to all subjects in the .staging context.
+        """
+        schema_data = json.dumps({"schema": schema1_def})
+
+        # Create subjects in different contexts
+        staging_subject_1 = ":.staging:topic-1"
+        staging_subject_2 = ":.staging:topic-2"
+        prod_subject = ":.prod:topic-1"
+        default_subject = "topic-1"
+
+        # Register schemas in contexts (using superuser)
+        for subject in [
+            staging_subject_1,
+            staging_subject_2,
+            prod_subject,
+            default_subject,
+        ]:
+            result = self.sr_client.post_subjects_subject_versions(
+                subject=subject, data=schema_data, auth=self.super_auth
+            )
+            self.assert_equal(result.status_code, 200)
+
+        # No ACLs - should deny access to all subjects
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=staging_subject_1, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+        # Grant prefix ACL on .staging context - should allow all .staging subjects
+        self._post_acl(self._create_acl(":.staging:", "SUBJECT", "PREFIXED", "READ"))
+
+        # Should allow access to .staging subjects
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=staging_subject_1, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json(), [1])
+
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=staging_subject_2, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json(), [1])
+
+        # Should deny access to .prod subjects
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=prod_subject, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+        # Should deny access to default context subjects
+        result = self.sr_client.get_subjects_subject_versions(
+            subject=default_subject, auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+        # GET /subjects should filter correctly by context ACL
+        result = self.sr_client.get_subjects(auth=self.user_auth)
+        self.assert_equal(result.status_code, 200)
+        # Should return qualified subjects for .staging context
+        result_subjects = set(result.json())
+        self.assert_in(":.staging:topic-1", result_subjects)
+        self.assert_in(":.staging:topic-2", result_subjects)
+        self.assert_not_in(":.prod:topic-1", result_subjects)
+        self.assert_not_in("topic-1", result_subjects)
+
     @cluster(num_nodes=3)
     def test_enterprise_sanctions(self):
         """
@@ -8184,3 +10348,201 @@ class SchemaRegistryAclAuthzTest(SchemaRegistryEndpoints):
             self.redpanda.set_cluster_config(
                 {"schema_registry_enable_authorization": True}
             )
+
+
+class SchemaRegistryContextAuthzTest(SchemaRegistryAclAuthzTestBase):
+    """
+    Authorization tests for context-qualified subject functionality.
+
+    These tests verify that Schema Registry correctly enforces ACL authorization
+    when using context-qualified subjects and the subject query parameter.
+    """
+
+    def __init__(self, context: TestContext, **kwargs: Any):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_enable_qualified_subjects": True},
+            **kwargs,
+        )
+
+    def _setup_test_schemas(self):
+        """Create schemas used by all authorization tests."""
+        schema_data = json.dumps({"schema": schema1_def})
+        schema_data_2 = json.dumps({"schema": schema2_def})
+
+        # sub1 and sub2 in default context share the same schema
+        result = self.sr_client.post_subjects_subject_versions(
+            "sub1", data=schema_data, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.schema_id_default_ctx = result.json()["id"]
+
+        result = self.sr_client.post_subjects_subject_versions(
+            "sub2", data=schema_data, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["id"], self.schema_id_default_ctx)
+
+        # :.ctx1:sub1 also has the same schema
+        result = self.sr_client.post_subjects_subject_versions(
+            ":.ctx1:sub1", data=schema_data, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.schema_id_ctx1 = result.json()["id"]
+
+        # :.ctx1:sub2 also has the same schema
+        result = self.sr_client.post_subjects_subject_versions(
+            ":.ctx1:sub2", data=schema_data, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["id"], self.schema_id_ctx1)
+
+        # :.ctx1:unique-sub has a different schema (only exists in ctx1)
+        result = self.sr_client.post_subjects_subject_versions(
+            ":.ctx1:unique-sub", data=schema_data_2, auth=self.super_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.unique_id_ctx1 = result.json()["id"]
+
+    def setUp(self):
+        super().setUp()
+        self._setup_test_schemas()
+
+    @cluster(num_nodes=1)
+    def test_subject_param_authorized_and_unauthorized(self):
+        """
+        GET /schemas/ids/{id}?subject=sub2 fails when user only has READ on sub1,
+        even though both subjects reference the same schema.
+        Authorization checks only the specified subject.
+        GET /schemas/ids/{id}?subject=sub1 succeeds when user has READ on sub1.
+        """
+        self._post_acl(self._create_acl("sub1", "SUBJECT", "LITERAL", "READ"))
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_default_ctx, subject="sub2", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_default_ctx, subject="sub1", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+    @cluster(num_nodes=1)
+    def test_context_qualified_subject_with_matching_acl(self):
+        """
+        GET /schemas/ids/{id}?subject=:.ctx1:sub1 succeeds when user has READ
+        on the context-qualified subject :.ctx1:sub1.
+        """
+        self._post_acl(self._create_acl(":.ctx1:sub1", "SUBJECT", "LITERAL", "READ"))
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_ctx1, subject=":.ctx1:sub1", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+    @cluster(num_nodes=1)
+    def test_context_qualified_subject_without_acl_on_that_context(self):
+        """
+        GET /schemas/ids/{id}?subject=:.ctx1:sub2 fails when user has READ on
+        sub1 (default context) but not on :.ctx1:sub2.
+        """
+        self._post_acl(self._create_acl("sub1", "SUBJECT", "LITERAL", "READ"))
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_ctx1, subject=":.ctx1:sub2", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+    @cluster(num_nodes=1)
+    def test_cross_context_search_finds_subject_in_non_default_context(self):
+        """
+        GET /schemas/ids/{id}?subject=unique-sub succeeds when the subject only
+        exists in ctx1 as :.ctx1:unique-sub and user has READ on :.ctx1:unique-sub.
+        Cross-context search finds the subject in the non-default context.
+        """
+        self._post_acl(
+            self._create_acl(":.ctx1:unique-sub", "SUBJECT", "LITERAL", "READ")
+        )
+        result = self.sr_client.get_schemas_ids_id(
+            self.unique_id_ctx1, subject="unique-sub", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema2_def)
+
+    @cluster(num_nodes=1)
+    def test_cross_context_search_no_auth_on_found_context(self):
+        """
+        GET /schemas/ids/{id}?subject=unique-sub fails when the subject is found
+        via cross-context search in ctx1 but user has DENY on :.ctx1:unique-sub.
+        """
+        self._post_acl(
+            self._create_acl(":.ctx1:unique-sub", "SUBJECT", "LITERAL", "READ", "DENY")
+        )
+        result = self.sr_client.get_schemas_ids_id(
+            self.unique_id_ctx1, subject="unique-sub", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+    @cluster(num_nodes=1)
+    def test_context_only_param_with_auth_on_ctx_subject(self):
+        """
+        GET /schemas/ids/{id}?subject=:.ctx1: succeeds when user has READ on
+        at least one subject in ctx1 (:.ctx1:sub1).
+        Context-only param checks all subjects in that context.
+        """
+        self._post_acl(self._create_acl(":.ctx1:sub1", "SUBJECT", "LITERAL", "READ"))
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_ctx1, subject=":.ctx1:", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+    @cluster(num_nodes=1)
+    def test_context_only_param_without_auth_on_any_ctx_subject(self):
+        """
+        GET /schemas/ids/{id}?subject=:.ctx1: fails when user has no READ
+        permission on any subject in ctx1.
+        """
+        # Only grant access to default context subject, not ctx1
+        self._post_acl(self._create_acl("sub1", "SUBJECT", "LITERAL", "READ"))
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_ctx1, subject=":.ctx1:", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)
+
+    @cluster(num_nodes=1)
+    def test_prefix_acl_covers_context_qualified_subject(self):
+        """
+        GET /schemas/ids/{id}?subject=:.ctx1:sub1 succeeds when user has a
+        PREFIX ACL on :.ctx1: which covers all subjects in that context.
+        """
+        self._post_acl(self._create_acl(":.ctx1:", "SUBJECT", "PREFIXED", "READ"))
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_ctx1, subject=":.ctx1:sub1", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        result = self.sr_client.get_schemas_ids_id(
+            self.schema_id_ctx1, subject=":.ctx1:sub2", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema1_def)
+
+        result = self.sr_client.get_schemas_ids_id(
+            self.unique_id_ctx1, subject=":.ctx1:unique-sub", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 200)
+        self.assert_equal(result.json()["schema"], schema2_def)
+
+    @cluster(num_nodes=1)
+    def test_nonexistent_schema_id_returns_403_not_404(self):
+        """
+        GET /schemas/ids/{id}?subject=sub1 returns 403 (not 404) for non-existent
+        schema ID when user lacks authorization. This prevents information leakage
+        about whether a schema ID exists.
+        """
+        result = self.sr_client.get_schemas_ids_id(
+            99999, subject="sub1", auth=self.user_auth
+        )
+        self.assert_equal(result.status_code, 403)

@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/rpkutil"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/ethtool"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/irq"
-	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/utils"
 	"github.com/spf13/afero"
 	"go.uber.org/zap"
 )
@@ -112,7 +112,7 @@ func (n *nic) Name() string {
 // NICs.
 func getLowerNames(fs afero.Fs, nicName string) []string {
 	nicDir := fmt.Sprintf("/sys/class/net/%s", nicName)
-	files := utils.ListFilesInPath(fs, nicDir)
+	files := rpkutil.ListFilesInPath(fs, nicDir)
 
 	lowers := []string{}
 	for _, file := range files {
@@ -274,14 +274,14 @@ func gvnicIrqToQueueIdx(irq IrqInfo, numIRQs int) int {
 	// New pattern: gve-ntfy-blk30@pci:0000:00:08.0
 	newPattern := regexp.MustCompile(`gve-ntfy-blk(\d+)`)
 
-	virtioMatch := newPattern.FindStringSubmatch(irq.ProcLine)
-	if len(virtioMatch) == 0 {
+	gvnicMatch := newPattern.FindStringSubmatch(irq.ProcLine)
+	if len(gvnicMatch) == 0 {
 		// try the legacy pattern
 		legacyPattern := regexp.MustCompile(`ntfy-block\.(\d+)$`)
-		virtioMatch = legacyPattern.FindStringSubmatch(irq.ProcLine)
+		gvnicMatch = legacyPattern.FindStringSubmatch(irq.ProcLine)
 	}
-	if len(virtioMatch) == 2 {
-		idx, _ := strconv.Atoi(virtioMatch[1])
+	if len(gvnicMatch) == 2 {
+		idx, _ := strconv.Atoi(gvnicMatch[1])
 		// https://github.com/torvalds/linux/blob/v6.17/drivers/net/ethernet/google/gve/gve.h#L1082-L1094
 		// TX is the lower half, RX the upper half of the IRQs
 		return idx % (numIRQs / 2)
@@ -337,7 +337,7 @@ func (n *nic) GetMaxRxQueueCount() (int, error) {
 func (n *nic) GetRxQueueCount() (int, error) {
 	rpsCpus, err := n.GetRpsCPUFiles()
 	if err != nil {
-		return 0, utils.ChainedError(err, "Unable to get the RPS number")
+		return 0, rpkutil.ChainedError(err, "Unable to get the RPS number")
 	}
 	rxQueuesCount := len(rpsCpus)
 	zap.L().Sugar().Debugf("Getting number of Rx queues for '%s'", n.name)

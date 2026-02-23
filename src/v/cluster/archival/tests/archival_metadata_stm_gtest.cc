@@ -14,7 +14,6 @@
 #include "cluster/archival/archival_metadata_stm.h"
 #include "model/record.h"
 #include "raft/tests/raft_fixture.h"
-#include "test_utils/scoped_config.h"
 #include "test_utils/test.h"
 #include "utils/available_promise.h"
 
@@ -64,6 +63,7 @@ struct archival_stm_node {
     archival_stm_node() = default;
 
     ss::shared_ptr<cluster::archival_metadata_stm> archival_stm;
+    ss::sharded<cloud_storage_clients::upstream_registry> upstreams;
     ss::sharded<cloud_storage_clients::client_pool> client_pool;
     ss::sharded<cloud_io::remote> cloud_io;
     ss::sharded<cloud_storage::remote> remote;
@@ -78,7 +78,8 @@ public:
           _archival_stm_nodes, [](archival_stm_node& node) {
               return node.remote.stop()
                 .then([&node]() { return node.cloud_io.stop(); })
-                .then([&node]() { return node.client_pool.stop(); });
+                .then([&node]() { return node.client_pool.stop(); })
+                .then([&node]() { return node.upstreams.stop(); });
           });
 
         co_await raft::raft_fixture::TearDownAsync();
@@ -92,8 +93,13 @@ public:
         for (auto& [id, node] : nodes()) {
             auto& stm_node = _archival_stm_nodes.at(id());
 
+            co_await stm_node.upstreams.start(
+              ss::sharded_parameter([]() { return get_configuration(); }));
             co_await stm_node.client_pool.start(
-              10, ss::sharded_parameter([]() { return get_configuration(); }));
+              ss::sharded_parameter(
+                [&stm_node]() { return std::ref(stm_node.upstreams.local()); }),
+              10,
+              ss::sharded_parameter([]() { return get_configuration(); }));
             co_await stm_node.cloud_io.start(
               std::ref(stm_node.client_pool),
               ss::sharded_parameter([]() { return get_configuration(); }),
@@ -505,9 +511,6 @@ TEST_F_CORO(
   archival_metadata_stm_gtest_fixture, test_archival_stm_error_propagation) {
     ss::abort_source never_abort;
 
-    auto s_cfg = scoped_config{};
-    s_cfg.get("cloud_storage_disable_metadata_consistency_checks")
-      .set_value(false);
     co_await start();
 
     std::vector<cloud_storage::segment_meta> good_segment;
@@ -600,9 +603,6 @@ TEST_F_CORO(
     auto timeout = 30s;
     auto deadline = ss::lowres_clock::now() + timeout;
 
-    auto s_cfg = scoped_config{};
-    s_cfg.get("cloud_storage_disable_metadata_consistency_checks")
-      .set_value(false);
     co_await start();
 
     std::vector<cloud_storage::segment_meta> good_segment;

@@ -50,6 +50,9 @@ public:
     ss::future<get_offsets_reply>
     get_offsets(get_offsets_request, ::rpc::streaming_context&) override;
 
+    ss::future<get_size_reply>
+    get_size(get_size_request, ::rpc::streaming_context&) override;
+
     ss::future<get_end_offset_for_term_reply> get_end_offset_for_term(
       get_end_offset_for_term_request, ::rpc::streaming_context&) override;
 
@@ -64,6 +67,12 @@ public:
 
     ss::future<get_extent_metadata_reply> get_extent_metadata(
       get_extent_metadata_request, ::rpc::streaming_context&) override;
+
+    ss::future<flush_domain_reply>
+    flush_domain(flush_domain_request, ::rpc::streaming_context&) override;
+
+    ss::future<restore_domain_reply>
+    restore_domain(restore_domain_request, ::rpc::streaming_context&) override;
 
 private:
     ss::sharded<leader_router>* _leader_router;

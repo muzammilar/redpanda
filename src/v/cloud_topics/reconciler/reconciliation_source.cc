@@ -18,6 +18,7 @@
 #include "cluster/partition.h"
 #include "kafka/utils/txn_reader.h"
 #include "model/fundamental.h"
+#include "model/record_batch_reader.h"
 #include "model/timeout_clock.h"
 #include "utils/retry_chain_node.h"
 
@@ -119,10 +120,7 @@ public:
         if (cfg.max_offset < cfg.start_offset) {
             co_return model::make_empty_record_batch_reader();
         }
-        auto reader = co_await _fe->make_reader(
-          cfg,
-          /*debounce_deadline=*/
-          std::nullopt);
+        auto reader = co_await _fe->make_reader(cfg);
 
         // It's important the `aborted_transaction_tracker_impl` takes a shared
         // so we don't have to worry about the lifetimes of the reader and
@@ -130,8 +128,11 @@ public:
         auto tracker = std::make_unique<aborted_transaction_tracker_impl>(
           _fe, std::move(reader.ot_state));
 
-        co_return model::make_record_batch_reader<kafka::read_committed_reader>(
-          std::move(tracker), std::move(reader.reader));
+        // Wrap the reader with some readahead to hide the latency of
+        // downloading a bit.
+        co_return model::make_readahead_record_batch_reader(
+          model::make_record_batch_reader<kafka::read_committed_reader>(
+            std::move(tracker), std::move(reader.reader)));
     }
 
 private:

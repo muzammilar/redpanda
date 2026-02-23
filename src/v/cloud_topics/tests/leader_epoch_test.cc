@@ -43,7 +43,7 @@ public:
         wait_for_all_members(5s).get();
 
         cluster::topic_properties props;
-        props.cloud_topic_enabled = true;
+        props.storage_mode = model::redpanda_storage_mode::cloud;
         props.shadow_indexing = model::shadow_indexing_mode::disabled;
 
         create_topic({model::kafka_namespace, topic_name}, 1, 3, props).get();
@@ -167,9 +167,9 @@ public:
                        .tp_id;
         EXPECT_TRUE(tp_id.has_value());
 
-        l1::replicated_metastore meta(get_ct_app(model::node_id{0})
-                                        .get_sharded_l1_metastore_router()
-                                        ->local());
+        auto& meta = get_ct_app(model::node_id{0})
+                       .get_sharded_replicated_metastore()
+                       ->local();
         auto l1_offset = co_await meta.get_offsets(
           model::topic_id_partition(*tp_id, model::partition_id{0}));
         if (!l1_offset.has_value()) {

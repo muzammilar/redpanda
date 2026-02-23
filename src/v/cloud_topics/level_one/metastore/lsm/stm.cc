@@ -45,6 +45,17 @@ void maybe_log_update_error(
       o,
       r.error());
 }
+
+std::string_view to_string_view(stm::errc e) {
+    switch (e) {
+    case stm::errc::not_leader:
+        return "stm::errc::not_leader";
+    case stm::errc::raft_error:
+        return "stm::errc::raft_error";
+    case stm::errc::shutting_down:
+        return "stm::errc::shutting_down";
+    }
+}
 } // namespace
 
 stm::stm(
@@ -56,10 +67,11 @@ stm::stm(
     snapshot_timer_.set_callback([this] { write_snapshot_async(); });
 }
 
-ss::future<std::expected<model::term_id, stm::errc>>
-stm::sync(model::timeout_clock::duration timeout) {
+ss::future<std::expected<model::term_id, stm::errc>> stm::sync(
+  model::timeout_clock::duration timeout,
+  std::optional<std::reference_wrapper<ss::abort_source>> as) {
     auto sync_res = co_await ss::coroutine::as_future(
-      metastore_stm_base::sync(timeout));
+      metastore_stm_base::sync(timeout, as));
     if (sync_res.failed()) {
         auto eptr = sync_res.get_exception();
         auto msg = fmt::format("Exception caught while syncing: {}", eptr);
@@ -83,6 +95,10 @@ stm::sync(model::timeout_clock::duration timeout) {
 
 ss::future<std::expected<model::offset, stm::errc>> stm::replicate_and_wait(
   model::term_id term, model::record_batch batch, ss::abort_source& as) {
+    auto gh = _gate.try_hold();
+    if (!gh) {
+        co_return std::unexpected(errc::shutting_down);
+    }
     constexpr auto replicate_timeout = 10s;
     auto opts = raft::replicate_options(
       raft::consistency_level::quorum_ack,
@@ -169,8 +185,8 @@ model::offset stm::max_removable_local_log_offset() { return {}; }
 ss::future<raft::local_snapshot_applied>
 stm::apply_local_snapshot(raft::stm_snapshot_header, iobuf&& snapshot_buf) {
     auto parser = iobuf_parser(std::move(snapshot_buf));
-    auto snapshot = co_await serde::read_async<lsm_state>(parser);
-    state_ = std::move(snapshot);
+    auto stm_snapshot = co_await serde::read_async<lsm_stm_snapshot>(parser);
+    state_ = std::move(stm_snapshot.state);
     co_return raft::local_snapshot_applied::yes;
 }
 
@@ -187,8 +203,8 @@ stm::take_local_snapshot(ssx::semaphore_units units) {
 
 ss::future<> stm::apply_raft_snapshot(const iobuf& snapshot_buf) {
     auto parser = iobuf_parser(snapshot_buf.copy());
-    auto snapshot = co_await serde::read_async<lsm_state>(parser);
-    state_ = std::move(snapshot);
+    auto stm_snapshot = co_await serde::read_async<lsm_stm_snapshot>(parser);
+    state_ = std::move(stm_snapshot.state);
 }
 
 ss::future<iobuf> stm::take_raft_snapshot() {
@@ -197,9 +213,9 @@ ss::future<iobuf> stm::take_raft_snapshot() {
     co_return std::move(snapshot_buf);
 }
 
-ss::future<lsm_stm_snapshot> stm::make_snapshot() const {
+ss::future<lsm_stm_snapshot> stm::make_snapshot() {
     lsm_stm_snapshot snapshot;
-    snapshot.state = state_.copy();
+    snapshot.state = state_.share();
     co_return snapshot;
 }
 
@@ -253,4 +269,12 @@ void lsm_stm_factory::create(
     raft->log()->stm_manager()->add_stm(std::move(s));
 }
 
+std::ostream& operator<<(std::ostream& os, stm::errc e) {
+    return os << to_string_view(e);
+}
+
 } // namespace cloud_topics::l1
+
+auto format_as(cloud_topics::l1::stm::errc e) {
+    return cloud_topics::l1::to_string_view(e);
+}

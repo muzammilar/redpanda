@@ -852,30 +852,6 @@ redpanda_cc_btest(
         "//src/v/cluster",
         "//src/v/model",
         "//src/v/raft",
-        "//src/v/redpanda/tests:fixture",
-        "//src/v/ssx:future_util",
-        "//src/v/test_utils:seastar_boost",
-        "//src/v/utils:unresolved_address",
-        "@boost//:test",
-        "@fmt",
-        "@seastar",
-        "@seastar//:testing",
-    ],
-)
-
-redpanda_cc_btest(
-    name = "remake_partition_tests",
-    timeout = "short",
-    srcs = ["remake_partition_tests.cc"],
-    cpu = 1,
-    deps = [
-        ":cluster_test_fixture",
-        "//src/v/base",
-        "//src/v/cluster",
-        "//src/v/kafka/server/tests:kafka_test_utils",
-        "//src/v/model",
-        "//src/v/raft",
-        "//src/v/redpanda/tests:fixture",
         "//src/v/ssx:future_util",
         "//src/v/test_utils:seastar_boost",
         "//src/v/utils:unresolved_address",
@@ -1329,6 +1305,24 @@ redpanda_cc_gtest(
         "//src/v/random:generators",
         "//src/v/test_utils:gtest",
         "//src/v/utils:to_string",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "client_quota_serde_test",
+    timeout = "short",
+    srcs = [
+        "client_quota_serde_test.cc",
+    ],
+    deps = [
+        "//src/v/cluster",
+        "//src/v/serde",
+        "//src/v/serde:set",
+        "//src/v/serde:sstring",
+        "//src/v/test_utils:gtest",
+        "@fmt",
         "@googletest//:gtest",
         "@seastar",
     ],

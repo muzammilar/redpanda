@@ -19,6 +19,8 @@
 #include <chrono>
 #include <exception>
 
+using namespace std::chrono_literals;
+
 namespace cloud_topics {
 
 housekeeper::housekeeper(
@@ -55,6 +57,18 @@ ss::future<> housekeeper::do_housekeeping() {
         auto offset = co_await do_time_retention(*retention_duration);
         new_start_offset = std::max(new_start_offset, offset);
     }
+    auto max_allowed_start_offset = _l0_metastore->get_max_allowed_start_offset(
+      _tidp);
+    if (max_allowed_start_offset < new_start_offset) {
+        vlog(
+          cd_log.trace,
+          "{} - Pinning requested new start offset {} by max allowed start "
+          "offset {}",
+          _tidp,
+          new_start_offset,
+          max_allowed_start_offset);
+        new_start_offset = max_allowed_start_offset;
+    }
     if (new_start_offset != kafka::offset::min()) {
         co_await _l0_metastore->set_start_offset(_tidp, new_start_offset, &_as);
     }
@@ -63,11 +77,47 @@ ss::future<> housekeeper::do_housekeeping() {
     co_await sync_start_offset();
 }
 
+ss::future<> housekeeper::do_bump_epoch() {
+    auto curr_partition_epoch = _l0_metastore->estimate_inactive_epoch(_tidp);
+
+    if (curr_partition_epoch != _last_epoch) {
+        vlog(
+          cd_log.debug,
+          "{}: Epoch made progress ({} -> {}), nothing to do.",
+          _tidp,
+          _last_epoch,
+          curr_partition_epoch);
+        _last_epoch = curr_partition_epoch;
+        co_return;
+    }
+
+    vlog(
+      cd_log.debug,
+      "{}: Partition idle since last housekeeping interval, "
+      "force the epoch to advance.",
+      _tidp);
+
+    auto new_epoch = co_await _l0_metastore->get_current_cluster_epoch(
+      _tidp, &_as);
+    if (!new_epoch.has_value()) {
+        co_return;
+    }
+    vlog(
+      cd_log.debug,
+      "{}: Advance epoch: {} -> {}",
+      _tidp,
+      curr_partition_epoch,
+      new_epoch);
+    co_await _l0_metastore->advance_epoch(_tidp, new_epoch.value(), &_as);
+    co_await _l0_metastore->sync_to_next_placeholder(_tidp, &_as);
+}
+
 ss::future<> housekeeper::do_loop() {
     simple_time_jitter<ss::lowres_clock> jitter(_loop_interval());
     co_await ss::sleep_abortable<ss::lowres_clock>(jitter.next_duration(), _as);
     try {
         co_await do_housekeeping();
+        co_await do_bump_epoch();
     } catch (...) {
         auto ex = std::current_exception();
         vlogl(
@@ -80,7 +130,6 @@ ss::future<> housekeeper::do_loop() {
 }
 
 namespace {
-
 void handle_error(l1::metastore::errc ec) {
     switch (ec) {
     case l1::metastore::errc::missing_ntp:
@@ -110,9 +159,9 @@ ss::future<kafka::offset> housekeeper::do_bytes_retention(size_t size) {
 
 ss::future<kafka::offset>
 housekeeper::do_time_retention(std::chrono::milliseconds duration) {
-    // It's important that we get the offsets before the timequery, as the data
-    // could change after the timequery, and this way we ensure we don't delete
-    // all the data.
+    // It's important that we get the offsets before the timequery, as the
+    // data could change after the timequery, and this way we ensure we
+    // don't delete all the data.
     auto offsets_result = co_await _l1_metastore->get_offsets(_tidp);
     if (!offsets_result.has_value()) {
         handle_error(offsets_result.error());

@@ -57,8 +57,8 @@ constexpr auto format_by_name = std::to_array({
 
 /// Primitive data types.
 /// https://json-schema.org/draft/2020-12/json-schema-core#name-instance-data-model
-enum class json_value_type {
-    null,
+enum class json_value_type : uint8_t {
+    null = 0,
     boolean,
     object,
     array,
@@ -66,6 +66,29 @@ enum class json_value_type {
     integer,
     string,
 };
+
+constexpr auto all_json_value_types = std::to_array({
+  json_value_type::null,
+  json_value_type::boolean,
+  json_value_type::object,
+  json_value_type::array,
+  json_value_type::number,
+  json_value_type::integer,
+  json_value_type::string,
+});
+
+consteval bool json_value_types_contiguous() {
+    for (size_t i = 0; i < all_json_value_types.size(); ++i) {
+        if (static_cast<size_t>(all_json_value_types[i]) != i) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+  json_value_types_contiguous(),
+  "json_value_type order/values drifted from all_json_value_types");
 
 json_value_type parse_json_value_type(const std::string&);
 
@@ -280,9 +303,20 @@ public:
                                  : std::nullopt;
     }
 
+    /// \return Subschemas in the "oneOf" keyword if specified.
+    const_list_view one_of() const { return const_list_view(one_of_); }
+
     /// \return Format of this schema object if specified.
     /// See https://www.learnjsonschema.com/2020-12/validation/format
     const std::optional<format>& format() const { return format_; }
+
+    /// \return The raw $ref value.
+    /// See
+    /// https://json-schema.org/understanding-json-schema/structuring#dollarref
+    const std::optional<std::string>& ref_value() const { return ref_value_; }
+
+    /// \return The resolved subschema pointed to by $ref.
+    const subschema* ref() const { return ref_; }
 
 private:
     /// Base.
@@ -302,7 +336,12 @@ private:
     items_t items_;
     ss::shared_ptr<subschema> additional_items_;
 
+    std::vector<ss::shared_ptr<subschema>> one_of_;
+
     std::optional<enum format> format_;
+
+    std::optional<std::string> ref_value_;
+    const subschema* ref_{nullptr};
 };
 
 /// Represents a JSON Schema resource identified by a canonical URI

@@ -378,7 +378,8 @@ ss::future<writer_error> record_multiplexer::flush_writers() {
       ss::max_concurrent_for_each(
         _writers, 10, [](auto& entry) { return entry.second->flush(); }));
     if (result.failed()) {
-        vlog(_log.warn, "Error flushing writers: {}", result.get_exception());
+        auto ex = result.get_exception();
+        vlog(_log.warn, "Error flushing writers: {}", ex);
         _error = writer_error::flush_error;
         co_return _error.value();
     }
@@ -402,22 +403,19 @@ record_multiplexer::finish(
             _error = res.error();
             continue;
         }
-        if (_result) {
-            auto& files = res.value();
-            vlog(
-              _log.trace, "writer finished: files_created={})", files.size());
-            std::move(
-              files.begin(),
-              files.end(),
-              std::back_inserter(finished_files.data_files));
-        }
+        auto& files = res.value();
+        vlog(_log.trace, "writer finished: files_created={})", files.size());
+        std::move(
+          files.begin(),
+          files.end(),
+          std::back_inserter(finished_files.data_files));
     }
     if (_invalid_record_writer) {
         auto writer = std::move(_invalid_record_writer);
         auto res = co_await std::move(*writer).finish();
         if (res.has_error()) {
             _error = res.error();
-        } else if (_result) {
+        } else {
             auto& files = res.value();
             vlog(
               _log.trace,

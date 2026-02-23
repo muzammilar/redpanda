@@ -126,11 +126,13 @@ public:
      * https://en.cppreference.com/w/cpp/ranges/as_rvalue_view.html
      */
     template<typename Range>
-    requires(std::ranges::sized_range<Range>)
+    requires(std::ranges::range<Range>)
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     chunked_vector(std::from_range_t, Range&& range)
       : chunked_vector() {
-        reserve(std::ranges::size(range));
+        if constexpr (std::ranges::sized_range<Range>) {
+            reserve(std::ranges::size(range));
+        }
         std::copy(
           std::ranges::begin(range),
           std::ranges::end(range),
@@ -435,10 +437,16 @@ public:
 
         bool operator==(const iter& o) const {
             check_generation();
+            dassert(
+              _vec == o._vec,
+              "iterator compared with different chunked_vector");
             return std::tie(_index, _vec) == std::tie(o._index, o._vec);
         };
         auto operator<=>(const iter& o) const {
             check_generation();
+            dassert(
+              _vec == o._vec,
+              "iterator compared with different chunked_vector");
             return std::tie(_index, _vec) <=> std::tie(o._index, o._vec);
         };
 
@@ -463,13 +471,11 @@ public:
         }
 
         inline void check_generation() const {
-#ifndef NDEBUG
-            vassert(
+            dassert(
               _vec->_generation == _my_generation,
               "Attempting to use an invalidated iterator. The corresponding "
               "chunked_vector container has been mutated since this "
               "iterator was constructed.");
-#endif
         }
 
         size_t _index{};

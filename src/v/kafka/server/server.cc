@@ -561,7 +561,7 @@ ss::future<response_ptr> sasl_authenticate_handler::handle(
                   ctx.sasl()->session_lifetime_ms());
                 if (!ctx.audit_authn_success(
                       ctx.sasl()->mechanism().mechanism_name(),
-                      ctx.sasl()->mechanism().audit_user())) {
+                      ctx.sasl()->mechanism().audit_user().copy())) {
                     ctx.sasl()->set_state(
                       security::sasl_server::sasl_state::failed);
                     sasl_authenticate_response_data data{
@@ -602,7 +602,7 @@ ss::future<response_ptr> sasl_authenticate_handler::handle(
     if (!ctx.audit_authn_failure(
           fmt::format("SASL authentication failed: {}", ec.message()),
           ctx.sasl()->mechanism().mechanism_name(),
-          ctx.sasl()->mechanism().audit_user())) {
+          ctx.sasl()->mechanism().audit_user().copy())) {
         data.error_code = error_code::broker_not_available;
         data.error_message = "Broker not available - audit system failure";
     } else {
@@ -1462,6 +1462,41 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     request.decode(ctx.reader(), ctx.header().version);
     log_request(ctx.header(), request);
 
+    // Check if topic deletion is globally disabled
+    if (!config::shard_local_cfg().delete_topic_enable()) {
+        delete_topics_response resp;
+        resp.data.responses.reserve(
+          request.data.topic_names.size() + request.data.topics.size());
+
+        // Use appropriate error code based on API version
+        // API version 3+ supports topic_deletion_disabled (error 73)
+        const auto ec = (ctx.header().version >= api_version(3))
+                          ? error_code::topic_deletion_disabled
+                          : error_code::invalid_request;
+        const auto err_msg = "Topic deletion is disabled.";
+
+        std::ranges::transform(
+          request.data.topic_names,
+          std::back_inserter(resp.data.responses),
+          [ec, err_msg](const model::topic& t) {
+              return deletable_topic_result{
+                .name = t, .error_code = ec, .error_message = err_msg};
+          });
+
+        std::ranges::transform(
+          request.data.topics,
+          std::back_inserter(resp.data.responses),
+          [ec, err_msg](const delete_topic_state& t) {
+              return deletable_topic_result{
+                .name = t.name,
+                .topic_id = t.topic_id,
+                .error_code = ec,
+                .error_message = err_msg};
+          });
+
+        co_return co_await ctx.respond(std::move(resp));
+    }
+
     // Determine the names and IDs that have been provided, and detect
     // duplicates.
     chunked_hash_set<model::topic> provided_names;
@@ -1680,16 +1715,18 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     // Measure the partition mutation rate
     auto resp_delay = 0ms;
     const auto now = quota_manager::clock::now();
+    const auto principal = ctx.connection()->get_principal();
     auto quota_exceeded_it = co_await ssx::partition(
       valid_topic_names.begin(),
       valid_topic_names.end(),
-      [&ctx, &resp_delay, now](const model::topic& t) {
+      [&ctx, &resp_delay, now, &principal](const model::topic& t) {
           const auto cfg = ctx.metadata_cache().get_topic_cfg(as_tp_ns_view(t));
           const auto mutations = cfg ? cfg->partition_count : 0;
           /// Capture before next scheduling point below
           auto& resp_delay_ref = resp_delay;
           return ctx.quota_mgr()
-            .record_partition_mutations(ctx.header().client_id, mutations, now)
+            .record_partition_mutations(
+              principal.name_view(), ctx.header().client_id, mutations, now)
             .then([&resp_delay_ref](std::chrono::milliseconds delay) {
                 resp_delay_ref = std::max(delay, resp_delay_ref);
                 return delay == 0ms;
@@ -2024,7 +2061,11 @@ ss::future<response_ptr> create_acls_handler::handle(
                     error_code::invalid_config, "GBAC feature not yet active");
               } else {
                   response.data.results.emplace_back(
-                    map_topic_error_code(results[i]));
+                    map_topic_error_code(results[i]),
+                    results[i] == cluster::errc::success
+                      ? std::nullopt
+                      : std::make_optional<ss::sstring>(
+                          fmt::format("{}", results[i])));
               }
           },
           [&response](creatable_acl_result r) {

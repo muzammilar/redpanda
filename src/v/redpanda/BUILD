@@ -30,8 +30,10 @@ redpanda_cc_library(
         "//src/v/cloud_storage",
         "//src/v/cloud_storage_clients",
         "//src/v/cloud_topics:app",
+        "//src/v/cloud_topics:test_fixture_cfg",
         "//src/v/cloud_topics/level_one/metastore:leader_router",
         "//src/v/cloud_topics/level_one/metastore:simple_stm",
+        "//src/v/cloud_topics/level_one/metastore/lsm:stm",
         "//src/v/cloud_topics/level_zero/stm:ctp_stm_factory",
         "//src/v/cluster",
         "//src/v/cluster:cloud_metadata_offsets_recovery_router",
@@ -82,6 +84,7 @@ redpanda_cc_library(
         "//src/v/redpanda/admin/services/datalake",
         "//src/v/redpanda/admin/services/internal:breakglass",
         "//src/v/redpanda/admin/services/internal:debug",
+        "//src/v/redpanda/admin/services/internal:level_zero_gc",
         "//src/v/redpanda/admin/services/internal:metastore",
         "//src/v/redpanda/admin/services/internal:shadow_link_internal",
         "//src/v/redpanda/admin/services/shadow_link",
@@ -121,20 +124,6 @@ redpanda_cc_library(
     ],
 )
 
-# Enable or disable (thin) LTO for the redpanda binary (only)
-bool_flag(
-    name = "lto",
-    build_setting_default = False,
-)
-
-config_setting(
-    name = "use_lto",
-    flag_values = {
-        ":lto": "true",
-    },
-    visibility = ["//visibility:public"],
-)
-
 # Enable or disable --emit-relocs for the redpanda binary (only)
 bool_flag(
     name = "emit_relocs",
@@ -155,14 +144,6 @@ redpanda_cc_binary(
         "main.cc",
     ],
     linkopts =
-        select({
-            ":use_lto": [
-                "-flto=thin",
-                "-ffat-lto-objects",
-            ],
-            "//conditions:default": [
-            ],
-        }) +
         select({
             ":use_emit_relocs": [
                 "-Wl,--emit-relocs",

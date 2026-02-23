@@ -21,7 +21,7 @@ class AvroSchemaReferencesTest
 public:
     // Register a schema in the store and return the avro_schema_definition
     avro_schema_definition register_schema(
-      const subject& sub,
+      const context_subject& sub,
       const schema_definition& schema_def,
       schema_version version) {
         auto avro_def = make_avro_schema_definition(
@@ -39,9 +39,9 @@ TEST_F(AvroSchemaReferencesTest, RegisterWithReferences) {
     // Regression test: verify that schemas with external references are
     // correctly resolved from the schema store
 
-    const auto ref_sub = subject("AddressSubject");
+    const auto ref_sub = context_subject::unqualified("AddressSubject");
     const auto ref_name = "com.example.types.Address";
-    const auto main_sub = subject("PersonSubject");
+    const auto main_sub = context_subject::unqualified("PersonSubject");
     const auto main_name = "com.example.types.Person";
 
     auto referenced_schema = schema_definition{
@@ -78,7 +78,9 @@ TEST_F(AvroSchemaReferencesTest, RegisterWithReferences) {
 })",
       schema_type::avro,
       {schema_reference{
-        .name = ref_name, .sub = ref_sub, .version = schema_version(1)}},
+        .name = ref_name,
+        .sub = {ref_sub, is_qualified::no},
+        .version = schema_version(1)}},
       {}};
 
     // Register the referenced schema (should not throw)
@@ -100,7 +102,7 @@ TEST_F(AvroSchemaReferencesTest, DiamondDependencies) {
 
     // Shared base
     register_schema(
-      subject("BaseSubject"),
+      context_subject::unqualified("BaseSubject"),
       schema_definition{
         R"({"type": "record", "name": "Base", "namespace": "com.example",
             "fields": [{"name": "id", "type": "string"}]})",
@@ -109,35 +111,35 @@ TEST_F(AvroSchemaReferencesTest, DiamondDependencies) {
 
     // Left references Base
     register_schema(
-      subject("LeftSubject"),
+      context_subject::unqualified("LeftSubject"),
       schema_definition{
         R"({"type": "record", "name": "Left", "namespace": "com.example",
             "fields": [{"name": "base", "type": "com.example.Base"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.Base",
-          .sub = subject("BaseSubject"),
+          .sub = context_subject_reference::unqualified("BaseSubject"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
 
     // Right also references Base
     register_schema(
-      subject("RightSubject"),
+      context_subject::unqualified("RightSubject"),
       schema_definition{
         R"({"type": "record", "name": "Right", "namespace": "com.example",
             "fields": [{"name": "base", "type": "com.example.Base"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.Base",
-          .sub = subject("BaseSubject"),
+          .sub = context_subject_reference::unqualified("BaseSubject"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
 
     // Top references both
     auto top_valid = register_schema(
-      subject("TopSubject"),
+      context_subject::unqualified("TopSubject"),
       schema_definition{
         R"({"type": "record", "name": "Top", "namespace": "com.example",
             "fields": [
@@ -147,11 +149,11 @@ TEST_F(AvroSchemaReferencesTest, DiamondDependencies) {
         schema_type::avro,
         {schema_reference{
            .name = "com.example.Left",
-           .sub = subject("LeftSubject"),
+           .sub = context_subject_reference::unqualified("LeftSubject"),
            .version = schema_version(1)},
          schema_reference{
            .name = "com.example.Right",
-           .sub = subject("RightSubject"),
+           .sub = context_subject_reference::unqualified("RightSubject"),
            .version = schema_version(1)}},
         {}},
       schema_version{1});
@@ -165,7 +167,7 @@ TEST_F(AvroSchemaReferencesTest, TransitiveReferences) {
 
     // Leaf: Country (no dependencies)
     register_schema(
-      subject("CountrySubject"),
+      context_subject::unqualified("CountrySubject"),
       schema_definition{
         R"({"type": "record", "name": "Country", "namespace": "com.example",
             "fields": [{"name": "code", "type": "string"}]})",
@@ -174,28 +176,28 @@ TEST_F(AvroSchemaReferencesTest, TransitiveReferences) {
 
     // Middle: Address references Country
     register_schema(
-      subject("AddressSubject"),
+      context_subject::unqualified("AddressSubject"),
       schema_definition{
         R"({"type": "record", "name": "Address", "namespace": "com.example",
             "fields": [{"name": "country", "type": "com.example.Country"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.Country",
-          .sub = subject("CountrySubject"),
+          .sub = context_subject_reference::unqualified("CountrySubject"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
 
     // Root: Person references Address (should transitively fetch Country)
     auto person_valid = register_schema(
-      subject("PersonSubject"),
+      context_subject::unqualified("PersonSubject"),
       schema_definition{
         R"({"type": "record", "name": "Person", "namespace": "com.example",
             "fields": [{"name": "address", "type": "com.example.Address"}, {"name": "country", "type": "com.example.Country"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.Address",
-          .sub = subject("AddressSubject"),
+          .sub = context_subject_reference::unqualified("AddressSubject"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
@@ -207,20 +209,20 @@ TEST_F(AvroSchemaReferencesTest, PrimitiveTypeReference) {
     // Test that we allow referencing primitive types (naming them)
 
     register_schema(
-      subject("StringSubject"),
+      context_subject::unqualified("StringSubject"),
       schema_definition{R"("string")", schema_type::avro},
       schema_version{1});
 
     // Should work - we're giving a name to a primitive type
     auto person_valid = register_schema(
-      subject("PersonSubject"),
+      context_subject::unqualified("PersonSubject"),
       schema_definition{
         R"({"type": "record", "name": "Person", "namespace": "com.example",
             "fields": [{"name": "customString", "type": "com.example.CustomString"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.CustomString",
-          .sub = subject("StringSubject"),
+          .sub = context_subject_reference::unqualified("StringSubject"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
@@ -257,7 +259,7 @@ TEST_F(AvroSchemaReferencesTest, SameNameDifferentSubjectsInIsolation) {
 
     // Register SubjectD - schema named "Shared" with field_d
     register_schema(
-      subject("SubjectD"),
+      context_subject::unqualified("SubjectD"),
       schema_definition{
         R"({"type": "record", "name": "Shared", "namespace": "com.example",
             "fields": [{"name": "field_d", "type": "string"}]})",
@@ -266,7 +268,7 @@ TEST_F(AvroSchemaReferencesTest, SameNameDifferentSubjectsInIsolation) {
 
     // Register SubjectE - DIFFERENT schema but also named "Shared"
     register_schema(
-      subject("SubjectE"),
+      context_subject::unqualified("SubjectE"),
       schema_definition{
         R"({"type": "record", "name": "Shared", "namespace": "com.example",
             "fields": [{"name": "field_e", "type": "int"}]})",
@@ -275,28 +277,28 @@ TEST_F(AvroSchemaReferencesTest, SameNameDifferentSubjectsInIsolation) {
 
     // Register B - uses Shared from SubjectD
     auto b_schema = register_schema(
-      subject("SubjectB"),
+      context_subject::unqualified("SubjectB"),
       schema_definition{
         R"({"type": "record", "name": "B", "namespace": "com.example",
             "fields": [{"name": "shared", "type": "com.example.Shared"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.Shared",
-          .sub = subject("SubjectD"),
+          .sub = context_subject_reference::unqualified("SubjectD"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
 
     // Register C - uses Shared from SubjectE
     auto c_schema = register_schema(
-      subject("SubjectC"),
+      context_subject::unqualified("SubjectC"),
       schema_definition{
         R"({"type": "record", "name": "C", "namespace": "com.example",
             "fields": [{"name": "shared", "type": "com.example.Shared"}]})",
         schema_type::avro,
         {schema_reference{
           .name = "com.example.Shared",
-          .sub = subject("SubjectE"),
+          .sub = context_subject_reference::unqualified("SubjectE"),
           .version = schema_version(1)}},
         {}},
       schema_version{1});
@@ -304,7 +306,7 @@ TEST_F(AvroSchemaReferencesTest, SameNameDifferentSubjectsInIsolation) {
     // Register A which depends on both B and C
     // This should succeed, with a logged warning about the name conflict
     auto a_schema = register_schema(
-      subject("SubjectA"),
+      context_subject::unqualified("SubjectA"),
       schema_definition{
         R"({"type": "record", "name": "A", "namespace": "com.example",
             "fields": [
@@ -314,11 +316,11 @@ TEST_F(AvroSchemaReferencesTest, SameNameDifferentSubjectsInIsolation) {
         schema_type::avro,
         {schema_reference{
            .name = "com.example.B",
-           .sub = subject("SubjectB"),
+           .sub = context_subject_reference::unqualified("SubjectB"),
            .version = schema_version(1)},
          schema_reference{
            .name = "com.example.C",
-           .sub = subject("SubjectC"),
+           .sub = context_subject_reference::unqualified("SubjectC"),
            .version = schema_version(1)}},
         {}},
       schema_version{1});

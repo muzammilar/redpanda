@@ -14,13 +14,16 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "The name used to reference this schema in the dependent schema definition."
         },
         "subject": {
-          "type": "string"
+          "type": "string",
+          "description": "The subject name of the referenced schema. Use [:.<context>:]<subject> for context-qualified subjects, or just <subject> for the default context."
         },
         "version": {
-          "type": "integer"
+          "type": "integer",
+          "description": "The version of the referenced schema."
         }
       }
     },

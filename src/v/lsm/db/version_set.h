@@ -129,7 +129,7 @@ private:
 //
 // Each version keeps track of a set of table files per level. The entire set of
 // versions is maintained in this data structure.
-class version_set {
+class version_set : public file_id_allocator {
     class builder;
 
 public:
@@ -141,19 +141,14 @@ public:
     // Return the current version of this set.
     ss::lw_shared_ptr<version> current() { return _current; }
 
-    // Allocate a new file ID
-    internal::file_id new_file_id() { return _next_file_id++; }
+    // Allocate a new file ID.
+    internal::file_id allocate_id() override { return _next_file_id++; }
 
-    // The highest allocated file ID.
-    internal::file_id highest_used_file_id() {
-        auto fid = _next_file_id;
-        fid--;
-        return fid;
-    }
-
-    // Reuse a file ID (for example because a write failed or operation was
-    // cancelled).
-    void reuse_file_id(internal::file_id id);
+    // Create a new edit that can be applied to the version_set.
+    //
+    // These live edits are tracked so that we can ensure file GC does not
+    // delete any of the files allocated for these edits.
+    ss::lw_shared_ptr<version_edit> new_edit();
 
     // Apply the edit to form a new version of the database that is both saved
     // to persistence as well as set to be the current version.
@@ -161,11 +156,15 @@ public:
     // The edit is applied on top of the current version, and this method
     // requires external synchronization (it's not valid to call this method
     // concurrently).
-    ss::future<> log_and_apply(version_edit);
+    ss::future<> log_and_apply(ss::lw_shared_ptr<version_edit>);
 
     // Recover the last saved version of the database from the persistence
     // layer.
     ss::future<> recover();
+
+    // Reload the manifest from disk. Returns true if the manifest was updated,
+    // false if no change. Throws if the manifest would regress state.
+    ss::future<bool> refresh();
 
     // The latest seqno applied to the LSM tree.
     std::optional<internal::sequence_number> last_seqno() const {
@@ -185,6 +184,9 @@ public:
 
     // Get all the files that are currently being used by any live version.
     chunked_hash_set<internal::file_handle> get_live_files();
+
+    // Return the minimum file ID that is not yet committed.
+    internal::file_id min_uncommitted_file_id() const;
 
 private:
     friend class version;
@@ -207,6 +209,7 @@ private:
     table_cache* _table_cache;
     ss::lw_shared_ptr<internal::options> _options;
     ss::lw_shared_ptr<version> _current;
+    intrusive_list<version_edit, &version_edit::_list_hook> _live_edits;
     internal::file_id _next_file_id = internal::file_id{2};
     internal::file_id _current_manifest_id;
     std::optional<internal::sequence_number> _last_seqno;
@@ -221,7 +224,7 @@ public:
     internal::level level() const { return _level; }
     // Return the object that holds the edits to the descriptor done
     // by this compaction.
-    version_edit* edit() { return &_edit; }
+    ss::lw_shared_ptr<version_edit> edit() { return _edit; }
 
     enum which : uint8_t {
         input_level = 0,
@@ -255,20 +258,24 @@ public:
     // before processing "internal_key".
     bool should_stop_before(internal::key_view key);
 
+    fmt::iterator format_to(fmt::iterator) const;
+
 private:
     friend class version;
     friend class version_set;
 
     compaction(
-      ss::lw_shared_ptr<internal::options> options, internal::level level)
+      ss::lw_shared_ptr<internal::options> options,
+      ss::lw_shared_ptr<version_edit> edit,
+      internal::level level)
       : _level(level)
-      , _edit(*options)
-      , _level_ptrs(options->levels.size()) {}
+      , _edit(std::move(edit))
+      , _level_ptrs(/*n=*/options->levels.size(), /*val=*/0) {}
 
     internal::level _level;
     uint64_t _max_output_file_size = 0;
     ss::lw_shared_ptr<version> _input_version;
-    version_edit _edit;
+    ss::lw_shared_ptr<version_edit> _edit;
     // Each compaction reads inputs from "level_" and "level_+1"
     std::array<chunked_vector<ss::lw_shared_ptr<file_meta_data>>, 2>
       _inputs; // The two sets of inputs

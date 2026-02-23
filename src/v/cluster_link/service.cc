@@ -408,24 +408,9 @@ public:
           "write_at_offset_stm not attached to partition {}",
           _partition->ntp());
     }
-    ss::future<> start() final {
-        auto holder = _gate.hold();
-        auto sync_offset = co_await _stm->get_expected_last_offset(
-          sync_timeout);
-        if (sync_offset.has_error()) {
-            throw std::runtime_error(
-              fmt::format(
-                "Failed to sync write_at_offset_stm for partition {}: {}",
-                _partition->ntp(),
-                sync_offset.error().message()));
-        }
-        vlog(
-          cllog.trace,
-          "[{}] Starting local partition sink at offset {}",
-          _partition->ntp(),
-          sync_offset.value());
-        _last_replicated_offset = sync_offset.value();
-    }
+    ss::future<> start() final { return initialize(); }
+
+    ss::future<> reset() final { return initialize(); }
 
     ss::future<> stop() noexcept final {
         vlog(
@@ -542,10 +527,31 @@ public:
           _partition->log()->from_log_offset(_partition->high_watermark()));
     }
 
+    bool can_prefix_truncate() const final {
+        _gate.check();
+        return _partition->get_ntp_config().is_locally_collectable();
+    }
+
     ss::future<kafka::error_code> prefix_truncate(
       kafka::offset truncation_offset,
       ss::lowres_clock::time_point deadline) final {
         auto h = _gate.hold();
+        auto timeout
+          = std::chrono::duration_cast<::model::timeout_clock::duration>(
+            deadline - ss::lowres_clock::now());
+        auto err = co_await _stm->ensure_truncatable(
+          truncation_offset, timeout);
+        if (err != kafka::write_at_offset_stm::errc::success) {
+            vlog(
+              cllog.warn,
+              "[{}] Failed to ensure truncatable offset {}: {}, will be "
+              "retried later",
+              _partition->ntp(),
+              truncation_offset,
+              err);
+            // a blanket error to trigger a retry later
+            co_return kafka::error_code::offset_out_of_range;
+        }
         co_return co_await kafka::make_partition_proxy(_partition)
           .prefix_truncate(kafka::offset_cast(truncation_offset), deadline);
     }
@@ -594,6 +600,25 @@ public:
     }
 
 private:
+    ss::future<> initialize() {
+        auto holder = _gate.hold();
+        auto sync_offset = co_await _stm->get_expected_last_offset(
+          sync_timeout);
+        if (sync_offset.has_error()) {
+            throw std::runtime_error(
+              fmt::format(
+                "Failed to sync write_at_offset_stm for partition {}: {}",
+                _partition->ntp(),
+                sync_offset.error().message()));
+        }
+        vlog(
+          cllog.trace,
+          "[{}] Reset-ing local partition sink at offset {}",
+          _partition->ntp(),
+          sync_offset.value());
+        _last_replicated_offset = sync_offset.value();
+    }
+
     ss::gate _gate;
     ss::lw_shared_ptr<cluster::partition> _partition;
     const cluster::metadata_cache& _metadata_cache;

@@ -12,6 +12,7 @@
 #include "absl/container/btree_set.h"
 #include "base/seastarx.h"
 #include "cloud_topics/level_one/metastore/state.h"
+#include "cloud_topics/level_one/metastore/state_update_utils.h"
 #include "container/chunked_hash_map.h"
 #include "container/chunked_vector.h"
 #include "model/fundamental.h"
@@ -62,10 +63,8 @@ struct new_object
       chunked_hash_map<model::partition_id, metadata>>
       extent_metas;
 
-    using sorted_extents_by_tidp_t = chunked_hash_map<
-      model::topic_id_partition,
-      absl::btree_multiset<extent>>;
-    void collect_extents_by_tidp(sorted_extents_by_tidp_t*) const;
+    // Returns the sum of lengths of the extents collected.
+    size_t collect_extents_by_tidp(sorted_extents_by_tidp_t*) const;
 };
 
 using term_state_update_t
@@ -182,12 +181,15 @@ struct set_start_offset_update
     auto serde_fields() { return std::tie(tp, new_start_offset); }
 
     static constexpr auto key{update_key::set_start_offset};
-    static std::expected<set_start_offset_update, stm_update_error>
-    build(const state&, const model::topic_id_partition&, kafka::offset);
+    static std::expected<set_start_offset_update, stm_update_error> build(
+      const state&,
+      const model::topic_id_partition&,
+      kafka::offset,
+      bool* is_no_op = nullptr);
 
-    std::expected<std::monostate, stm_update_error> can_apply(const state&);
+    std::expected<std::monostate, stm_update_error>
+    can_apply(const state&, bool* is_no_op = nullptr);
     std::expected<std::monostate, stm_update_error> apply(state&);
-    bool is_no_op(const state&) const;
 
     model::topic_id_partition tp;
     kafka::offset new_start_offset;

@@ -18,9 +18,11 @@ limitations under the License.
 import builtins
 import collections.abc
 import google.protobuf.descriptor
+import google.protobuf.field_mask_pb2
 import google.protobuf.internal.containers
 import google.protobuf.message
 import google.protobuf.timestamp_pb2
+from ...... import proto
 import sys
 import typing
 if sys.version_info >= (3, 10):
@@ -30,11 +32,43 @@ else:
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
 
 @typing.final
-class Role(google.protobuf.message.Message):
+class ScramCredential(google.protobuf.message.Message):
     """=============================================
 
-    The Role resource represents a security role with associated members.
+    The ScramCredential resource used for SCRAM authentication.
     """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    NAME_FIELD_NUMBER: builtins.int
+    MECHANISM_FIELD_NUMBER: builtins.int
+    PASSWORD_FIELD_NUMBER: builtins.int
+    PASSWORD_SET_AT_FIELD_NUMBER: builtins.int
+    name: builtins.str
+    'The name of the SCRAM credential.'
+    mechanism: proto.redpanda.core.common.v1.security_types_pb2.ScramMechanism.ValueType
+    'The SCRAM mechanism used for this credential.'
+    password: builtins.str
+    'The password for the SCRAM credential.'
+
+    @property
+    def password_set_at(self) -> google.protobuf.timestamp_pb2.Timestamp:
+        """The timestamp when the password was last set.
+        For passwords set before this feature was implemented, this will return
+        the Unix epoch (1970-01-01T00:00:00Z).
+        """
+
+    def __init__(self, *, name: builtins.str=..., mechanism: proto.redpanda.core.common.v1.security_types_pb2.ScramMechanism.ValueType=..., password: builtins.str=..., password_set_at: google.protobuf.timestamp_pb2.Timestamp | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['password_set_at', b'password_set_at']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['mechanism', b'mechanism', 'name', b'name', 'password', b'password', 'password_set_at', b'password_set_at']) -> None:
+        ...
+Global___ScramCredential: typing_extensions.TypeAlias = ScramCredential
+
+@typing.final
+class Role(google.protobuf.message.Message):
+    """The Role resource represents a security role with associated members."""
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
     NAME_FIELD_NUMBER: builtins.int
     MEMBERS_FIELD_NUMBER: builtins.int
@@ -53,11 +87,196 @@ class Role(google.protobuf.message.Message):
 Global___Role: typing_extensions.TypeAlias = Role
 
 @typing.final
-class CreateRoleRequest(google.protobuf.message.Message):
+class CreateScramCredentialRequest(google.protobuf.message.Message):
     """=============================================
 
-    CreateRoleRequest is the request for the CreateRole RPC.
+    CreateScramCredentialRequest is the request for the CreateScramCredential
+    RPC.
     """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    SCRAM_CREDENTIAL_FIELD_NUMBER: builtins.int
+
+    @property
+    def scram_credential(self) -> Global___ScramCredential:
+        """The SCRAM credential to create."""
+
+    def __init__(self, *, scram_credential: Global___ScramCredential | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> None:
+        ...
+Global___CreateScramCredentialRequest: typing_extensions.TypeAlias = CreateScramCredentialRequest
+
+@typing.final
+class CreateScramCredentialResponse(google.protobuf.message.Message):
+    """CreateScramCredentialResponse is the response from the CreateScramCredential
+    RPC.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    SCRAM_CREDENTIAL_FIELD_NUMBER: builtins.int
+
+    @property
+    def scram_credential(self) -> Global___ScramCredential:
+        """The created SCRAM credential."""
+
+    def __init__(self, *, scram_credential: Global___ScramCredential | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> None:
+        ...
+Global___CreateScramCredentialResponse: typing_extensions.TypeAlias = CreateScramCredentialResponse
+
+@typing.final
+class GetScramCredentialRequest(google.protobuf.message.Message):
+    """GetScramCredentialRequest is the request for the GetScramCredential RPC."""
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    NAME_FIELD_NUMBER: builtins.int
+    name: builtins.str
+    'The name of the SCRAM credential to retrieve.'
+
+    def __init__(self, *, name: builtins.str=...) -> None:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['name', b'name']) -> None:
+        ...
+Global___GetScramCredentialRequest: typing_extensions.TypeAlias = GetScramCredentialRequest
+
+@typing.final
+class GetScramCredentialResponse(google.protobuf.message.Message):
+    """GetScramCredentialResponse is the response from the GetScramCredential RPC."""
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    SCRAM_CREDENTIAL_FIELD_NUMBER: builtins.int
+
+    @property
+    def scram_credential(self) -> Global___ScramCredential:
+        """The requested SCRAM credential."""
+
+    def __init__(self, *, scram_credential: Global___ScramCredential | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> None:
+        ...
+Global___GetScramCredentialResponse: typing_extensions.TypeAlias = GetScramCredentialResponse
+
+@typing.final
+class ListScramCredentialsRequest(google.protobuf.message.Message):
+    """ListScramCredentialsRequest is the request for the ListScramCredentials RPC."""
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    def __init__(self) -> None:
+        ...
+Global___ListScramCredentialsRequest: typing_extensions.TypeAlias = ListScramCredentialsRequest
+
+@typing.final
+class ListScramCredentialsResponse(google.protobuf.message.Message):
+    """ListScramCredentialsResponse is the response from the ListScramCredentials
+    RPC.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    SCRAM_CREDENTIALS_FIELD_NUMBER: builtins.int
+
+    @property
+    def scram_credentials(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[Global___ScramCredential]:
+        """The list of SCRAM credentials."""
+
+    def __init__(self, *, scram_credentials: collections.abc.Iterable[Global___ScramCredential] | None=...) -> None:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['scram_credentials', b'scram_credentials']) -> None:
+        ...
+Global___ListScramCredentialsResponse: typing_extensions.TypeAlias = ListScramCredentialsResponse
+
+@typing.final
+class UpdateScramCredentialRequest(google.protobuf.message.Message):
+    """UpdateScramCredentialRequest is the request for the UpdateScramCredential
+    RPC.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    SCRAM_CREDENTIAL_FIELD_NUMBER: builtins.int
+    UPDATE_MASK_FIELD_NUMBER: builtins.int
+
+    @property
+    def scram_credential(self) -> Global___ScramCredential:
+        """The SCRAM credential to update."""
+
+    @property
+    def update_mask(self) -> google.protobuf.field_mask_pb2.FieldMask:
+        """The list of fields to update
+        See [AIP-134](https://google.aip.dev/134) for how to use `field_mask`
+        """
+
+    def __init__(self, *, scram_credential: Global___ScramCredential | None=..., update_mask: google.protobuf.field_mask_pb2.FieldMask | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['scram_credential', b'scram_credential', 'update_mask', b'update_mask']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['scram_credential', b'scram_credential', 'update_mask', b'update_mask']) -> None:
+        ...
+Global___UpdateScramCredentialRequest: typing_extensions.TypeAlias = UpdateScramCredentialRequest
+
+@typing.final
+class UpdateScramCredentialResponse(google.protobuf.message.Message):
+    """UpdateScramCredentialResponse is the response from the UpdateScramCredential
+    RPC.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    SCRAM_CREDENTIAL_FIELD_NUMBER: builtins.int
+
+    @property
+    def scram_credential(self) -> Global___ScramCredential:
+        """The updated SCRAM credential."""
+
+    def __init__(self, *, scram_credential: Global___ScramCredential | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['scram_credential', b'scram_credential']) -> None:
+        ...
+Global___UpdateScramCredentialResponse: typing_extensions.TypeAlias = UpdateScramCredentialResponse
+
+@typing.final
+class DeleteScramCredentialRequest(google.protobuf.message.Message):
+    """DeleteScramCredentialRequest is the request for the DeleteScramCredential
+    RPC.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    NAME_FIELD_NUMBER: builtins.int
+    name: builtins.str
+    'The name of the SCRAM credential to delete.'
+
+    def __init__(self, *, name: builtins.str=...) -> None:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['name', b'name']) -> None:
+        ...
+Global___DeleteScramCredentialRequest: typing_extensions.TypeAlias = DeleteScramCredentialRequest
+
+@typing.final
+class DeleteScramCredentialResponse(google.protobuf.message.Message):
+    """DeleteScramCredentialResponse is the response from the DeleteScramCredential
+    RPC.
+    """
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    def __init__(self) -> None:
+        ...
+Global___DeleteScramCredentialResponse: typing_extensions.TypeAlias = DeleteScramCredentialResponse
+
+@typing.final
+class CreateRoleRequest(google.protobuf.message.Message):
+    """CreateRoleRequest is the request for the CreateRole RPC."""
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
     ROLE_FIELD_NUMBER: builtins.int
 
@@ -389,24 +608,44 @@ class RoleUser(google.protobuf.message.Message):
 Global___RoleUser: typing_extensions.TypeAlias = RoleUser
 
 @typing.final
+class RoleGroup(google.protobuf.message.Message):
+    """RoleGroup represents a group member of a Role."""
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+    NAME_FIELD_NUMBER: builtins.int
+    name: builtins.str
+    'The name of the group.'
+
+    def __init__(self, *, name: builtins.str=...) -> None:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['name', b'name']) -> None:
+        ...
+Global___RoleGroup: typing_extensions.TypeAlias = RoleGroup
+
+@typing.final
 class RoleMember(google.protobuf.message.Message):
     """RoleMember represents a member of a Role."""
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
     USER_FIELD_NUMBER: builtins.int
+    GROUP_FIELD_NUMBER: builtins.int
 
     @property
     def user(self) -> Global___RoleUser:
         ...
 
-    def __init__(self, *, user: Global___RoleUser | None=...) -> None:
+    @property
+    def group(self) -> Global___RoleGroup:
         ...
 
-    def HasField(self, field_name: typing.Literal['member', b'member', 'user', b'user']) -> builtins.bool:
+    def __init__(self, *, user: Global___RoleUser | None=..., group: Global___RoleGroup | None=...) -> None:
         ...
 
-    def ClearField(self, field_name: typing.Literal['member', b'member', 'user', b'user']) -> None:
+    def HasField(self, field_name: typing.Literal['group', b'group', 'member', b'member', 'user', b'user']) -> builtins.bool:
         ...
 
-    def WhichOneof(self, oneof_group: typing.Literal['member', b'member']) -> typing.Literal['user'] | None:
+    def ClearField(self, field_name: typing.Literal['group', b'group', 'member', b'member', 'user', b'user']) -> None:
+        ...
+
+    def WhichOneof(self, oneof_group: typing.Literal['member', b'member']) -> typing.Literal['user', 'group'] | None:
         ...
 Global___RoleMember: typing_extensions.TypeAlias = RoleMember

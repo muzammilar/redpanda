@@ -7,6 +7,8 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+from ducktape.tests.test import TestContext
+from typing import Any
 from ducktape.utils.util import wait_until
 from ducktape.mark import matrix
 from collections.abc import Iterable
@@ -28,6 +30,7 @@ from rptest.services.redpanda import (
 )
 from rptest.tests.end_to_end import EndToEndTest
 from rptest.util import Scale
+import rptest.tests.cloud_topics.utils as ct_utils
 
 
 class EndToEndCloudTopicsBase(EndToEndTest):
@@ -45,7 +48,12 @@ class EndToEndCloudTopicsBase(EndToEndTest):
 
     rpk: RpkTool
 
-    def __init__(self, test_context, extra_rp_conf=None, environment=None):
+    def __init__(
+        self,
+        test_context: TestContext,
+        extra_rp_conf: dict[str, Any] | None = None,
+        environment: dict[str, str] | None = None,
+    ):
         super(EndToEndCloudTopicsBase, self).__init__(test_context=test_context)
 
         self.test_context = test_context
@@ -89,7 +97,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
         self.redpanda.start()
         for topic in self.topics:
             config = {
-                "redpanda.cloud_topic.enabled": "true",
+                TopicSpec.PROPERTY_STORAGE_MODE: TopicSpec.STORAGE_MODE_CLOUD,
                 "cleanup.policy": topic.cleanup_policy,
             }
             if topic.min_cleanable_dirty_ratio is not None:
@@ -103,7 +111,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
                 config=config,
             )
 
-    def wait_until_reconciled(self, topic: str, partition: int, transactions: bool):
+    def wait_until_reconciled(self, topic: str, partition: int):
         def get_offsets():
             last_record: int | None = None
             output = self.rpk.consume(
@@ -142,14 +150,10 @@ class EndToEndCloudTopicsBase(EndToEndTest):
             retry_on_exc=True,
         )
 
-    def wait_until_all_reconciled(
-        self, topics: Iterable[TopicSpec] | None = None, transactions: bool = False
-    ):
+    def wait_until_all_reconciled(self, topics: Iterable[TopicSpec] | None = None):
         for topic in topics or self.topics:
             for partition in range(topic.partition_count):
-                self.wait_until_reconciled(
-                    topic=topic.name, partition=partition, transactions=transactions
-                )
+                self.wait_until_reconciled(topic=topic.name, partition=partition)
 
 
 class EndToEndCloudTopicsTest(EndToEndCloudTopicsBase):
@@ -197,6 +201,44 @@ class EndToEndCloudTopicsTest(EndToEndCloudTopicsBase):
             expected_missing_records=35 * self.topics[0].partition_count
         )
         self.wait_until_all_reconciled()
+
+    @cluster(num_nodes=4)
+    def test_get_size(self):
+        """
+        Test that the metastore GetSize RPC returns the correct partition size.
+
+        1. Before any data is written, GetSize should return either 0 or NOT_FOUND
+           (partitions are lazily created in the metastore).
+        2. After writing data, GetSize should eventually return a positive value.
+        """
+        topic = self.s3_topic_name
+        partition = 0
+
+        def get_partition_size() -> int | None:
+            return ct_utils.get_l1_partition_size(self.admin, topic, partition)
+
+        # Before writing data, the partition should either not exist or have size 0
+        initial_size = get_partition_size()
+        assert initial_size is None or initial_size == 0, (
+            f"Expected partition size to be 0 or not found before writing data, "
+            f"got {initial_size}"
+        )
+        self.logger.info(
+            f"Initial partition size: {initial_size} (None means not found)"
+        )
+
+        # Write data to the topic
+        self.start_producer()
+        self.await_num_produced(min_records=50000)
+        self.producer.stop()
+
+        # Wait for the data to be reconciled to the metastore
+        self.wait_until_reconciled(topic=topic, partition=partition)
+
+        # Waits until the the partition size reaches a reported positive size
+        ct_utils.wait_until_l1_partition_size(
+            self.admin, topic, partition, lambda size: size > 0
+        )
 
 
 class EndToEndCloudTopicsTxTest(EndToEndCloudTopicsBase):
@@ -268,7 +310,7 @@ class EndToEndCloudTopicsTxTest(EndToEndCloudTopicsBase):
         assert cstatus.validator.valid_reads == committed_messages
         assert cstatus.validator.invalid_reads == 0
         assert cstatus.validator.out_of_scope_invalid_reads == 0
-        self.wait_until_all_reconciled(self.topics, transactions=True)
+        self.wait_until_all_reconciled(self.topics)
 
 
 class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
@@ -289,11 +331,11 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
 
     def __init__(self, test_context):
         key_map_memory_kb = test_context.injected_args[
-            "storage_compaction_key_map_memory_kb"
+            "cloud_topics_compaction_key_map_memory_kb"
         ]
         extra_rp_conf = {
-            "log_compaction_interval_ms": 4000,
-            "storage_compaction_key_map_memory": key_map_memory_kb * 1024,
+            "cloud_topics_compaction_interval_ms": 4000,
+            "cloud_topics_compaction_key_map_memory": key_map_memory_kb * 1024,
         }
         environment = {"__REDPANDA_TEST_DISABLE_BOUNDED_PROPERTY_CHECKS": "ON"}
         super(EndToEndCloudTopicsCompactionTest, self).__init__(
@@ -334,7 +376,7 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
         assert self.redpanda
         assert self.topic
         try:
-            self.producer = KgoVerifierProducer(
+            self.kgo_producer = KgoVerifierProducer(
                 self.test_context,
                 self.redpanda,
                 self.topic,
@@ -345,18 +387,18 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
                 validate_latest_values=True,
                 tolerate_failed_produce=True,
             )
-            self.producer.start()
-            self.producer.wait_for_latest_value_map()
-            self.producer.wait()
+            self.kgo_producer.start()
+            self.kgo_producer.wait_for_latest_value_map()
+            self.kgo_producer.wait()
         finally:
-            self.producer.stop()
+            self.kgo_producer.stop()
 
     def consume(self):
         assert self.redpanda
         assert self.topic
-        traffic_node = self.producer.nodes[0]
+        traffic_node = self.kgo_producer.nodes[0]
         try:
-            self.consumer = KgoVerifierSeqConsumer(
+            self.kgo_consumer = KgoVerifierSeqConsumer(
                 self.test_context,
                 self.redpanda,
                 self.topic,
@@ -366,14 +408,14 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
                 validate_latest_values=True,
                 nodes=[traffic_node],
             )
-            self.consumer.start(clean=False)
-            self.consumer.wait()
+            self.kgo_consumer.start(clean=False)
+            self.kgo_consumer.wait()
         finally:
-            self.consumer.stop()
+            self.kgo_consumer.stop()
 
     @cluster(num_nodes=4)
-    @matrix(storage_compaction_key_map_memory_kb=[3, 10, 128 * 1024])
-    def test_compact(self, storage_compaction_key_map_memory_kb):
+    @matrix(cloud_topics_compaction_key_map_memory_kb=[3, 10, 128 * 1024])
+    def test_compact(self, cloud_topics_compaction_key_map_memory_kb):
         def seen_managed_logs():
             return self.get_managed_logs() > 0
 
@@ -385,8 +427,8 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
         )
 
         num_rounds = 1
-        self.prev_log_compactions = 0
-        self.prev_removed_records = 0
+        self.prev_log_compactions = 0.0
+        self.prev_removed_records = 0.0
         for i in range(0, num_rounds):
             self.produce()
 

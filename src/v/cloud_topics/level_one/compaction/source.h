@@ -14,6 +14,7 @@
 #include "cloud_topics/level_one/compaction/filter.h"
 #include "cloud_topics/level_one/compaction/meta.h"
 #include "cloud_topics/level_one/compaction/worker_probe.h"
+#include "cloud_topics/level_one/frontend_reader/level_one_reader_probe.h"
 #include "cloud_topics/level_one/metastore/extent_metadata_reader.h"
 #include "cloud_topics/level_one/metastore/metastore.h"
 #include "cloud_topics/level_one/metastore/offset_interval_set.h"
@@ -32,13 +33,15 @@ public:
       const chunked_vector<offset_interval_set::interval>&,
       const offset_interval_set&,
       kafka::offset,
+      kafka::offset,
       compaction::key_offset_map*,
       std::chrono::milliseconds,
       metastore*,
       io*,
       ss::abort_source&,
       compaction_job_state&,
-      compaction_worker_probe&);
+      compaction_worker_probe&,
+      level_one_reader_probe*);
     ss::future<> initialize() final;
     ss::future<ss::stop_iteration> map_building_iteration() final;
     ss::future<ss::stop_iteration>
@@ -62,6 +65,9 @@ private:
 
     // The start offset of the CTP.
     kafka::offset _start_offset;
+
+    // The maximum compactible offset, as pinned by e.g. iceberg translation.
+    kafka::offset _max_compactible_offset;
 
     // Iterator used during `map_building_iteration()` which points into the
     // above vector `_dirty_range_intervals`. Iterating backwards over extents
@@ -95,6 +101,7 @@ private:
     ss::abort_source& _as;
     compaction_job_state& _state;
     compaction_worker_probe& _probe;
+    level_one_reader_probe* _l1_reader_probe;
 
     // Dirty ranges returned by the `metastore` that were indexed during
     // `map_deduplication_iteration`.

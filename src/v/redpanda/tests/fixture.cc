@@ -94,14 +94,16 @@ redpanda_thread_fixture::redpanda_thread_fixture(
   bool enable_legacy_upload_mode,
   bool iceberg_enabled,
   bool enable_cloud_topics,
-  bool development_cluster_linking_enabled)
+  bool development_cluster_linking_enabled,
+  cloud_topics::test_fixture_cfg ct_test_cfg)
   : app(ssx::sformat("redpanda-{}", node_id()))
   , proxy_port(proxy_port)
   , schema_reg_port(schema_reg_port)
   , kafka_port(kafka_port)
   , data_dir(std::move(base_dir))
   , remove_on_shutdown(remove_on_shutdown)
-  , app_signal(std::make_unique<::stop_signal>()) {
+  , app_signal(std::make_unique<::stop_signal>())
+  , ct_test_cfg(ct_test_cfg) {
     configure(
       node_id,
       kafka_port,
@@ -131,7 +133,7 @@ redpanda_thread_fixture::redpanda_thread_fixture(
           }),
           audit_log_client_config(kafka_port));
         app.check_environment();
-        app.wire_up_and_start(*app_signal, true);
+        app.wire_up_and_start(*app_signal, true, ct_test_cfg);
     } catch (...) {
         // shutdown half-initialized app nicely so that its destructor doesn't
         // assert and the exception bubbles up
@@ -333,7 +335,7 @@ void redpanda_thread_fixture::restart(should_wipe w) {
     }).get();
     app.initialize(proxy_config(), proxy_client_config());
     app.check_environment();
-    app.wire_up_and_start(*app_signal, true);
+    app.wire_up_and_start(*app_signal, true, ct_test_cfg);
 }
 
 void redpanda_thread_fixture::configure(
@@ -395,7 +397,10 @@ void redpanda_thread_fixture::configure(
               .set_value(std::make_optional(s3_config->server_addr.host()));
             config.get("cloud_storage_url_style")
               .set_value(std::make_optional([&] {
-                  switch (s3_config->url_style) {
+                  if (!s3_config->url_style.has_value()) {
+                      return config::s3_url_style::virtual_host;
+                  }
+                  switch (*s3_config->url_style) {
                   case cloud_storage_clients::s3_url_style::virtual_host:
                       return config::s3_url_style::virtual_host;
                   case cloud_storage_clients::s3_url_style::path:

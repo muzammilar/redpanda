@@ -36,8 +36,9 @@
 namespace cluster {
 
 topic_table::topic_table(
-  data_migrations::migrated_resources& migrated_resources)
-  : _probe(*this)
+  data_migrations::migrated_resources& migrated_resources,
+  model::node_id node_id)
+  : _probe(*this, node_id)
   , _migrated_resources(migrated_resources) {}
 
 ss::future<std::error_code>
@@ -189,7 +190,7 @@ topic_table::apply(topic_lifecycle_transition soft_del, model::offset offset) {
         const auto& topic_cfg = tp->second.get_configuration();
         const auto& topic_properties = topic_cfg.properties;
 
-        if (topic_properties.requires_remote_erase()) {
+        if (topic_properties.requires_tiered_remote_erase()) {
             auto tombstone = nt_lifecycle_marker{
               .config = tp->second.get_configuration(),
               .initial_revision_id = tp->second.get_remote_revision().value_or(
@@ -204,10 +205,7 @@ topic_table::apply(topic_lifecycle_transition soft_del, model::offset offset) {
               soft_del.topic.initial_revision_id);
         }
 
-        if (
-          topic_properties.iceberg_mode != model::iceberg_mode::disabled
-          && topic_properties.iceberg_delete.value_or(
-            config::shard_local_cfg().iceberg_delete())) {
+        if (topic_properties.requires_iceberg_remote_erase()) {
             // Note that for iceberg tombstones we use topic.get_revision()
             // (i.e. revision that got assigned to the topic at creation time)
             // and not topic.get_remote_revision() (which may be an earlier
@@ -225,10 +223,7 @@ topic_table::apply(topic_lifecycle_transition soft_del, model::offset offset) {
               it->second.last_deleted_revision);
         }
 
-        if (
-          topic_properties.cloud_topic_enabled
-          && !topic_properties.read_replica.value_or(false)
-          && topic_properties.remote_delete) {
+        if (topic_properties.requires_cloud_topic_remote_erase()) {
             auto tp_id = topic_cfg.tp_id;
             if (tp_id.has_value()) {
                 auto tombstone = nt_cloud_topic_tombstone{
@@ -1049,6 +1044,31 @@ void incremental_update(
     }
 }
 
+void incremental_update(
+  model::redpanda_storage_mode& property,
+  property_update<std::optional<model::redpanda_storage_mode>> override,
+  model::redpanda_storage_mode /*default_value*/) {
+    // Validation of storage mode transitions is done at the kafka layer.
+    // This function only applies the update.
+    switch (override.op) {
+    case incremental_update_operation::remove:
+        // Cannot remove redpanda.storage.mode - it can only be set explicitly
+        vlog(
+          clusterlog.warn,
+          "Cannot remove property redpanda.storage.mode - it can only be set "
+          "explicitly. Current value: {}",
+          property);
+        return;
+    case incremental_update_operation::set:
+        if (override.value) {
+            property = *override.value;
+        }
+        return;
+    case incremental_update_operation::none:
+        return;
+    }
+}
+
 template<typename T>
 void incremental_update(
   tristate<T>& property, property_update<tristate<T>> override) {
@@ -1206,6 +1226,11 @@ topic_properties topic_table::update_topic_properties(
     incremental_update(
       updated_properties.message_timestamp_after_max_ms,
       overrides.message_timestamp_after_max_ms);
+    incremental_update(updated_properties.remote_label, overrides.remote_label);
+    incremental_update(
+      updated_properties.storage_mode,
+      overrides.storage_mode,
+      storage::ntp_config::default_storage_mode);
     return updated_properties;
 }
 
@@ -1718,7 +1743,8 @@ ss::future<> topic_table::apply_snapshot(
 
     // Lifecycle markers is a simple static collection without notifications
     // etc, so we can just copy directly into place.
-    _lifecycle_markers = controller_snap.topics.lifecycle_markers;
+    _lifecycle_markers.replace(
+      controller_snap.topics.lifecycle_markers.values().copy());
 
     reset_partitions_to_force_reconfigure(
       controller_snap.topics.partitions_to_force_recover);

@@ -10,7 +10,14 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "cloud_io/remote.h"
+#include "cloud_storage_clients/types.h"
+#include "cloud_topics/level_one/metastore/manifest_io.h"
 #include "cloud_topics/level_one/metastore/metastore.h"
+#include "model/fundamental.h"
+#include "storage/fwd.h"
+
+#include <memory>
 
 namespace cloud_topics::l1 {
 class leader_router;
@@ -20,13 +27,19 @@ class leader_router;
 // topic partition).
 class replicated_metastore : public metastore {
 public:
-    explicit replicated_metastore(leader_router& fe);
+    replicated_metastore(
+      leader_router& fe,
+      cloud_io::remote& io,
+      cloud_storage_clients::bucket_name bucket);
 
     ss::future<std::expected<std::unique_ptr<object_metadata_builder>, errc>>
     object_builder() override;
 
     ss::future<std::expected<offsets_response, errc>>
     get_offsets(const model::topic_id_partition&) override;
+
+    ss::future<std::expected<size_response, errc>>
+    get_size(const model::topic_id_partition&) override;
 
     ss::future<std::expected<add_response, errc>> add_objects(
       const object_metadata_builder&, const term_offset_map_t&) override;
@@ -85,8 +98,14 @@ public:
       kafka::offset,
       size_t) override;
 
+    ss::future<std::expected<std::nullopt_t, errc>> flush() override;
+
+    ss::future<std::expected<std::nullopt_t, errc>>
+    restore(const cloud_storage::remote_label&) override;
+
 private:
     leader_router& fe_;
+    std::unique_ptr<manifest_io> manifest_io_;
 };
 
 } // namespace cloud_topics::l1

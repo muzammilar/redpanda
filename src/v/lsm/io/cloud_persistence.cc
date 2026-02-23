@@ -17,11 +17,14 @@
 #include "lsm/core/internal/files.h"
 #include "lsm/io/file_io.h"
 #include "lsm/io/persistence.h"
+#include "ssx/future-util.h"
 #include "utils/retry_chain_node.h"
+#include "utils/uuid.h"
 
 #include <seastar/core/fstream.hh>
 #include <seastar/core/reactor.hh>
 
+#include <exception>
 #include <memory>
 
 namespace lsm::io {
@@ -126,8 +129,12 @@ public:
         } catch (const std::system_error& err) {
             throw io_error_exception(err.code(), "io error closing: {}", err);
         } catch (...) {
-            throw io_error_exception(
-              "io error closing: {}", std::current_exception());
+            auto ex = std::current_exception();
+            if (ssx::is_shutdown_exception(ex)) {
+                throw abort_requested_exception(
+                  "shutdown exception while closing: {}", ex);
+            }
+            throw io_error_exception("io error closing: {}", ex);
         }
     }
 
@@ -218,8 +225,12 @@ public:
             throw io_error_exception(
               e.code(), "io error downloading file: {}", e);
         } catch (...) {
-            throw io_error_exception(
-              "io error downloading file: {}", std::current_exception());
+            auto ex = std::current_exception();
+            if (ssx::is_shutdown_exception(ex)) {
+                throw abort_requested_exception(
+                  "shutdown exception while downloading file: {}", ex);
+            }
+            throw io_error_exception("io error downloading file: {}", ex);
         }
         if (check_result(result)) {
             co_return co_await open_local_reader(filepath);
@@ -255,8 +266,12 @@ public:
             throw io_error_exception(
               e.code(), "io error opening file writer: {}", e);
         } catch (...) {
-            throw io_error_exception(
-              "io error opening file writer: {}", std::current_exception());
+            auto ex = std::current_exception();
+            if (ssx::is_shutdown_exception(ex)) {
+                throw abort_requested_exception(
+                  "shutdown exception while opening file writer: {}", ex);
+            }
+            throw io_error_exception("io error opening file writer: {}", ex);
         }
     }
 
@@ -279,8 +294,12 @@ public:
                   e.code(), "io error removing file: {}", e);
             }
         } catch (...) {
-            throw io_error_exception(
-              "io error removing file: {}", std::current_exception());
+            auto ex = std::current_exception();
+            if (ssx::is_shutdown_exception(ex)) {
+                throw abort_requested_exception(
+                  "shutdown exception while removing file: {}", ex);
+            }
+            throw io_error_exception("io error removing file: {}", ex);
         }
         check_result(result);
     }
@@ -296,8 +315,12 @@ public:
         try {
             result = co_await _remote->list_objects(_bucket, rtc, _prefix);
         } catch (...) {
-            throw io_error_exception(
-              "io error listing files: {}", std::current_exception());
+            auto ex = std::current_exception();
+            if (ssx::is_shutdown_exception(ex)) {
+                throw abort_requested_exception(
+                  "shutdown exception while listing files: {}", ex);
+            }
+            throw io_error_exception("io error listing files: {}", ex);
         }
         if (result.has_error()) {
             throw io_error_exception(
@@ -342,19 +365,27 @@ private:
             throw io_error_exception(
               e.code(), "io error opening file reader: {}", e);
         } catch (...) {
+            auto ex = std::current_exception();
+            if (ssx::is_shutdown_exception(ex)) {
+                throw abort_requested_exception(
+                  "shutdown exception while listing files: {}", ex);
+            }
             throw io_error_exception(
-              "io error opening staging file reader: {}",
-              std::current_exception());
+              "io error opening staging file reader: {}", ex);
         }
     }
     ss::future<uint64_t> save_locally(
       uint64_t content_length,
       ss::input_stream<char> input_stream,
       std::filesystem::path filepath) {
+        auto temp_path = fmt::format(
+          "{}.tmp.{}", filepath.native(), uuid_t::create());
+
+        // Download to temp file so we can swap below.
         auto file = ss::open_file_dma(
-          filepath.native(),
+          temp_path,
           ss::open_flags::create | ss::open_flags::rw
-            | ss::open_flags::truncate);
+            | ss::open_flags::exclusive);
         auto output_stream
           = co_await ss::with_file_close_on_failure(
               std::move(file),
@@ -374,14 +405,29 @@ private:
                     }
                     return fut;
                 });
+
         co_await ss::copy(input_stream, output_stream)
           .finally([&output_stream] { return output_stream.close(); })
           .finally([&input_stream] { return input_stream.close(); });
+
+        auto rename_fut = co_await ss::coroutine::as_future(
+          ss::rename_file(temp_path, filepath.native()));
+        if (rename_fut.failed()) {
+            auto ex = rename_fut.get_exception();
+            co_await ss::remove_file(temp_path).then_wrapped(
+              [](ss::future<> fut) { fut.ignore_ready_future(); });
+            throw io_error_exception(
+              "Rename from {} to {} failed: {}",
+              temp_path,
+              filepath.native(),
+              ex);
+        }
+
         co_return content_length;
     }
 
     std::filesystem::path staging_path(std::string_view name) {
-        return _staging / name;
+        return _staging / fmt::format("{}-{}", _prefix(), name);
     }
 
     cloud_storage_clients::object_key cloud_key(std::string_view name) {

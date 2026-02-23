@@ -16,6 +16,8 @@
 #include "security/role_store.h"
 #include "utils/base64.h"
 
+#include <seastar/util/defer.hh>
+
 #include <boost/algorithm/string.hpp>
 #include <fmt/ostream.h>
 #include <gtest/gtest.h>
@@ -103,7 +105,7 @@ TEST(AUTHORIZER_TEST, authz_resource_type_auto) {
       get_resource_type<kafka::transactional_id>(),
       security::resource_type::transactional_id);
     ASSERT_EQ(
-      get_resource_type<pandaproxy::schema_registry::subject>(),
+      get_resource_type<pandaproxy::schema_registry::context_subject>(),
       security::resource_type::sr_subject);
     ASSERT_EQ(
       get_resource_type<pandaproxy::schema_registry::registry_resource>(),
@@ -1915,6 +1917,10 @@ TEST(AUTHORIZER_TEST, role_authz_remove_binding_multiple_match) {
 
 TEST(AUTHORIZER_TEST, authz_filter_out_non_kafka_resources) {
     namespace ppsr = pandaproxy::schema_registry;
+    ppsr::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { ppsr::enable_qualified_subjects::reset_local(); });
+
     acl_principal user(principal_type::user, "alice");
     acl_host host("192.168.2.1");
 
@@ -1972,7 +1978,7 @@ TEST(AUTHORIZER_TEST, authz_filter_out_non_kafka_resources) {
 
     // Check prefix match for schema registry subject
     result = auth.authorized(
-      ppsr::subject("model-value"),
+      ppsr::context_subject::from_string("model-value"),
       acl_operation::read,
       user,
       host,
@@ -1982,7 +1988,7 @@ TEST(AUTHORIZER_TEST, authz_filter_out_non_kafka_resources) {
 
     // Check read implies describe
     result = auth.authorized(
-      ppsr::subject("model-key"),
+      ppsr::context_subject::from_string("model-key"),
       acl_operation::describe,
       user,
       host,
@@ -1992,7 +1998,7 @@ TEST(AUTHORIZER_TEST, authz_filter_out_non_kafka_resources) {
 
     // Check read does not imply write
     result = auth.authorized(
-      ppsr::subject("model-key"),
+      ppsr::context_subject::from_string("model-key"),
       acl_operation::write,
       user,
       host,
@@ -2760,4 +2766,612 @@ TEST(AUTHORIZER_TEST, group_authz_large_number_of_groups) {
     EXPECT_TRUE(result.authorized);
     EXPECT_EQ(result.group.value().name(), "group42");
 }
+
+// Tests for group-role lookup: groups can be members of roles
+TEST(AUTHORIZER_TEST, group_role_authz_simple_allow) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    role_name role_name1("role1");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_host host1("192.168.1.2");
+
+    // Role has read permission
+    acl_entry allow_role(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, allow_role);
+
+    role_store roles;
+    // Add group1 as a member of role1
+    roles.put(role_name1, role{{role_member::from_principal(group1)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // User in group1 should be authorized via group -> role path
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_TRUE(result.authorized);
+    EXPECT_EQ(result.acl, allow_role);
+    EXPECT_EQ(result.role, role_name1);
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_deny_takes_precedence) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    role_name role_name1("role1");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_host host1("192.168.1.2");
+
+    // Role has deny permission
+    acl_entry deny_role(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::deny);
+
+    // Group has allow permission
+    acl_entry allow_group(
+      group1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, deny_role);
+    bindings.emplace_back(resource, allow_group);
+
+    role_store roles;
+    // Add group1 as a member of role1
+    roles.put(role_name1, role{{role_member::from_principal(group1)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // Role deny should take precedence over group allow
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_FALSE(result.authorized);
+    EXPECT_EQ(result.acl, deny_role);
+    EXPECT_EQ(result.role, role_name1);
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_multiple_groups_one_in_role) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    acl_principal group2(principal_type::group, "group2");
+    role_name role_name1("role1");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_host host1("192.168.1.2");
+
+    // Role has read permission
+    acl_entry allow_role(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, allow_role);
+
+    role_store roles;
+    // Only group2 is a member of role1
+    roles.put(role_name1, role{{role_member::from_principal(group2)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // User in both groups should be authorized via group2 -> role path
+    chunked_vector<acl_principal> groups{group1, group2};
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      groups);
+
+    EXPECT_TRUE(result.authorized);
+    EXPECT_EQ(result.acl, allow_role);
+    EXPECT_EQ(result.role, role_name1);
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_group_not_in_role) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    acl_principal group2(principal_type::group, "group2");
+    role_name role_name1("role1");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_host host1("192.168.1.2");
+
+    // Role has read permission
+    acl_entry allow_role(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, allow_role);
+
+    role_store roles;
+    // group2 is a member of role1, but user is only in group1
+    roles.put(role_name1, role{{role_member::from_principal(group2)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // User in group1 should NOT be authorized since group1 is not in the role
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_FALSE(result.authorized);
+    EXPECT_FALSE(result.role.has_value());
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_user_and_group_in_different_roles) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    role_name user_role_name("user_role");
+    role_name group_role_name("group_role");
+    acl_principal user_role = role::to_principal(user_role_name());
+    acl_principal group_role = role::to_principal(group_role_name());
+    acl_host host1("192.168.1.2");
+
+    // User role denies read
+    acl_entry deny_user_role(
+      user_role,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::deny);
+
+    // Group role allows read
+    acl_entry allow_group_role(
+      group_role,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, deny_user_role);
+    bindings.emplace_back(resource, allow_group_role);
+
+    role_store roles;
+    // User is directly in user_role, group is in group_role
+    roles.put(user_role_name, role{{role_member::from_principal(user1)}});
+    roles.put(group_role_name, role{{role_member::from_principal(group1)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // User role deny should be checked first and take precedence
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_FALSE(result.authorized);
+    EXPECT_EQ(result.acl, deny_user_role);
+    EXPECT_EQ(result.role, user_role_name);
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_group_deny_via_role) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    role_name role_name1("role1");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_host host1("192.168.1.2");
+
+    // User has direct allow
+    acl_entry allow_user(
+      user1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    // Role (containing group) has deny
+    acl_entry deny_role(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::deny);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, allow_user);
+    bindings.emplace_back(resource, deny_role);
+
+    role_store roles;
+    // group1 is a member of role1
+    roles.put(role_name1, role{{role_member::from_principal(group1)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // Group's role deny should be checked and deny takes precedence
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    // The deny via group's role should take precedence over user's direct allow
+    EXPECT_FALSE(result.authorized);
+    EXPECT_EQ(result.acl, deny_role);
+    EXPECT_EQ(result.role, role_name1);
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_multiple_roles_for_group) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    role_name role_name1("role1");
+    role_name role_name2("role2");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_principal role2 = role::to_principal(role_name2());
+    acl_host host1("192.168.1.2");
+
+    // Role1 allows read
+    acl_entry allow_role1(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    // Role2 allows write
+    acl_entry allow_role2(
+      role2,
+      acl_host::wildcard_host(),
+      acl_operation::write,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, allow_role1);
+    bindings.emplace_back(resource, allow_role2);
+
+    role_store roles;
+    // group1 is a member of both roles
+    roles.put(role_name1, role{{role_member::from_principal(group1)}});
+    roles.put(role_name2, role{{role_member::from_principal(group1)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // User should have read access via role1
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::read,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_TRUE(result.authorized);
+    EXPECT_EQ(result.acl, allow_role1);
+    EXPECT_EQ(result.role, role_name1);
+
+    // User should have write access via role2
+    result = auth.authorized(
+      default_topic,
+      acl_operation::write,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_TRUE(result.authorized);
+    EXPECT_EQ(result.acl, allow_role2);
+    EXPECT_EQ(result.role, role_name2);
+}
+
+TEST(AUTHORIZER_TEST, group_role_authz_implied_operations) {
+    acl_principal user1(principal_type::user, "user1");
+    acl_principal group1(principal_type::group, "group1");
+    role_name role_name1("role1");
+    acl_principal role1 = role::to_principal(role_name1());
+    acl_host host1("192.168.1.2");
+
+    // Role allows read, which implies describe
+    acl_entry allow_role(
+      role1,
+      acl_host::wildcard_host(),
+      acl_operation::read,
+      acl_permission::allow);
+
+    std::vector<acl_binding> bindings;
+    resource_pattern resource(
+      resource_type::topic, default_topic(), pattern_type::literal);
+    bindings.emplace_back(resource, allow_role);
+
+    role_store roles;
+    roles.put(role_name1, role{{role_member::from_principal(group1)}});
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // User should have describe access (implied by read) via group -> role
+    auto result = auth.authorized(
+      default_topic,
+      acl_operation::describe,
+      user1,
+      host1,
+      security::superuser_required::no,
+      {group1});
+
+    EXPECT_TRUE(result.authorized);
+    EXPECT_EQ(result.acl, allow_role);
+    EXPECT_EQ(result.role, role_name1);
+}
+
+// Test ACL pattern types (prefix, literal, wildcard) for context subjects.
+TEST(AUTHORIZER_TEST, authz_sr_context_subject_patterns) {
+    namespace ppsr = pandaproxy::schema_registry;
+    ppsr::enable_qualified_subjects::set_local(true);
+    auto reset_flag = ss::defer(
+      [] { ppsr::enable_qualified_subjects::reset_local(); });
+
+    auto user = acl_principal{principal_type::user, "user"};
+    auto host = acl_host{"192.168.2.1"};
+
+    auto check_access = [&](authorizer& auth, std::string_view subject) {
+        return auth
+          .authorized(
+            ppsr::context_subject::from_string(subject),
+            acl_operation::read,
+            user,
+            host,
+            security::superuser_required::no,
+            {})
+          .is_authorized();
+    };
+
+    // Prefix ACL: ":.staging:" should match all subjects in .staging context
+    {
+        auto auth = make_test_instance();
+        auth.add_bindings(
+          {{resource_pattern{
+              resource_type::sr_subject, ":.staging:", pattern_type::prefixed},
+            allow_read_acl}});
+
+        EXPECT_TRUE(check_access(auth, ":.staging:topic-1"));
+        EXPECT_TRUE(check_access(auth, ":.staging:topic-2"));
+        EXPECT_FALSE(check_access(auth, ":.prod:topic-1"));
+        EXPECT_FALSE(check_access(auth, "topic-1"));
+        EXPECT_FALSE(check_access(auth, ":.:topic-1"));
+    }
+
+    // Literal ACL: should match only exact subject
+    {
+        auto auth = make_test_instance();
+        auth.add_bindings(
+          {{resource_pattern{
+              resource_type::sr_subject,
+              ":.staging:topic-1",
+              pattern_type::literal},
+            allow_read_acl}});
+
+        EXPECT_TRUE(check_access(auth, ":.staging:topic-1"));
+        EXPECT_FALSE(check_access(auth, ":.staging:topic-2"));
+        EXPECT_FALSE(check_access(auth, ":.prod:topic-1"));
+        EXPECT_FALSE(check_access(auth, "topic-1"));
+        EXPECT_FALSE(check_access(auth, ":.:topic-1"));
+    }
+
+    // Wildcard ACL: should match all subjects
+    {
+        auto auth = make_test_instance();
+        auth.add_bindings(
+          {{resource_pattern{
+              resource_type::sr_subject,
+              resource_pattern::wildcard,
+              pattern_type::literal},
+            allow_read_acl}});
+
+        EXPECT_TRUE(check_access(auth, ":.staging:topic-1"));
+        EXPECT_TRUE(check_access(auth, ":.prod:topic-1"));
+        EXPECT_TRUE(check_access(auth, "topic-1"));
+        EXPECT_TRUE(check_access(auth, ":.:topic-1"));
+    }
+}
+
+// Tests for Group principal parsing and validation
+TEST(AUTHORIZER_TEST, parse_group_principal_from_string_view) {
+    // Test the fixed from_string_view<principal_type> function
+    auto user_type = from_string_view<principal_type>("user");
+    ASSERT_TRUE(user_type.has_value());
+    EXPECT_EQ(*user_type, principal_type::user);
+
+    auto group_type = from_string_view<principal_type>("group");
+    ASSERT_TRUE(group_type.has_value());
+    EXPECT_EQ(*group_type, principal_type::group);
+
+    auto role_type = from_string_view<principal_type>("role");
+    ASSERT_TRUE(role_type.has_value());
+    EXPECT_EQ(*role_type, principal_type::role);
+
+    auto ephemeral_type = from_string_view<principal_type>("ephemeral user");
+    ASSERT_TRUE(ephemeral_type.has_value());
+    EXPECT_EQ(*ephemeral_type, principal_type::ephemeral_user);
+
+    // Test invalid type
+    auto invalid_type = from_string_view<principal_type>("invalid");
+    EXPECT_FALSE(invalid_type.has_value());
+}
+
+TEST(AUTHORIZER_TEST, parse_group_principal_from_string) {
+    // Test basic Group principal parsing
+    auto group1 = acl_principal::from_string("Group:developers");
+    EXPECT_EQ(group1.type(), principal_type::group);
+    EXPECT_EQ(group1.name(), "developers");
+
+    // Test Group with hyphens
+    auto group2 = acl_principal::from_string("Group:my-team");
+    EXPECT_EQ(group2.type(), principal_type::group);
+    EXPECT_EQ(group2.name(), "my-team");
+
+    // Test Group with underscores
+    auto group3 = acl_principal::from_string("Group:team_123");
+    EXPECT_EQ(group3.type(), principal_type::group);
+    EXPECT_EQ(group3.name(), "team_123");
+
+    // Test Group with mixed case
+    auto group4 = acl_principal::from_string("Group:TeamLead");
+    EXPECT_EQ(group4.type(), principal_type::group);
+    EXPECT_EQ(group4.name(), "TeamLead");
+
+    // Test that wildcard groups throw exception (only users can be wildcards)
+    EXPECT_THROW(acl_principal::from_string("Group:*"), acl_conversion_error);
+
+    // Test empty group name throws
+    EXPECT_THROW(acl_principal::from_string("Group:"), std::exception);
+
+    // Verify User principal with wildcard still works
+    auto wildcard_user = acl_principal::from_string("User:*");
+    EXPECT_EQ(wildcard_user.type(), principal_type::user);
+    EXPECT_TRUE(wildcard_user.wildcard());
+
+    // Verify User principal without wildcard
+    auto user1 = acl_principal::from_string("User:alice");
+    EXPECT_EQ(user1.type(), principal_type::user);
+    EXPECT_EQ(user1.name(), "alice");
+    EXPECT_FALSE(user1.wildcard());
+}
+
+TEST(AUTHORIZER_TEST, authorize_with_group_principal_acls) {
+    // Create test principals
+    auto user = acl_principal(principal_type::user, "alice");
+    auto group = acl_principal(principal_type::group, "developers");
+    auto host = acl_host("192.168.1.1");
+    const model::topic topic("dev-topic");
+
+    // Create ACL for Group:developers
+    acl_entry allow_read(
+      group, acl_wildcard_host, acl_operation::read, acl_permission::allow);
+
+    // Create resource and binding
+    resource_pattern resource(
+      resource_type::topic, topic(), pattern_type::literal);
+    std::vector<acl_binding> bindings;
+    bindings.emplace_back(resource, allow_read);
+
+    // Setup authorizer
+    role_store roles;
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // Test authorization with user who is in the group
+    auto result = auth.authorized(
+      topic,
+      acl_operation::read,
+      user,
+      host,
+      security::superuser_required::no,
+      {group});
+
+    // Verify authorization succeeded
+    EXPECT_TRUE(bool(result));
+    EXPECT_EQ(result.acl, allow_read);
+    EXPECT_EQ(result.group, group);
+    EXPECT_EQ(result.principal, user);
+
+    // Test authorization without group membership fails
+    auto result_no_group = auth.authorized(
+      topic,
+      acl_operation::read,
+      user,
+      host,
+      security::superuser_required::no,
+      {});
+
+    EXPECT_FALSE(bool(result_no_group));
+}
+
+TEST(AUTHORIZER_TEST, group_principal_acl_deny_precedence) {
+    // Create test principals
+    auto user = acl_principal(principal_type::user, "bob");
+    auto blocked_group = acl_principal(principal_type::group, "blocked");
+    auto host = acl_host("192.168.1.1");
+    const model::topic topic("sensitive-topic");
+
+    // Create DENY ACL for Group:blocked
+    acl_entry deny_write(
+      blocked_group,
+      acl_wildcard_host,
+      acl_operation::write,
+      acl_permission::deny);
+
+    // Create ALLOW ACL for User:bob
+    acl_entry allow_write(
+      user, acl_wildcard_host, acl_operation::write, acl_permission::allow);
+
+    // Create resource and bindings
+    resource_pattern resource(
+      resource_type::topic, topic(), pattern_type::literal);
+    std::vector<acl_binding> bindings;
+    bindings.emplace_back(resource, deny_write);
+    bindings.emplace_back(resource, allow_write);
+
+    // Setup authorizer
+    role_store roles;
+    auto auth = make_test_instance(authorizer::allow_empty_matches::no, &roles);
+    auth.add_bindings(bindings);
+
+    // Test: User bob is in blocked group - DENY should win
+    auto result_with_group = auth.authorized(
+      topic,
+      acl_operation::write,
+      user,
+      host,
+      security::superuser_required::no,
+      {blocked_group});
+
+    // DENY via group should take precedence over user ALLOW
+    EXPECT_FALSE(bool(result_with_group));
+    EXPECT_EQ(result_with_group.acl, deny_write);
+    EXPECT_EQ(result_with_group.group, blocked_group);
+
+    // Test: User bob without blocked group - ALLOW should work
+    auto result_without_group = auth.authorized(
+      topic,
+      acl_operation::write,
+      user,
+      host,
+      security::superuser_required::no,
+      {});
+
+    EXPECT_TRUE(bool(result_without_group));
+    EXPECT_EQ(result_without_group.acl, allow_write);
+    EXPECT_FALSE(result_without_group.group.has_value());
+}
+
 } // namespace security

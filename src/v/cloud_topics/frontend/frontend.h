@@ -13,6 +13,7 @@
 #include "cloud_topics/frontend/errc.h"
 #include "cloud_topics/level_zero/stm/ctp_stm_api.h"
 #include "cloud_topics/log_reader_config.h"
+#include "cloud_topics/types.h"
 #include "model/fundamental.h"
 #include "model/timeout_clock.h"
 #include "raft/types.h"
@@ -127,9 +128,8 @@ public:
     raft::replicate_stages replicate(
       model::batch_identity, model::record_batch, raft::replicate_options);
 
-    ss::future<storage::translating_reader> make_reader(
-      cloud_topic_log_reader_config cfg,
-      std::optional<model::timeout_clock::time_point>);
+    ss::future<storage::translating_reader>
+    make_reader(cloud_topic_log_reader_config cfg);
 
     ss::future<std::vector<model::tx_range>> aborted_transactions(
       kafka::offset base,
@@ -150,6 +150,29 @@ public:
     size_t estimate_size_between(kafka::offset, kafka::offset) const;
 
     ss::future<std::error_code> linearizable_barrier();
+
+    ss::future<size_t> size_bytes();
+
+    /// Get the current cluster epoch
+    ss::future<std::expected<cloud_topics::cluster_epoch, frontend_errc>>
+    get_current_epoch(ss::abort_source& as) noexcept;
+
+    /// Epoch state snapshot returned by advance_epoch.
+    struct epoch_info {
+        cluster_epoch estimated_inactive_epoch;
+        cluster_epoch max_applied_epoch;
+        model::offset last_reconciled_log_offset;
+        model::offset current_epoch_window_offset;
+        friend auto operator<=>(const epoch_info&, const epoch_info&) = default;
+    };
+
+    /// Return current epoch state.
+    epoch_info get_epoch_info() const;
+
+    /// Advance the partition to the current cluster epoch and return epoch
+    /// state.
+    ss::future<std::expected<epoch_info, frontend_errc>> advance_epoch(
+      cloud_topics::cluster_epoch, model::timeout_clock::time_point);
 
 private:
     // All timequeries work by first getting a coarse grained timequery result
@@ -186,8 +209,7 @@ private:
 
     bool cache_enabled() const;
 
-    std::optional<model::topic_id_partition>
-    ntp_to_topic_id_partition(const model::ntp& ntp) const;
+    model::topic_id_partition topic_id_partition() const;
 
     std::unique_ptr<model::record_batch_reader::impl>
     make_l0_reader(const cloud_topic_log_reader_config& cfg) const;

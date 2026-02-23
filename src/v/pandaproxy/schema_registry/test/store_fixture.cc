@@ -9,11 +9,14 @@
 
 #include "pandaproxy/schema_registry/test/store_fixture.h"
 
+#include "pandaproxy/schema_registry/types.h"
+
 #include <seastar/core/smp.hh>
 
 namespace pandaproxy::schema_registry::test_utils {
 
 store_fixture::store_fixture() {
+    enable_qualified_subjects::set_local(true);
     _smp_svc_group = std::make_unique<ss::smp_service_group>(
       ss::create_smp_service_group(ss::smp_service_group_config{}).get());
     _store.start(is_mutable::yes, *_smp_svc_group).get();
@@ -23,10 +26,11 @@ store_fixture::~store_fixture() {
     _store.stop().get();
     ss::destroy_smp_service_group(*_smp_svc_group).get();
     _smp_svc_group.reset();
+    enable_qualified_subjects::reset_local();
 }
 
 schema_id store_fixture::insert(
-  const subject& sub,
+  const context_subject& sub,
   const schema_definition& schema_def,
   schema_version version) {
     const auto id = _next_id++;

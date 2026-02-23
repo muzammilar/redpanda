@@ -8,11 +8,13 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "cloud_storage_clients/types.h"
 #include "cluster/commands.h"
 #include "cluster/partition.h"
 #include "cluster/tests/topic_properties_generator.h"
 #include "cluster/types.h"
 #include "model/fundamental.h"
+#include "model/metadata.h"
 #include "raft/consensus.h"
 #include "security/acl.h"
 #include "storage/types.h"
@@ -47,6 +49,11 @@ inline security::acl_binding binding_for_role(const ss::sstring& role_name) {
       security::acl_principal{security::principal_type::role, role_name});
 }
 
+inline security::acl_binding binding_for_group(const ss::sstring& group_name) {
+    return binding_for_principal(
+      security::acl_principal{security::principal_type::group, group_name});
+}
+
 inline topic_properties uploadable_topic_properties() {
     auto props = random_topic_properties();
     if (
@@ -59,6 +66,8 @@ inline topic_properties uploadable_topic_properties() {
     props.recovery = false;
     props.read_replica = false;
     props.cleanup_policy_bitflags = model::cleanup_policy_bitflags::deletion;
+    // Set storage_mode to tiered, to match the shadow_indexing setting.
+    props.storage_mode = model::redpanda_storage_mode::tiered;
     return props;
 }
 
@@ -68,6 +77,23 @@ inline topic_properties non_remote_topic_properties() {
     props.recovery = false;
     props.read_replica = false;
     props.cleanup_policy_bitflags = model::cleanup_policy_bitflags::deletion;
+    return props;
+}
+
+inline topic_properties cloud_topic_properties() {
+    topic_properties props;
+    props.storage_mode = model::redpanda_storage_mode::cloud;
+    props.shadow_indexing = model::shadow_indexing_mode::disabled;
+    props.recovery = std::nullopt;
+    props.read_replica = std::nullopt;
+    props.cleanup_policy_bitflags = model::cleanup_policy_bitflags::deletion;
+    return props;
+}
+
+inline topic_properties read_replica_cloud_topic_properties() {
+    auto props = cloud_topic_properties();
+    props.read_replica = std::make_optional(true);
+    props.read_replica_bucket = "replica-bucket";
     return props;
 }
 

@@ -136,11 +136,10 @@ kafka::leader_epoch cloud_topic_partition::leader_epoch() const {
     return kafka::leader_epoch(static_cast<int32_t>(term()));
 }
 
-ss::future<storage::translating_reader> cloud_topic_partition::make_reader(
-  kafka::log_reader_config cfg,
-  std::optional<model::timeout_clock::time_point> deadline) {
+ss::future<storage::translating_reader>
+cloud_topic_partition::make_reader(kafka::log_reader_config cfg) {
     auto config = kafka_to_cloud_topic_log_reader_config(cfg);
-    return _fe->make_reader(config, deadline);
+    return _fe->make_reader(config);
 }
 
 ss::future<std::vector<cluster::tx::tx_range>>
@@ -225,6 +224,19 @@ result<partition_info> cloud_topic_partition::get_partition_info() const {
 size_t cloud_topic_partition::estimate_size_between(
   kafka::offset base, kafka::offset last) const {
     return _fe->estimate_size_between(base, last);
+}
+
+size_t cloud_topic_partition::local_size_bytes() const {
+    return _partition->size_bytes();
+}
+
+ss::future<std::optional<size_t>>
+cloud_topic_partition::cloud_size_bytes() const {
+    co_return co_await _fe->size_bytes();
+}
+
+model::offset cloud_topic_partition::offset_lag() const {
+    return _partition->high_watermark() - _partition->dirty_offset();
 }
 
 } // namespace kafka
