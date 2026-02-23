@@ -27,6 +27,7 @@
 
 #include <boost/range/irange.hpp>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace cluster::self_test {
@@ -35,18 +36,27 @@ namespace {
 
 enum class read_or_write { read, write };
 
+static const auto five_hundred_us = 500000;
+
 struct shard_benchmark_results {
     metrics write;
     std::optional<metrics> read;
 };
 
 metrics merge_metrics(std::vector<metrics> shard_metrics) {
-    auto merged = std::move(shard_metrics.front());
-    for (size_t i = 1; i < shard_metrics.size(); ++i) {
-        merged.merge_from(shard_metrics[i]);
+    if (shard_metrics.empty()) {
+        // This will be bogus but we should never get here with no metrics
+        // anyway
+        return metrics{five_hundred_us};
     }
 
-    return merged;
+    return std::ranges::fold_left(
+      std::views::drop(shard_metrics, 1),
+      std::move(shard_metrics.front()),
+      [](metrics acc, const metrics& m) {
+          acc.merge_from(m);
+          return acc;
+      });
 }
 
 uint64_t get_next_pos(uint64_t pos, const diskcheck_opts& opts) {
@@ -107,8 +117,7 @@ ss::future<metrics> do_run_benchmark(
     auto irange = boost::irange<uint16_t>(0, opts.parallelism);
     auto start = ss::lowres_clock::now();
     auto start_highres = ss::lowres_system_clock::now();
-    static const auto five_seconds_us = 500000;
-    metrics m{five_seconds_us};
+    metrics m{five_hundred_us};
     co_await ss::parallel_for_each(
       irange, [&start, &files, &m, &opts, &cancelled](uint64_t i) {
           return run_benchmark_fiber<mode>(start, files[i], m, opts, cancelled);
