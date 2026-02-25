@@ -481,7 +481,7 @@ record_multiplexer::handle_invalid_record(
   std::optional<iobuf> val,
   model::timestamp ts,
   model::timestamp_type ts_t,
-  const std::vector<model::record_header>& headers,
+  const chunked_vector<model::record_header>& headers,
   ss::abort_source& as) {
     _translation_probe.increment_invalid_record(cause);
     switch (_invalid_record_action) {

@@ -14,6 +14,7 @@
 #include "base/vassert.h"
 #include "bytes/iobuf.h"
 #include "bytes/iobuf_parser.h"
+#include "container/chunked_vector.h"
 #include "model/compression.h"
 #include "model/fundamental.h"
 #include "model/record_batch_types.h"
@@ -197,7 +198,7 @@ public:
       iobuf key,
       int32_t val_size,
       iobuf value,
-      std::vector<record_header> hdrs) noexcept
+      chunked_vector<record_header> hdrs) noexcept
       : _size_bytes(size_bytes)
       , _attributes(attributes)
       , _timestamp_delta(timestamp_delta)
@@ -214,7 +215,7 @@ public:
       int32_t offset_delta,
       std::optional<iobuf> key,
       std::optional<iobuf> value,
-      std::vector<record_header> hdrs) noexcept
+      chunked_vector<record_header> hdrs) noexcept
       : _attributes(attributes)
       , _timestamp_delta(timestamp_delta)
       , _offset_delta(offset_delta)
@@ -288,11 +289,11 @@ public:
     bool has_key() const { return _key_size >= 0; }
     bool is_tombstone() const { return !has_value(); }
 
-    const std::vector<record_header>& headers() const { return _headers; }
-    std::vector<record_header>& headers() { return _headers; }
+    const chunked_vector<record_header>& headers() const { return _headers; }
+    chunked_vector<record_header>& headers() { return _headers; }
 
     record share() {
-        std::vector<record_header> copy;
+        chunked_vector<record_header> copy;
         copy.reserve(_headers.size());
         for (auto& h : _headers) {
             copy.push_back(h.share());
@@ -309,7 +310,7 @@ public:
           std::move(copy));
     }
     record copy() const {
-        std::vector<record_header> cp;
+        chunked_vector<record_header> cp;
         cp.reserve(_headers.size());
         for (auto& h : _headers) {
             cp.push_back(h.copy());
@@ -345,7 +346,7 @@ private:
     iobuf _key;
     int32_t _val_size{-1};
     iobuf _value;
-    std::vector<record_header> _headers{};
+    chunked_vector<record_header> _headers{};
 };
 
 class record_batch_attributes final {

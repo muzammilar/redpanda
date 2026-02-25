@@ -7,6 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "container/chunked_vector.h"
 #include "model/batch_compression.h"
 #include "model/record.h"
 #include "model/record_utils.h"
@@ -200,7 +201,7 @@ TEST_F(RecordBatchTest, RecordSizeBytesWithEmptyKey) {
 }
 
 TEST_F(RecordBatchTest, RecordSizeBytesWithHeaders) {
-    std::vector<model::record_header> headers;
+    chunked_vector<model::record_header> headers;
     headers.emplace_back(3, iobuf::from("hdr"), 2, iobuf::from("hv"));
     auto r = model::record(
       model::record_attributes(0),
@@ -213,7 +214,7 @@ TEST_F(RecordBatchTest, RecordSizeBytesWithHeaders) {
 }
 
 TEST_F(RecordBatchTest, RecordSizeBytesWithNullHeaderValues) {
-    std::vector<model::record_header> headers;
+    chunked_vector<model::record_header> headers;
     headers.emplace_back(3, iobuf::from("hdr"), -1, iobuf{});
     auto r = model::record(
       model::record_attributes(0),

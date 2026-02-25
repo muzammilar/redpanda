@@ -43,7 +43,7 @@ public:
       std::optional<iobuf> parsable_val,
       model::timestamp ts,
       model::timestamp_type ts_t,
-      const std::vector<model::record_header>& headers)
+      const chunked_vector<model::record_header>& headers)
       = 0;
     virtual ~record_translator() = default;
 };
@@ -59,7 +59,7 @@ public:
       std::optional<iobuf> parsable_val,
       model::timestamp ts,
       model::timestamp_type ts_t,
-      const std::vector<model::record_header>& headers) override;
+      const chunked_vector<model::record_header>& headers) override;
     ~key_value_translator() override = default;
 };
 
@@ -74,7 +74,7 @@ public:
       std::optional<iobuf> parsable_val,
       model::timestamp ts,
       model::timestamp_type ts_t,
-      const std::vector<model::record_header>& headers) override;
+      const chunked_vector<model::record_header>& headers) override;
     ~structured_data_translator() override = default;
 };
 
@@ -93,7 +93,7 @@ public:
       std::optional<iobuf> parsable_val,
       model::timestamp ts,
       model::timestamp_type ts_t,
-      const std::vector<model::record_header>& headers) override;
+      const chunked_vector<model::record_header>& headers) override;
     ~default_translator() override = default;
 
 private:

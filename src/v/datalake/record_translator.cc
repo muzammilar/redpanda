@@ -80,7 +80,7 @@ std::unique_ptr<iceberg::struct_value> build_rp_struct(
   std::optional<iobuf> key,
   model::timestamp ts,
   model::timestamp_type ts_t,
-  const std::vector<model::record_header>& headers) {
+  const chunked_vector<model::record_header>& headers) {
     auto system_data = std::make_unique<iceberg::struct_value>();
     system_data->fields.reserve(6);
 
@@ -149,7 +149,7 @@ default_translator::translate_data(
   std::optional<iobuf> parsable_val,
   model::timestamp ts,
   model::timestamp_type ts_t,
-  const std::vector<model::record_header>& headers) {
+  const chunked_vector<model::record_header>& headers) {
     if (val_type.has_value()) {
         co_return co_await structured_translator.translate_data(
           pid,
@@ -195,7 +195,7 @@ key_value_translator::translate_data(
   std::optional<iobuf> parsable_val,
   model::timestamp ts,
   model::timestamp_type ts_t,
-  const std::vector<model::record_header>& headers) {
+  const chunked_vector<model::record_header>& headers) {
     if (val_type.has_value()) {
         vlog(
           datalake_log.error,
@@ -279,7 +279,7 @@ structured_data_translator::translate_data(
   std::optional<iobuf> parsable_val,
   model::timestamp ts,
   model::timestamp_type ts_t,
-  const std::vector<model::record_header>& headers) {
+  const chunked_vector<model::record_header>& headers) {
     if (!val_type.has_value()) {
         vlog(
           datalake_log.error,
