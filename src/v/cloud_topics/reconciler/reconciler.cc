@@ -701,6 +701,13 @@ reconciler<Clock>::build_object(
     }
     metas.shrink_to_fit();
 
+    if (metas.empty()) {
+        // Return early without finishing the builder or completing the
+        // multipart upload. The caller's cleanup will abort the upload
+        // and close the builder.
+        co_return built_object_metadata{};
+    }
+
     auto obj_info = co_await ctx.builder->finish().finally(
       [&ctx] { return ctx.close_builder(); });
     vlog(
