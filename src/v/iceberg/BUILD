@@ -78,6 +78,10 @@ redpanda_cc_library(
         "catalog_errors.h",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
 )
 
 redpanda_cc_library(

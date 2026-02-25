@@ -227,6 +227,21 @@ rest_catalog::commit_txn(const table_identifier& t_id, transaction txn) {
       });
 }
 
+ss::future<checked<void, catalog_describe_error>>
+rest_catalog::describe_catalog() {
+    auto rtc = create_rtc();
+    vlog(log.trace, "describe catalog requested");
+    auto h = co_await lock_.get_units();
+    auto res = co_await client_->get_config(rtc);
+    if (res.has_value()) {
+        co_return outcome::success();
+    }
+    co_return catalog_describe_error{
+      .errc = map_error("describe_catalog", res.error()),
+      .message = fmt::format("{}", res.error()),
+    };
+}
+
 retry_chain_node rest_catalog::create_rtc() {
     return {as_, request_timeout_(), request_timeout_() / 10};
 }

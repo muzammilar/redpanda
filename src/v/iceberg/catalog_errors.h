@@ -9,6 +9,10 @@
  */
 #pragma once
 
+#include "base/seastarx.h"
+
+#include <seastar/core/sstring.hh>
+
 #include <ostream>
 #include <string_view>
 
@@ -56,5 +60,12 @@ constexpr std::string_view to_string_view(catalog_errc e) {
 inline std::ostream& operator<<(std::ostream& o, catalog_errc e) {
     return o << to_string_view(e);
 }
+
+/// Rich error for catalog describe, carrying a human-readable message
+/// suitable for surfacing to the user via the admin API.
+struct catalog_describe_error {
+    catalog_errc errc;
+    ss::sstring message;
+};
 
 } // namespace iceberg

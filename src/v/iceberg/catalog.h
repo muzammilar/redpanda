@@ -66,6 +66,10 @@ public:
     virtual ss::future<checked<table_metadata, errc>>
     commit_txn(const table_identifier& table_ident, transaction) = 0;
 
+    // Probes the catalog for connectivity and credential validity.
+    virtual ss::future<checked<void, catalog_describe_error>>
+    describe_catalog() = 0;
+
     virtual ss::future<> stop() = 0;
 };
 
