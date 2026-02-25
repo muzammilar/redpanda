@@ -33,7 +33,7 @@ struct http_error_mapping_visitor {
         return unexpected_state;
     }
 
-    errc operator()(const rest_client::http_call_error& err) const {
+    errc map_http_call_error(const rest_client::http_call_error& err) const {
         return ss::visit(
           err,
           [this](const rest_client::http_status_error& status) {
@@ -42,12 +42,19 @@ struct http_error_mapping_visitor {
           [](const ss::sstring&) { return unexpected_state; });
     }
 
+    errc operator()(const rest_client::http_call_error& err) const {
+        return map_http_call_error(err);
+    }
+
     errc operator()(const rest_client::json_parse_error&) const {
         return unexpected_state;
     }
 
-    errc operator()(const rest_client::retries_exhausted&) const {
-        return timedout;
+    errc operator()(const rest_client::retries_exhausted& err) const {
+        if (err.last_error) {
+            return map_http_call_error(*err.last_error);
+        }
+        return unexpected_state;
     }
 
     errc operator()(const http::url_build_error&) const {
