@@ -23,6 +23,9 @@
 namespace storage {
 
 model::offset stm_manager::max_removable_local_log_offset() {
+    if (!has_started()) {
+        return model::offset::min();
+    }
     model::offset result = model::offset::max();
     for (const auto& stm : _stms) {
         auto mco = stm->max_removable_local_log_offset();
@@ -37,6 +40,12 @@ model::offset stm_manager::max_removable_local_log_offset() {
 }
 
 model::offset stm_manager::tx_snapshot_offset() const {
+    if (!has_started()) {
+        vlog(
+          stlog.debug,
+          "attempt to get tx_snapshot_offset before stm_manager is started");
+        return model::offset::min();
+    }
     if (_tx_stm) {
         return _tx_stm->last_locally_snapshotted_offset();
     }
@@ -44,6 +53,13 @@ model::offset stm_manager::tx_snapshot_offset() const {
 }
 
 std::optional<kafka::offset> stm_manager::lowest_pinned_data_offset() const {
+    if (!has_started()) {
+        vlog(
+          stlog.debug,
+          "attempt to get lowest_pinned_data_offset before stm_manager is "
+          "started");
+        return kafka::offset::min();
+    }
     std::optional<kafka::offset> result;
     for (const auto& stm : _stms) {
         auto pinned = stm->lowest_pinned_data_offset();
@@ -72,6 +88,7 @@ void stm_manager::set_max_tx_end_remove_offset(model::offset o) {
 
 bool stm_manager::is_batch_in_idempotent_window(
   const model::record_batch_header& hdr) const {
+    check_status("is_batch_in_idempotent_window");
     if (!_tx_stm) {
         return false;
     }

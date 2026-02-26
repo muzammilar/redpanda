@@ -292,6 +292,7 @@ ss::future<xshard_transfer_state> consensus::stop() {
     }
     co_await _replication_monitor.stop();
     co_await _event_manager.stop();
+    _log->stm_manager()->stop();
     if (_stm_manager) {
         co_await _stm_manager->stop();
     }
@@ -1659,6 +1660,7 @@ consensus::do_start(std::optional<xshard_transfer_state> xst_state) {
             co_await ss::coroutine::switch_to(ss::default_scheduling_group());
             co_await _stm_manager->start();
         }
+        _log->stm_manager()->start();
 
         vlog(
           _ctxlog.info,

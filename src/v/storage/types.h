@@ -21,10 +21,13 @@
 #include "model/timestamp.h"
 #include "storage/file_sanitizer_types.h"
 #include "storage/fwd.h"
+#include "storage/logger.h"
 #include "storage/scoped_file_tracker.h"
 
 #include <seastar/core/abort_source.hh>
+#include <seastar/core/condition-variable.hh>
 #include <seastar/core/file.hh> //io_priority
+#include <seastar/core/gate.hh>
 #include <seastar/core/rwlock.hh>
 #include <seastar/util/bool_class.hh>
 
@@ -126,6 +129,29 @@ public:
  */
 class stm_manager {
 public:
+    ~stm_manager() {
+        vassert(
+          _status != status::running,
+          "stm_manager is destructed without shutting down");
+    }
+
+    void start() {
+        vassert(
+          _status == status::not_started, "Invalid status transition on start");
+        _status = status::running;
+        _status_running_cv.broadcast();
+    }
+
+    void stop() {
+        vassert(
+          _status != status::shutting_down,
+          "Invalid status transition on stop");
+        if (_status == status::not_started) {
+            _status_running_cv.broadcast();
+        }
+        _status = status::shutting_down;
+    }
+
     void add_stm(ss::shared_ptr<snapshotable_stm> stm) {
         if (
           stm->type() == stm_type::user_topic_transactional
@@ -137,7 +163,7 @@ public:
     }
 
     ss::future<> ensure_snapshot_exists(model::offset offset) {
-        auto f = ss::now();
+        auto f = await_start();
         for (auto stm : _stms) {
             f = f.then([stm, offset]() {
                 return stm->ensure_local_snapshot_exists(offset);
@@ -147,6 +173,7 @@ public:
     }
 
     void make_snapshot_in_background() {
+        check_status("make_snapshot_in_background");
         for (auto& stm : _stms) {
             stm->write_local_snapshot_in_background();
         }
@@ -161,6 +188,7 @@ public:
 
     ss::future<chunked_vector<model::tx_range>>
     aborted_tx_ranges(model::offset to, model::offset from) {
+        co_await await_start();
         chunked_vector<model::tx_range> r;
         if (_tx_stm) {
             r = co_await _tx_stm->aborted_tx_ranges(to, from);
@@ -170,6 +198,7 @@ public:
 
     model::control_record_type
     parse_tx_control_batch(const model::record_batch& b) {
+        check_status("parse_tx_control_batch");
         if (!_tx_stm) {
             return model::control_record_type::unknown;
         }
@@ -177,10 +206,12 @@ public:
     }
 
     const std::vector<ss::shared_ptr<snapshotable_stm>>& stms() const {
+        check_status("stms");
         return _stms;
     }
 
     std::optional<storage::stm_type> transactional_stm_type() const {
+        check_status("transactional_stm_type");
         if (_tx_stm) {
             return _tx_stm->type();
         }
@@ -188,6 +219,7 @@ public:
     }
 
     const ss::shared_ptr<snapshotable_stm> transactional_stm() const {
+        check_status("transactional_stm");
         return _tx_stm;
     }
 
@@ -200,10 +232,45 @@ public:
     bool is_batch_in_idempotent_window(const model::record_batch_header&) const;
 
 private:
+    void check_status(std::string_view operation) const {
+        switch (_status) {
+        case status::not_started: {
+            vassert(
+              false, "stm_manager has not started for operation {}", operation);
+        }
+        case status::running:
+            [[likely]] return;
+        case status::shutting_down:
+            throw ss::gate_closed_exception();
+        }
+    }
+
+    bool has_started() const {
+        if (_status == status::not_started) {
+            return false;
+        }
+        check_status("has_started");
+        return true;
+    }
+
+    ss::future<> await_start() const {
+        if (_status == status::not_started) {
+            vlog(
+              stlog.error,
+              "attempt to list STMs before stm_manager is started");
+            co_await _status_running_cv.wait();
+        }
+        check_status("await_start");
+    }
+
+    enum class status : uint8_t { not_started, running, shutting_down };
+
     ss::shared_ptr<snapshotable_stm> _tx_stm;
     std::vector<ss::shared_ptr<snapshotable_stm>> _stms;
     model::offset _max_tombstone_remove_offset{};
     model::offset _max_tx_end_remove_offset{};
+    status _status{status::not_started};
+    mutable ss::condition_variable _status_running_cv;
 };
 
 /// returns base_offset's from batches. Not max_offsets
