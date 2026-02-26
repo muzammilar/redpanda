@@ -133,7 +133,7 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
     auto is_broker_time = timestamp_type == model::timestamp_type::append_time;
     auto first_timestamp = batch.header().first_timestamp.value();
     auto max_timestamp = batch.header().max_timestamp;
-    auto it = model::record_batch_iterator::create(batch);
+    auto it = model::record_batch_copy_iterator::create(batch);
     while (it.has_next()) {
         if (as.abort_requested()) {
             vlog(_log.debug, "Abort requested, stopping translation");

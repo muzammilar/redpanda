@@ -717,32 +717,51 @@ struct batch_identity {
     friend std::ostream& operator<<(std::ostream&, const batch_identity&);
 };
 
-// A simple iterator for model::record_batch
+// A simple iterator for model::record_batch. Note that this iterator makes a
+// copy of all record keys/values.
 //
 // Usage:
 //
 // ```
-// auto it = model::record_batch_iterator::create(batch);
+// auto it = model::record_batch_copy_iterator::create(batch);
 // while (it.has_next()) {
 //   model::record record = it.next();
 //   // do something with record
 //   co_await ss::coroutine::maybe_yield();
 // }
 // ```
+class record_batch_copy_iterator {
+public:
+    bool has_next() const noexcept;
+
+    model::record next();
+
+    static record_batch_copy_iterator create(const model::record_batch& b);
+
+private:
+    record_batch_copy_iterator(int32_t rc, iobuf_const_parser p);
+
+    int32_t _index = 0;
+    int32_t _record_count;
+    iobuf_const_parser _parser;
+};
+
+// Same type of simple iterator as the `record_batch_copy_iterator` except that
+// no copying will occur.
 class record_batch_iterator {
 public:
     bool has_next() const noexcept;
 
     model::record next();
 
-    static record_batch_iterator create(const model::record_batch& b);
+    static record_batch_iterator create(model::record_batch&& b);
 
 private:
-    record_batch_iterator(int32_t rc, iobuf_const_parser p);
+    record_batch_iterator(int32_t rc, iobuf_parser p);
 
     int32_t _index = 0;
     int32_t _record_count;
-    iobuf_const_parser _parser;
+    iobuf_parser _parser;
 };
 
 constexpr uint32_t packed_record_batch_header_size
@@ -903,7 +922,7 @@ public:
      */
     template<typename Func>
     void for_each_record(Func f) const {
-        auto it = record_batch_iterator::create(*this);
+        auto it = record_batch_copy_iterator::create(*this);
         while (it.has_next()) {
             if constexpr (std::is_void_v<
                             std::invoke_result_t<Func, model::record>>) {
@@ -949,7 +968,7 @@ public:
 
     template<typename Func>
     ss::future<> for_each_record_async(Func f) const {
-        auto it = record_batch_iterator::create(*this);
+        auto it = record_batch_copy_iterator::create(*this);
         while (it.has_next()) {
             if constexpr (std::is_same_v<
                             ss::futurize_t<
@@ -1036,6 +1055,7 @@ private:
 
     explicit operator bool() const noexcept { return !empty(); }
     friend class ss::optimized_optional<record_batch>;
+    friend class record_batch_copy_iterator;
     friend class record_batch_iterator;
     friend class test::raw_record_batch_factory;
 
@@ -1051,10 +1071,10 @@ template<typename Func>
 inline ss::future<>
 for_each_record(const model::record_batch& batch, Func&& f) {
     return ss::do_with(
-      record_batch_iterator::create(batch),
+      record_batch_copy_iterator::create(batch),
       record{},
       [f = std::forward<Func>(f)](
-        record_batch_iterator& it, record& r) mutable {
+        record_batch_copy_iterator& it, record& r) mutable {
           return ss::do_until(
             [&it]() { return !it.has_next(); },
             [&it, &r, f = std::forward<Func>(f)]() {
