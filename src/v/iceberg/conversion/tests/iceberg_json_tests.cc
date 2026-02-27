@@ -1142,6 +1142,27 @@ TEST_CORO(IcebergValues, ValueObject) {
         OptionalIcebergPrimitive<long_value>(42)));
 }
 
+TEST_CORO(IcebergValues, ValueObjectDuplicateKeysLastWins) {
+    auto schema = R"({
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+          "key1": {"type": "string"}
+      }
+    })";
+    auto value = R"({"key1": "value1", "key1": "value2"})";
+
+    auto result = co_await to_iceberg_value(schema, value);
+
+    ASSERT_TRUE_CORO(result.has_value()) << result.error().what();
+    auto result_value = std::get<std::unique_ptr<struct_value>>(
+      std::move(result.value()));
+
+    EXPECT_THAT(
+      result_value->fields,
+      ElementsAre(OptionalIcebergPrimitive<string_value>("value2")));
+}
+
 TEST_CORO(IcebergValues, ValueObjectOptionals) {
     auto schema = R"({
       "$schema": "http://json-schema.org/draft-07/schema#",
