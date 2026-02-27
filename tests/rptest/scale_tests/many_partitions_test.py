@@ -9,6 +9,7 @@
 
 import concurrent.futures
 import math
+import re
 import time
 from collections import Counter
 from typing import Any, Callable
@@ -73,6 +74,11 @@ STRESS_DATA_SIZE = 1024 * 1024 * 1024 * 100
 # counts.
 STOP_TIMEOUT = 60 * 5
 CLOUD_TOPICS_STOP_TIMEOUT = 60 * 10
+
+# TODO: suppress this log in the reconciler
+METASTORE_TRANSPORT_LOG_ALLOW_LIST = [
+    re.compile(r"reconciler - .*std::runtime_error .*metastore::errc::transport_error"),
+]
 
 
 class ManyPartitionsTest(PreallocNodesTest):
@@ -843,7 +849,10 @@ class ManyPartitionsTest(PreallocNodesTest):
             topic_partitions_per_shard=topic_partitions_per_shard,
         )
 
-    @cluster(num_nodes=12, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    @cluster(
+        num_nodes=12,
+        log_allow_list=RESTART_LOG_ALLOW_LIST + METASTORE_TRANSPORT_LOG_ALLOW_LIST,
+    )
     @parametrize(
         mib_per_partition=DEFAULT_MIB_PER_PARTITION,
         topic_partitions_per_shard=DEFAULT_PARTITIONS_PER_SHARD,
@@ -858,7 +867,10 @@ class ManyPartitionsTest(PreallocNodesTest):
             topic_partitions_per_shard=topic_partitions_per_shard,
         )
 
-    @cluster(num_nodes=12, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    @cluster(
+        num_nodes=12,
+        log_allow_list=RESTART_LOG_ALLOW_LIST + METASTORE_TRANSPORT_LOG_ALLOW_LIST,
+    )
     @parametrize(
         mib_per_partition=DEFAULT_MIB_PER_PARTITION,
         topic_partitions_per_shard=DEFAULT_PARTITIONS_PER_SHARD,
