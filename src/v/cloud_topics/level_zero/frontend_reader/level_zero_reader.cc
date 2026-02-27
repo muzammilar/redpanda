@@ -19,6 +19,7 @@
 #include "cluster/partition.h"
 #include "config/configuration.h"
 #include "model/timeout_clock.h"
+#include "ssx/future-util.h"
 
 #include <seastar/coroutine/maybe_yield.hh>
 
@@ -51,8 +52,13 @@ level_zero_log_reader_impl::do_load_slice(
     try {
         return read_some(deadline);
     } catch (...) {
-        vlog(
-          _log.error, "Reader caught exception: {}", std::current_exception());
+        auto ex = std::current_exception();
+        vlogl(
+          _log,
+          ssx::is_shutdown_exception(ex) ? ss::log_level::debug
+                                         : ss::log_level::error,
+          "Reader caught exception: {}",
+          ex);
         set_end_of_stream();
         throw;
     }
