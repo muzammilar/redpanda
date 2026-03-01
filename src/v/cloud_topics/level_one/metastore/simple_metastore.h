@@ -29,9 +29,9 @@ public:
     simple_object_builder& operator=(const simple_object_builder&) = delete;
     simple_object_builder& operator=(simple_object_builder&&) = delete;
 
-    std::expected<object_id, error>
+    ss::future<std::expected<object_id, error>>
     get_or_create_object_for(const model::topic_id_partition&) override;
-    std::expected<object_id, error>
+    ss::future<std::expected<object_id, error>>
     create_object_for(const model::topic_id_partition&) override;
     std::expected<void, error> remove_pending_object(object_id) override;
     std::expected<void, error>

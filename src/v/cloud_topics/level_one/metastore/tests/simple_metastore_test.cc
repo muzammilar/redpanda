@@ -966,16 +966,16 @@ TEST(SimpleMetastoreTest, TestObjectBuilder) {
     auto tp_a = model::topic_id_partition::from(tid_a);
 
     // Creating objects for the same partition will result in the same object.
-    auto o_a = ob->get_or_create_object_for(tp_a).value();
-    auto o_a_2 = ob->get_or_create_object_for(tp_a).value();
+    auto o_a = ob->get_or_create_object_for(tp_a).get().value();
+    auto o_a_2 = ob->get_or_create_object_for(tp_a).get().value();
     ASSERT_EQ(o_a, o_a_2);
 
     // Creating objects for different partitions will result in the same
     // object.
     auto tp_b = model::topic_id_partition::from(tid_b);
-    auto o_b = ob->get_or_create_object_for(tp_b).value();
+    auto o_b = ob->get_or_create_object_for(tp_b).get().value();
     ASSERT_EQ(o_a, o_b);
-    auto o_b_2 = ob->get_or_create_object_for(tp_b).value();
+    auto o_b_2 = ob->get_or_create_object_for(tp_b).get().value();
     ASSERT_EQ(o_b, o_b_2);
 
     // Add a partition's metadata to the object.
@@ -984,7 +984,7 @@ TEST(SimpleMetastoreTest, TestObjectBuilder) {
     // Finish the current object. The next object will be different.
     ASSERT_TRUE(ob->finish(o_a, 0, 1000).has_value());
 
-    auto o_a_3 = ob->get_or_create_object_for(tp_a).value();
+    auto o_a_3 = ob->get_or_create_object_for(tp_a).get().value();
     ASSERT_NE(o_a_2, o_a_3);
 
     // We can't release the result until we finish all objects.
@@ -1009,7 +1009,7 @@ TEST(SimpleMetastoreTest, TestObjectBuilderCreatesNewObjects) {
     // Creating objects for the same partition will result in a different object
     // everytime.
     for (size_t i = 0; i < num_objects; ++i) {
-        auto oid_opt = ob->create_object_for(tp);
+        auto oid_opt = ob->create_object_for(tp).get();
         ASSERT_TRUE(oid_opt.has_value());
         auto [_, inserted] = oids.insert(oid_opt.value());
         ASSERT_TRUE(inserted);
@@ -1044,6 +1044,7 @@ TEST(SimpleMetastoreTest, TestObjectBuilderRemovedObjects) {
           ->get_or_create_object_for(
             model::topic_id_partition(
               topic_id, model::partition_id(static_cast<int32_t>(0))))
+          .get()
           .value();
     };
 
@@ -1079,7 +1080,7 @@ TEST(SimpleMetastoreTest, TestUpdateWithObjectBuilder) {
     auto tp_a = model::topic_id_partition::from(tid_a);
     {
         auto ob = m.object_builder().get().value();
-        auto o_a = ob->get_or_create_object_for(tp_a).value();
+        auto o_a = ob->get_or_create_object_for(tp_a).get().value();
         auto add_res = ob->add(
           o_a,
           metastore::object_metadata::ntp_metadata{
@@ -1105,7 +1106,7 @@ TEST(SimpleMetastoreTest, TestUpdateWithObjectBuilder) {
     }
     {
         auto ob = m.object_builder().get().value();
-        auto o_a = ob->get_or_create_object_for(tp_a).value();
+        auto o_a = ob->get_or_create_object_for(tp_a).get().value();
         auto add_res = ob->add(
           o_a,
           metastore::object_metadata::ntp_metadata{
@@ -1131,7 +1132,7 @@ TEST(SimpleMetastoreTest, TestUpdateWithObjectBuilder) {
     }
     {
         auto ob = m.object_builder().get().value();
-        auto o_a = ob->get_or_create_object_for(tp_a).value();
+        auto o_a = ob->get_or_create_object_for(tp_a).get().value();
         auto add_res = ob->add(
           o_a,
           metastore::object_metadata::ntp_metadata{
@@ -1155,7 +1156,7 @@ TEST(SimpleMetastoreTest, TestUpdateWithObjectBuilder) {
     }
     {
         auto ob = m.object_builder().get().value();
-        auto o_a = ob->get_or_create_object_for(tp_a).value();
+        auto o_a = ob->get_or_create_object_for(tp_a).get().value();
         auto add_res = ob->add(
           o_a,
           metastore::object_metadata::ntp_metadata{

@@ -36,7 +36,7 @@ term_state_update_t make_terms_update(const metastore::term_offset_map_t& m) {
 }
 } // namespace
 
-std::expected<object_id, simple_object_builder::error>
+ss::future<std::expected<object_id, simple_object_builder::error>>
 simple_object_builder::get_or_create_object_for(
   const model::topic_id_partition&) {
     // The simple metastore isn't partitioned at all, so have all partitions
@@ -44,16 +44,16 @@ simple_object_builder::get_or_create_object_for(
     if (pending_objects_.empty()) {
         auto oid = create_object_id();
         pending_objects_[oid] = {};
-        return oid;
+        co_return oid;
     }
-    return pending_objects_.begin()->first;
+    co_return pending_objects_.begin()->first;
 }
 
-std::expected<object_id, simple_object_builder::error>
+ss::future<std::expected<object_id, simple_object_builder::error>>
 simple_object_builder::create_object_for(const model::topic_id_partition&) {
     auto oid = create_object_id();
     pending_objects_[oid] = {};
-    return oid;
+    co_return oid;
 }
 
 std::expected<void, simple_object_builder::error>
