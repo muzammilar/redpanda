@@ -51,7 +51,7 @@ Unassign role "redpanda-admin" from users "red" and "panda"
 Unassign role "data-reader" from group "engineering"
   rpk security role unassign data-reader --group engineering
 
-Unassign role "data-reader" from both a user and an group
+Unassign role "data-reader" from both a user and a group
   rpk security role unassign data-reader --principal alice --group engineering
 `,
 		Args: cobra.ExactArgs(1),

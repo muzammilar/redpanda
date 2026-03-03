@@ -29,13 +29,13 @@ func listCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List IDP groups that have role mappings",
-		Long: `List IDP groups that have any role mapping.
+		Short:   "List groups that have role mappings",
+		Long: `List groups that have any role mapping.
 
-This command shows all identity provider (IDP) groups that are mapped to at
+This command shows all groups that are mapped to at
 least one Redpanda role.`,
 		Example: `
-List all IDP groups with role mappings:
+List all groups with role mappings:
   rpk security group list`,
 		Args: cobra.ExactArgs(0),
 		Run: func(cmd *cobra.Command, _ []string) {

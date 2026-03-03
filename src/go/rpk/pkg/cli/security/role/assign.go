@@ -37,9 +37,9 @@ The '--principal' flag accepts principals with the format
 '<PrincipalPrefix>:<Principal>'. If 'PrincipalPrefix' is not provided, then
 defaults to 'User:'.
 
-The '--group' flag assigns the role to an identity provider (IDP) group,
-granting all members of that group the permissions associated with the role.
-Group assignments are only supported on local (non-cloud) clusters running
+The '--group' flag assigns the role to a group, granting all members of that
+group the permissions associated with the role. Group assignments are only
+supported on local (non-cloud) clusters running
 Redpanda ` + minGroupVersion.String() + ` or later.
 `,
 		Example: `
@@ -52,7 +52,7 @@ Assign role "redpanda-admin" to users "red" and "panda"
 Assign role "data-reader" to group "engineering"
   rpk security role assign data-reader --group engineering
 
-Assign role "data-reader" to both a user and an group
+Assign role "data-reader" to both a user and a group
   rpk security role assign data-reader --principal alice --group engineering
 `,
 		Args: cobra.ExactArgs(1),

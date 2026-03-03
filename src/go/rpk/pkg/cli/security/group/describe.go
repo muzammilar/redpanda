@@ -29,12 +29,12 @@ func describeCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "describe [GROUP]",
 		Aliases: []string{"info"},
-		Short:   "Describe the roles assigned to an IDP group",
-		Long: `Describe the roles assigned to an IDP group.
+		Short:   "Describe the roles assigned to a group",
+		Long: `Describe the roles assigned to a group.
 
-This command shows which Redpanda roles are mapped to the specified IDP group.`,
+This command shows which Redpanda roles are mapped to the specified group.`,
 		Example: `
-Describe roles assigned to the "engineering" group:
+Describe Redpanda roles assigned to the "engineering" group:
   rpk security group describe engineering`,
 		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {

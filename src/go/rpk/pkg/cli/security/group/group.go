@@ -7,7 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
-// Package group manages IDP group-to-role mappings for Group-Based Access Control (GBAC).
+// Package group manages group-to-role mappings for Group-Based Access Control (GBAC).
 package group
 
 import (
@@ -20,12 +20,12 @@ import (
 
 var minVersion = redpanda.Version{Major: 26, Feature: 1}
 
-// NewCommand aggregates the IDP group subcommands.
+// NewCommand aggregates the group subcommands.
 func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "group",
 		Args:  cobra.ExactArgs(0),
-		Short: "Manage IDP group-to-role mappings",
+		Short: "Manage group-to-role mappings",
 	}
 	cmd.AddCommand(
 		listCommand(fs, p),
