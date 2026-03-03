@@ -1,0 +1,227 @@
+# Copyright 2026 Redpanda Data, Inc.
+#
+# Use of this software is governed by the Business Source License
+# included in the file licenses/BSL.md
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0
+
+from typing import Any
+
+from ducktape.tests.test import TestContext
+from ducktape.utils.util import wait_until
+
+from rptest.clients.types import TopicSpec
+from rptest.services.cluster import cluster
+from rptest.services.kgo_verifier_services import (
+    KgoVerifierProducer,
+    KgoVerifierSeqConsumer,
+)
+from rptest.services.redpanda import MetricsEndpoint
+from rptest.tests.cloud_topics.e2e_test import EndToEndCloudTopicsBase
+
+
+class CompactionStressBase(EndToEndCloudTopicsBase):
+    """
+    Base class for cloud topics compaction stress tests.
+
+    Provides metric helpers and a produce-compact-verify workflow for
+    exercising pathological compaction workloads.
+    """
+
+    # Override — no default topics, each test creates its own
+    topics = ()
+
+    def __init__(
+        self,
+        test_context: TestContext,
+        extra_rp_conf: dict[str, Any] | None = None,
+    ):
+        conf = {
+            "cloud_topics_compaction_interval_ms": 5000,
+        }
+        if extra_rp_conf:
+            conf.update(extra_rp_conf)
+
+        environment = {
+            "__REDPANDA_TEST_DISABLE_BOUNDED_PROPERTY_CHECKS": "ON",
+        }
+        super().__init__(
+            test_context,
+            extra_rp_conf=conf,
+            environment=environment,
+        )
+
+    # ── Metric helpers ──────────────────────────────────────────────
+
+    def _metric_sum(self, metric_name: str) -> float:
+        assert self.redpanda
+        return self.redpanda.metric_sum(
+            metric_name=metric_name,
+            metrics_endpoint=MetricsEndpoint.METRICS,
+            expect_metric=True,
+        )
+
+    def get_log_compactions(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_log_compactions"
+        )
+
+    def get_records_removed(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_worker_records_removed"
+        )
+
+    def get_managed_logs(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_managed_log_count"
+        )
+
+    # ── Wait helpers ────────────────────────────────────────────────
+
+    def wait_for_managed_logs(self, timeout_sec: int = 60):
+        wait_until(
+            lambda: self.get_managed_logs() > 0,
+            timeout_sec=timeout_sec,
+            backoff_sec=1,
+            err_msg="Did not see management of compact-enabled CTPs.",
+        )
+
+    def wait_for_compaction_rounds(
+        self,
+        min_rounds: int,
+        timeout_sec: int = 360,
+    ):
+        """Wait until at least `min_rounds` compaction rounds have completed."""
+        wait_until(
+            lambda: self.get_log_compactions() >= min_rounds,
+            timeout_sec=timeout_sec,
+            backoff_sec=2,
+            err_msg=lambda: (
+                f"Expected >= {min_rounds} compaction rounds, "
+                f"got {self.get_log_compactions()}"
+            ),
+        )
+
+    def wait_for_records_removed(
+        self,
+        min_removed: int,
+        timeout_sec: int = 360,
+    ):
+        """Wait until at least `min_removed` records have been removed."""
+        wait_until(
+            lambda: self.get_records_removed() >= min_removed,
+            timeout_sec=timeout_sec,
+            backoff_sec=2,
+            err_msg=lambda: (
+                f"Expected >= {min_removed} records removed, "
+                f"got {self.get_records_removed()}"
+            ),
+        )
+
+    def wait_for_compaction_quiesce(
+        self,
+        stable_sec: int = 30,
+        timeout_sec: int = 360,
+    ):
+        """
+        Wait for records_removed to stabilize, meaning compaction has
+        converged and there is nothing left to remove. The metric must
+        remain unchanged for `stable_sec` consecutive seconds.
+        """
+        import time
+
+        # First wait for at least one removal so we know compaction started.
+        wait_until(
+            lambda: self.get_records_removed() > 0,
+            timeout_sec=60,
+            backoff_sec=2,
+            err_msg="Compaction never started removing records",
+        )
+
+        prev = self.get_records_removed()
+        stable_since = time.time()
+
+        def _stable() -> bool:
+            nonlocal prev, stable_since
+            now_removed = self.get_records_removed()
+            if now_removed != prev:
+                self.logger.info(
+                    f"Compaction still active: records_removed {prev} -> {now_removed}"
+                )
+                prev = now_removed
+                stable_since = time.time()
+            return time.time() - stable_since >= stable_sec
+
+        wait_until(
+            _stable,
+            timeout_sec=timeout_sec,
+            backoff_sec=5,
+            err_msg=lambda: (
+                f"Compaction did not quiesce within {timeout_sec}s "
+                f"(records_removed={self.get_records_removed()})"
+            ),
+        )
+        self.logger.info(
+            f"Compaction quiesced: {self.get_records_removed()} records removed"
+        )
+
+    def produce_and_wait(
+        self,
+        topic: str,
+        msg_size: int,
+        msg_count: int,
+        key_set_cardinality: int,
+        rate_limit_bps: int | None = None,
+        tombstone_probability: float = 0.0,
+        tolerate_failed_produce: bool = False,
+    ) -> KgoVerifierProducer:
+        """Produce messages and wait for all acks + latest value map."""
+        assert self.redpanda
+        producer = KgoVerifierProducer(
+            self.test_context,
+            self.redpanda,
+            topic,
+            msg_size=msg_size,
+            msg_count=msg_count,
+            key_set_cardinality=key_set_cardinality,
+            rate_limit_bps=rate_limit_bps,
+            tombstone_probability=tombstone_probability,
+            validate_latest_values=True,
+            tolerate_failed_produce=tolerate_failed_produce,
+        )
+        producer.start()
+        try:
+            producer.wait_for_latest_value_map()
+            producer.wait()
+        finally:
+            producer.stop()
+        return producer
+
+    def consume_and_verify(
+        self,
+        topic: str,
+        producer: KgoVerifierProducer,
+    ):
+        """
+        Single-pass consume that validates every record's value matches
+        the last value the producer wrote for that key. Callers must
+        wait for full compaction (by metric) before calling this.
+        """
+        assert self.redpanda
+        consumer = KgoVerifierSeqConsumer(
+            self.test_context,
+            self.redpanda,
+            topic,
+            msg_size=0,
+            loop=False,
+            compacted=True,
+            validate_latest_values=True,
+            nodes=[producer.nodes[0]],
+        )
+        consumer.start(clean=False)
+        try:
+            consumer.wait(timeout_sec=120)
+        finally:
+            consumer.stop()
