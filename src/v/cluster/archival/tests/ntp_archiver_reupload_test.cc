@@ -146,11 +146,15 @@ struct reupload_fixture : public archiver_fixture {
             init_storage_api_local(segment_spec, std::nullopt, true);
         }
         wait_for_partition_leadership(manifest_ntp);
-        auto part = app.partition_manager.local().get(manifest_ntp);
+        auto part = partition();
         RPTEST_REQUIRE_EVENTUALLY(10s, [part]() mutable {
             return part->high_watermark() >= model::offset(1);
         });
         init_archiver();
+    }
+
+    ss::lw_shared_ptr<cluster::partition> partition() {
+        return app.partition_manager.local().get(manifest_ntp);
     }
 
     ss::shared_ptr<storage::log> disk_log_impl() {
@@ -220,7 +224,7 @@ struct reupload_fixture : public archiver_fixture {
 
     void init_archiver() {
         auto [arch_conf, remote_conf] = get_configurations();
-        auto part = app.partition_manager.local().get(manifest_ntp);
+        auto part = partition();
         part_probe.emplace(get_ntp_conf().ntp());
         manifest_view = ss::make_shared<cloud_storage::async_manifest_view>(
           remote,
@@ -319,7 +323,7 @@ FIXTURE_TEST(test_upload_compacted_segments, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -392,7 +396,7 @@ FIXTURE_TEST(test_upload_compacted_segments_concat, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -446,7 +450,7 @@ FIXTURE_TEST(
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     cluster::details::archival_metadata_stm_accessor stm_acc{
       *part->archival_meta_stm()};
 
@@ -483,7 +487,7 @@ FIXTURE_TEST(test_upload_compacted_segments_fill_gap, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     cluster::details::archival_metadata_stm_accessor stm_acc{
       *part->archival_meta_stm()};
 
@@ -520,7 +524,7 @@ FIXTURE_TEST(test_upload_both_compacted_and_non_compacted, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -590,7 +594,7 @@ FIXTURE_TEST(test_both_uploads_with_one_failing, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -672,7 +676,7 @@ FIXTURE_TEST(test_upload_when_compaction_disabled, reupload_fixture) {
     initialize(segments, false);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -715,7 +719,7 @@ FIXTURE_TEST(test_upload_when_reupload_disabled, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -774,7 +778,7 @@ FIXTURE_TEST(test_upload_limit, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // 4 out of 5 segments uploaded due to archiver limit of 4
@@ -863,7 +867,7 @@ FIXTURE_TEST(test_upload_compacted_segments_cross_term, reupload_fixture) {
     initialize(segments);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
     listen();
 
     // Upload two non compacted segments, no segment is compacted yet.
@@ -949,7 +953,7 @@ FIXTURE_TEST(test_adjacent_merging, reupload_fixture) {
     initialize(segments, false);
     auto action = ss::defer([this] { archiver->stop().get(); });
 
-    auto part = app.partition_manager.local().get(manifest_ntp);
+    auto part = partition();
 
     cluster::details::archival_metadata_stm_accessor stm_acc{
       *part->archival_meta_stm()};
