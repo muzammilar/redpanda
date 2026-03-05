@@ -593,6 +593,50 @@ TEST_F(PrefixRangeComputationTest, HeterogeneousCompleteCoverage) {
 }
 
 /*
+ * Verify that prefix ranges are balanced: no shard gets more than one extra
+ * prefix compared to any other. Also checks complete, non-overlapping coverage
+ * for several shard counts including 32 (the case that exposed the original
+ * imbalance where the last shard received all leftover prefixes).
+ */
+TEST_F(PrefixRangeComputationTest, BalancedDistribution) {
+    for (size_t total : std::vector<size_t>{
+           2, 3, 7, 10, 24, 32, 41, 64, 128, prefix_max, n_prefixes}) {
+        SCOPED_TRACE(fmt::format("total_shards={}", total));
+
+        std::vector<int> coverage_count(n_prefixes, 0);
+        size_t min_width = std::numeric_limits<size_t>::max();
+        size_t max_width = 0;
+
+        for (size_t shard = 0; shard < total; ++shard) {
+            auto r = cloud_topics::compute_prefix_range(shard, total);
+            ASSERT_TRUE(r.has_value());
+            ASSERT_LE(r->min, r->max);
+            ASSERT_LE(r->max, prefix_max);
+            size_t width = r->max - r->min + 1;
+            min_width = std::min(min_width, width);
+            max_width = std::max(max_width, width);
+
+            for (auto pfx = r->min; pfx <= r->max; ++pfx) {
+                coverage_count[pfx]++;
+            }
+        }
+
+        EXPECT_LE(max_width - min_width, 1) << fmt::format(
+          "Imbalance too large: min_width={}, max_width={}",
+          min_width,
+          max_width);
+
+        for (size_t pfx = 0; pfx < n_prefixes; ++pfx) {
+            EXPECT_EQ(coverage_count[pfx], 1) << fmt::format(
+              "Prefix {} covered {} times (total_shards={})",
+              pfx,
+              coverage_count[pfx],
+              total);
+        }
+    }
+}
+
+/*
  * Base test fixture for prefix-based partitioning tests.
  * Creates a single GC instance per test - do NOT create multiple GC instances.
  */
