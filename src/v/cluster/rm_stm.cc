@@ -259,7 +259,7 @@ ss::future<checked<model::term_id, tx::errc>> rm_stm::begin_tx(
   std::chrono::milliseconds transaction_timeout_ms,
   model::partition_id tm) {
     auto holder = _gate.hold();
-    auto state_lock = co_await _state_lock.hold_read_lock();
+    auto state_lock_holder = co_await _state_lock.hold_read_lock();
     auto lso_lock_holder = co_await _lso_lock.hold_write_lock();
     if (!co_await sync(_sync_timeout())) {
         vlog(
@@ -326,8 +326,7 @@ ss::future<checked<model::term_id, tx::errc>> rm_stm::do_begin_tx(
         vlog(
           _ctx_log.trace,
           "processing name:begin_tx pid:{}, tx_seq:{}, "
-          "timeout:{}, coordinator:{} => not "
-          "a leader",
+          "timeout:{}, coordinator:{} => not a leader",
           pid,
           tx_seq,
           transaction_timeout_ms,
@@ -1282,13 +1281,14 @@ model::offset rm_stm::last_stable_offset() {
     //
     // We distinguish between (1) and (2) based on the offset
     // we save during first apply (_bootstrap_committed_offset).
-
-    // We always want to return only the `applied` state as it
-    // contains aborted transactions metadata that is consumed by
-    // the client to distinguish aborted data batch.
+    //
+    // If there are in-flight transactions we base our calculation on applied
+    // state. `_lso_lock` prevents LSO calculation when there is a transaction
+    // is open from STM ingestion point of view, but not yet in STM applied
+    // state.
     //
     // We optimize for the case where there are no inflight transactional
-    // batch to return the high water mark.
+    // batches to return the high water mark.
     auto last_applied = last_applied_offset();
     auto next_to_apply = model::next_offset(last_applied);
 
@@ -1358,40 +1358,11 @@ model::offset rm_stm::last_stable_offset() {
         // There is an open transaction
         lso = first_tx_start;
     } else if (synced_leader) {
-        ////////////////  WARNING ///////////
-        // there is a real bug lurking here that overestimates the LSO beyond
-        // an open transaction.
-        //
-
-        // The problem manifests when the LSO is requested after successful
-        // replication of begin_tx batch but before the stm has applied it.
-        // In this case the LSO may be advanced beyond the begin_tx batch offset
-        // because the leader doesn't yet 'know' about the begin_tx batch and
-        // may not consider it in LSO calculation.
-
-        // Another problem is we do not let lso move backwards once
-        // computed (see _last_known_lso update below), So even if the
-        // stm has applied the begin_tx later, we will not correct
-        // the LSO to reflect the begin_tx presence.
-
-        // There is a test that caught this issue in rm_stm_tests which
-        // is disabled for now until we can fix the underlying problem.
-
-        // The impact of this overestimation is that compaction may compact
-        // away open transaction begin marker as it relies on LSO. The
-        // chances are rare but not impossible :(. if at that point the replica
-        // restarts and there are no further updates in the transaction, the
-        // transaction has no record of ever beginning.
-
-        // We need a better way to track in-flight transactions for the purposes
-        // of LSO calculation.
-
-        // An obvious solution is to clamp LSO to next_to_apply in all cases
-        // but it was tried in the past and caused performance regressions
-        // in non transaction workloads like write_caching, acks=0/1. So that
-        // is not a viable solution.
-
-        // no inflight transactions in (last_applied, last_visible_index]
+        // Thanks to _lso_lock held for write there's no transaction that has
+        // been opened in log, but its begin_tx batch hasn't been applied yet.
+        // Additionally, it means there's no unapplied abort batches, which
+        // guarantees that aborted_transactions() will return complete data for
+        // interval up to LSO
         lso = model::next_offset(last_visible_index);
     } else {
         // a follower or hasn't synced yet leader doesn't know about the
