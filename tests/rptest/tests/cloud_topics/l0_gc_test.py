@@ -9,6 +9,7 @@
 
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import TypeAlias, cast
 
 
@@ -237,6 +238,11 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
         for nid in self._gc_node_ids(node):
             self.logger.debug(f"Start L0 GC on node {nid}")
             self.l0_client.start_gc(l0_pb.StartGcRequest(node_id=nid))
+
+    def gc_reset(self, node: int | None = None):
+        for nid in self._gc_node_ids(node):
+            self.logger.debug(f"Reset L0 GC on node {nid}")
+            self.l0_client.reset_gc(l0_pb.ResetGcRequest(node_id=nid))
 
     def gc_advance_epoch(self, topic: str, partition: int, new_epoch: int) -> EpochInfo:
         self.logger.debug(f"Advance epoch for '{topic}/{partition}'")
@@ -643,9 +649,11 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
     )
     def test_concurrent_pause_start(self, cloud_storage_type: CloudStorageType):
         """
-        Integration: Rapidly toggle pause/start while GC is running.
-        Verify no crashes, no stuck state, and that the last command wins.
+        Integration: Rapidly toggle pause/start/reset while GC is running,
+        including concurrent resets from a background thread. Verify no
+        crashes, no stuck state, and that the last command wins.
         """
+
         topic = TopicSpec(partition_count=2, replication_factor=3)
         self.topics = [topic]
         self.create_topics(self.topics)
@@ -660,12 +668,34 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
             retry_on_exc=True,
         )
 
-        # Rapidly toggle pause/start.
-        self.logger.info("Starting rapid pause/start toggling (50 rounds)")
-        for _ in range(50):
-            self.gc_pause()
-            self.gc_start()
-        self.logger.info("Toggling complete")
+        # Fire resets concurrently from a background thread while the main
+        # thread rapidly toggles pause/start.
+        reset_errors: list[Exception] = []
+
+        def background_resets(rounds: int):
+            for i in range(rounds):
+                try:
+                    self.gc_reset()
+                except Exception as e:
+                    self.logger.warning(f"Background reset {i} failed: {e}")
+                    reset_errors.append(e)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            reset_fut = executor.submit(background_resets, 20)
+
+            self.logger.info(
+                "Starting rapid pause/start toggling (50 rounds) with concurrent resets"
+            )
+            for _ in range(50):
+                self.gc_pause()
+                self.gc_start()
+            self.logger.info("Toggling complete, waiting for background resets")
+
+            reset_fut.result(timeout=60)
+
+        assert len(reset_errors) == 0, (
+            f"Background resets had {len(reset_errors)} errors: {reset_errors}"
+        )
 
         # End with start — verify GC reaches RUNNING and keeps working.
         self.gc_start()
@@ -708,6 +738,104 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
                 backoff_sec=2,
                 retry_on_exc=True,
             )
+
+    @cluster(num_nodes=4)
+    @matrix(
+        cloud_storage_type=get_cloud_storage_type(applies_only_on=[CloudStorageType.S3])
+    )
+    def test_reset_while_paused(self, cloud_storage_type: CloudStorageType):
+        """
+        Integration: Reset GC while paused, then restart. Verify that GC
+        resumes and makes progress.
+        """
+        topic = TopicSpec(partition_count=2, replication_factor=3)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        self.produce_some(topics=[topic.name], n=300)
+
+        self.logger.debug("Wait for GC to start deleting")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        self.logger.debug("Pause GC")
+        self.gc_pause()
+        self.check_statuses(self.gc_get_status(), status=GcStatus.L0_GC_STATUS_PAUSED)
+
+        deleted_before_reset = self.get_num_objects_deleted()
+        self.logger.debug(f"Deleted before reset: {deleted_before_reset}")
+
+        self.logger.debug("Reset GC while paused")
+        self.gc_reset()
+
+        # GC should still be paused after reset (was paused before)
+        self.check_statuses(self.gc_get_status(), status=GcStatus.L0_GC_STATUS_PAUSED)
+
+        self.logger.debug("Start GC after reset — should resume and keep deleting")
+        self.gc_start()
+        self.check_statuses(self.gc_get_status(), status=GcStatus.L0_GC_STATUS_RUNNING)
+
+        wait_until(
+            lambda: self.get_num_objects_deleted() > deleted_before_reset,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+        self.logger.debug(
+            f"GC progressed after reset: {self.get_num_objects_deleted()} > {deleted_before_reset}"
+        )
+
+    @cluster(num_nodes=4)
+    @matrix(
+        cloud_storage_type=get_cloud_storage_type(applies_only_on=[CloudStorageType.S3])
+    )
+    def test_reset_while_running(self, cloud_storage_type: CloudStorageType):
+        """
+        Integration: Reset GC while it is actively running. Verify that it
+        auto-resumes without getting stuck.
+        """
+        topic = TopicSpec(partition_count=2, replication_factor=3)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        self.produce_some(topics=[topic.name], n=300)
+
+        self.logger.debug("Wait for GC to start deleting")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        self.logger.debug("Reset GC while running")
+        self.gc_reset()
+
+        deleted_after_reset = self.get_num_objects_deleted()
+        self.logger.debug(f"Deleted after reset: {deleted_after_reset}")
+
+        # GC should auto-resume to running state after reset
+        wait_until(
+            lambda: self._all_running(),
+            timeout_sec=15,
+            backoff_sec=2,
+            retry_on_exc=True,
+        )
+
+        self.logger.debug("Verify GC continues making progress after reset")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > deleted_after_reset,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+        self.logger.debug(
+            f"GC progressed after reset: {self.get_num_objects_deleted()} > {deleted_after_reset}"
+        )
 
     def _all_in_state(self, expected: GcStatus.ValueType) -> bool:
         try:
