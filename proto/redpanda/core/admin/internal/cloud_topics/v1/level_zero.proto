@@ -47,6 +47,15 @@ service LevelZeroService {
         };
     }
 
+    // Resets GC worker internal state on the specified node.
+    // Drains in-flight operations and clears iteration state.
+    // GC resumes automatically if it was running before the reset.
+    rpc ResetGc(ResetGcRequest) returns (ResetGcResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
+
     // Advance a cloud topic partition to the current cluster epoch.
     rpc AdvanceEpoch(AdvanceEpochRequest) returns (AdvanceEpochResponse) {
         option (pbgen.rpc) = {
@@ -114,6 +123,15 @@ message PauseGcRequest {
 // Empty on success; RPC error on failure.
 message PauseGcResponse {}
 
+// Request to reset GC worker state on a specific node.
+message ResetGcRequest {
+    // Target node. If omitted, the receiving node handles the request.
+    optional int32 node_id = 1;
+}
+
+// Empty on success; RPC error on failure.
+message ResetGcResponse {}
+
 // Request to advance a partition to the current cluster epoch.
 message AdvanceEpochRequest {
     common.v1.TopicPartition partition = 1;
@@ -155,6 +173,7 @@ enum Status {
     L0_GC_STATUS_RUNNING = 2;
     L0_GC_STATUS_STOPPING = 3;
     L0_GC_STATUS_STOPPED = 4;
+    L0_GC_STATUS_RESETTING = 5;
 }
 
 // Request the L0 size estimate for a single partition.

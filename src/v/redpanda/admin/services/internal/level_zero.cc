@@ -56,6 +56,8 @@ map_gc_state(cloud_topics::level_zero_gc::state st) {
         return status::l0_gc_status_paused;
     case running:
         return status::l0_gc_status_running;
+    case resetting:
+        return status::l0_gc_status_resetting;
     case stopping:
         return status::l0_gc_status_stopping;
     case stopped:
@@ -175,6 +177,27 @@ level_zero_service_impl::pause_gc(
 
     co_await _gc->invoke_on_all(&cloud_topics::level_zero_gc::pause);
     co_return pause_gc_response{};
+}
+
+seastar::future<proto::admin::level_zero::reset_gc_response>
+level_zero_service_impl::reset_gc(
+  serde::pb::rpc::context ctx, proto::admin::level_zero::reset_gc_request req) {
+    validate_initialized(_gc);
+    using namespace proto::admin::level_zero;
+    model::node_id target = req.has_node_id()
+                              ? model::node_id{req.get_node_id()}
+                              : _self;
+    validate_node_exists(_members_table->local(), target);
+
+    if (target != _self) {
+        co_return co_await _proxy_client
+          .make_client_for_node<level_zero_service_client>(target)
+          .reset_gc(ctx, std::move(req));
+    }
+
+    co_await _gc->invoke_on_all(
+      [](cloud_topics::level_zero_gc& gc) { return gc.reset(); });
+    co_return reset_gc_response{};
 }
 
 namespace {

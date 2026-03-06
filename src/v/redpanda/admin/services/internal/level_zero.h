@@ -70,6 +70,10 @@ public:
       serde::pb::rpc::context,
       proto::admin::level_zero::pause_gc_request) override;
 
+    seastar::future<proto::admin::level_zero::reset_gc_response> reset_gc(
+      serde::pb::rpc::context,
+      proto::admin::level_zero::reset_gc_request) override;
+
     seastar::future<proto::admin::level_zero::advance_epoch_response>
       advance_epoch(
         serde::pb::rpc::context,
