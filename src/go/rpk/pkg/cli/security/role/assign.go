@@ -37,8 +37,8 @@ The '--principal' flag accepts principals with the format
 '<PrincipalPrefix>:<Principal>'. If 'PrincipalPrefix' is not provided, then
 defaults to 'User:'.
 
-The '--group' flag assigns the role to a group, granting all members of that
-group the permissions associated with the role. Group assignments are only
+The '--group' flag assigns the role to an identity provider group, granting all members
+of that group the permissions associated with the role. Group assignments are only
 supported on local (non-cloud) clusters running
 Redpanda ` + minGroupVersion.String() + ` or later.
 `,
@@ -100,9 +100,9 @@ Assign role "data-reader" to both a user and a group
 				if !adminapi.HasMinimumVersion(cmd.Context(), cl, minGroupVersion) {
 					out.Die("--group requires Redpanda version %s or later", minGroupVersion.String())
 				}
-				var members []*adminv2.RoleMember
-				for _, g := range groups {
-					members = append(members, groupMember(g))
+				members := make([]*adminv2.RoleMember, len(groups))
+				for i, g := range groups {
+					members[i] = &adminv2.RoleMember{Member: &adminv2.RoleMember_Group{Group: &adminv2.RoleGroup{Name: g}}}
 				}
 				_, err = cl.SecurityService().AddRoleMembers(cmd.Context(), connect.NewRequest(&adminv2.AddRoleMembersRequest{
 					RoleName: roleName,

@@ -12,7 +12,6 @@ package role
 import (
 	"strings"
 
-	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
 	dataplanev1 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1"
 	"github.com/redpanda-data/common-go/rpadmin"
 
@@ -28,14 +27,6 @@ const (
 )
 
 var minGroupVersion = redpanda.Version{Major: 26, Feature: 1}
-
-func groupMember(name string) *adminv2.RoleMember {
-	return &adminv2.RoleMember{
-		Member: &adminv2.RoleMember_Group{
-			Group: &adminv2.RoleGroup{Name: name},
-		},
-	}
-}
 
 func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{

@@ -27,6 +27,8 @@ func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 		Short: "Manage group-to-role mappings",
 	}
 	cmd.AddCommand(
+		assignCommand(fs, p),
+		unassignCommand(fs, p),
 		listCommand(fs, p),
 		describeCommand(fs, p),
 	)

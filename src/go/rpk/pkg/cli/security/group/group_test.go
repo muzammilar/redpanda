@@ -16,20 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func groupMember(name string) *adminv2.RoleMember {
-	return &adminv2.RoleMember{
-		Member: &adminv2.RoleMember_Group{
-			Group: &adminv2.RoleGroup{Name: name},
-		},
-	}
-}
-
-func TestGroupMember(t *testing.T) {
-	m := groupMember("engineering")
-	require.NotNil(t, m.GetGroup())
-	require.Equal(t, "engineering", m.GetGroup().Name)
-	require.Nil(t, m.GetUser())
-}
+var (
+	engGroup = &adminv2.RoleMember{Member: &adminv2.RoleMember_Group{Group: &adminv2.RoleGroup{Name: "engineering"}}}
+	opsGroup = &adminv2.RoleMember{Member: &adminv2.RoleMember_Group{Group: &adminv2.RoleGroup{Name: "ops"}}}
+)
 
 func TestCollectGroupsFromAdminRoles(t *testing.T) {
 	var uninit []string
@@ -68,7 +58,7 @@ func TestCollectGroupsFromAdminRoles(t *testing.T) {
 			roles: []*adminv2.Role{
 				{
 					Name:    "admin",
-					Members: []*adminv2.RoleMember{groupMember("engineering")},
+					Members: []*adminv2.RoleMember{engGroup},
 				},
 			},
 			want: []string{"engineering"},
@@ -78,11 +68,11 @@ func TestCollectGroupsFromAdminRoles(t *testing.T) {
 			roles: []*adminv2.Role{
 				{
 					Name:    "admin",
-					Members: []*adminv2.RoleMember{groupMember("engineering")},
+					Members: []*adminv2.RoleMember{engGroup},
 				},
 				{
 					Name:    "reader",
-					Members: []*adminv2.RoleMember{groupMember("engineering"), groupMember("ops")},
+					Members: []*adminv2.RoleMember{engGroup, opsGroup},
 				},
 			},
 			want: []string{"engineering", "ops"},
@@ -113,7 +103,7 @@ func TestRolesForGroup(t *testing.T) {
 			roles: []*adminv2.Role{
 				{
 					Name:    "admin",
-					Members: []*adminv2.RoleMember{groupMember("ops")},
+					Members: []*adminv2.RoleMember{opsGroup},
 				},
 			},
 			groupName: "engineering",
@@ -124,11 +114,11 @@ func TestRolesForGroup(t *testing.T) {
 			roles: []*adminv2.Role{
 				{
 					Name:    "admin",
-					Members: []*adminv2.RoleMember{groupMember("engineering")},
+					Members: []*adminv2.RoleMember{engGroup},
 				},
 				{
 					Name:    "reader",
-					Members: []*adminv2.RoleMember{groupMember("ops")},
+					Members: []*adminv2.RoleMember{opsGroup},
 				},
 			},
 			groupName: "engineering",
@@ -139,11 +129,11 @@ func TestRolesForGroup(t *testing.T) {
 			roles: []*adminv2.Role{
 				{
 					Name:    "writer",
-					Members: []*adminv2.RoleMember{groupMember("engineering")},
+					Members: []*adminv2.RoleMember{engGroup},
 				},
 				{
 					Name:    "admin",
-					Members: []*adminv2.RoleMember{groupMember("engineering")},
+					Members: []*adminv2.RoleMember{engGroup},
 				},
 			},
 			groupName: "engineering",

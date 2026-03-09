@@ -99,9 +99,9 @@ Unassign role "data-reader" from both a user and a group
 				if !adminapi.HasMinimumVersion(cmd.Context(), cl, minGroupVersion) {
 					out.Die("--group requires Redpanda version %s or later", minGroupVersion.String())
 				}
-				var members []*adminv2.RoleMember
-				for _, g := range groups {
-					members = append(members, groupMember(g))
+				members := make([]*adminv2.RoleMember, len(groups))
+				for i, g := range groups {
+					members[i] = &adminv2.RoleMember{Member: &adminv2.RoleMember_Group{Group: &adminv2.RoleGroup{Name: g}}}
 				}
 				_, err = cl.SecurityService().RemoveRoleMembers(cmd.Context(), connect.NewRequest(&adminv2.RemoveRoleMembersRequest{
 					RoleName: roleName,
