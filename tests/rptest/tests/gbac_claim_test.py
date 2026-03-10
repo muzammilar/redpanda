@@ -1150,3 +1150,37 @@ class GbacConfigEdgeCaseTest(StubOIDCTestBase):
             topic_suffix,
             "Phase 2: suffix group should grant access in suffix mode",
         )
+
+    @cluster(num_nodes=4)
+    def test_invalid_group_claim_path(self) -> None:
+        """Invalid oidc_group_claim_path values are handled gracefully."""
+        # Sub-scenario 1: Syntactically invalid path is rejected.
+        try:
+            self.redpanda.set_cluster_config({"oidc_group_claim_path": "$[invalid"})
+            assert False, "Expected HTTPError for syntactically invalid claim path"
+        except requests.exceptions.HTTPError as e:
+            assert e.response.status_code == 400
+
+        # Sub-scenario 2: Valid syntax but nonexistent path — no groups.
+        self.redpanda.set_cluster_config(
+            {"oidc_group_claim_path": "$.nonexistent.claim"}
+        )
+
+        client_id = "invalid-path-test"
+        self.stub_idp.register_client(
+            client_id,
+            claims={
+                "sub": "invalid-path-user",
+                "groups": ["eng"],
+            },
+        )
+
+        resp = self.resolve_oidc_identity(client_id)
+        assert len(resp.groups) == 0
+
+        topic = "topic"
+        self.rpk.create_topic(topic)
+        self.rpk.sasl_allow_principal("Group:eng", ["all"], "topic", topic)
+
+        producer = self.make_producer(client_id)
+        self.assert_produce_denied(producer, topic)
