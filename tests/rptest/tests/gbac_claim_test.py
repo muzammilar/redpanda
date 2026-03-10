@@ -1098,3 +1098,55 @@ class GbacConfigEdgeCaseTest(StubOIDCTestBase):
             topic,
             "Phase 2: client-B should have access via groups2 claim path",
         )
+
+    @cluster(num_nodes=4)
+    def test_change_nested_group_behavior_at_runtime(self) -> None:
+        """Changing nested_group_behavior at runtime applies the new behavior
+        to subsequent tokens."""
+        client_id = "behavior-change-test"
+        self.stub_idp.register_client(
+            client_id,
+            claims={
+                "sub": "behavior-user",
+                "groups": ["a/b/c"],
+            },
+        )
+
+        # Phase 1: none mode — full path is the group name.
+        self.redpanda.set_cluster_config({"nested_group_behavior": "none"})
+
+        resp = self.resolve_oidc_identity(client_id)
+        assert list(resp.groups) == ["a/b/c"]
+
+        topic_full = "full-path-topic"
+        topic_suffix = "suffix-topic"
+        self.rpk.create_topic(topic_full)
+        self.rpk.create_topic(topic_suffix)
+        self.rpk.sasl_allow_principal("Group:a/b/c", ["all"], "topic", topic_full)
+        self.rpk.sasl_allow_principal("Group:c", ["all"], "topic", topic_suffix)
+
+        producer = self.make_producer(client_id)
+        self.wait_until_produce_succeeds(
+            producer,
+            topic_full,
+            "Phase 1: full path group should grant access in none mode",
+        )
+
+        self.assert_produce_denied(producer, topic_suffix)
+
+        # Switch to suffix mode.
+        self.redpanda.set_cluster_config({"nested_group_behavior": "suffix"})
+
+        # Phase 2: suffix mode — only last segment is the group name.
+        resp = self.resolve_oidc_identity(client_id)
+        assert list(resp.groups) == ["c"]
+
+        self.revoke_oidc_sessions()
+
+        self.assert_produce_denied(producer, topic_full)
+
+        self.wait_until_produce_succeeds(
+            producer,
+            topic_suffix,
+            "Phase 2: suffix group should grant access in suffix mode",
+        )
