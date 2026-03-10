@@ -438,12 +438,13 @@ class DatalakeDLQTest(RedpandaTest):
                 table_override=f"{self.topic_name}~dlq",
             )
 
-        invalid_schema_res = self._invalid_records_metric_sum(
-            self.topic_name, IcebergInvalidRecordCause.FAILED_KAFKA_SCHEMA_RESOLUTION
-        )
-        assert invalid_schema_res >= num_iter * num_invalid_per_iter, (
-            f"Expected {num_iter * num_invalid_per_iter} invalid records due to failed schema resolution but got {invalid_schema_res}"
-        )
+            invalid_schema_res = self._invalid_records_metric_sum(
+                self.topic_name,
+                IcebergInvalidRecordCause.FAILED_KAFKA_SCHEMA_RESOLUTION,
+            )
+            assert invalid_schema_res >= num_iter * num_invalid_per_iter, (
+                f"Expected {num_iter * num_invalid_per_iter} invalid records due to failed schema resolution but got {invalid_schema_res}"
+            )
 
     @cluster(num_nodes=4)
     @matrix(
