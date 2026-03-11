@@ -143,6 +143,74 @@ struct level_zero_gc_config {
     config::binding<std::chrono::milliseconds> throttle_no_progress;
 };
 
+/*
+ * State Machine
+ * =============
+ *
+ *  Construction
+ *       |
+ *       v
+ *  +--------+
+ *  | paused |<-----------------------------+
+ *  +---+----+                              |
+ *      | start()                           |
+ *      v                                   |
+ *  +----------------+                      |
+ *  | worker loop top|<-----------+         |
+ *  +-------+--------+            |         |
+ *          |                     |         |
+ *          | check safety        |         |
+ *          |                     |         |
+ *     ok +-+-+ !ok               |         |
+ *    +---+   +----+              |         |
+ *    v            v              |         |
+ *  +---------+ +---------------+ |         |
+ *  | running | |safety_blocked | |         |
+ *  |         | |               | |         |
+ *  | backoff | | increment     | |         |
+ *  |  then   | |  probe,       | |         |
+ *  | collect | |  sleep        | |         |
+ *  +----+----+ +-------+-------+ |         |
+ *       |              |         |         |
+ *       +------+-------+         |         |
+ *              |                 |         |
+ *              +-----------------+         |
+ *                  loop back               |
+ *                                          |
+ *  pause() from running or safety_blocked  |
+ *  ----------------------------------------+
+ *
+ *  reset() from any non-stopped state:
+ *
+ *  +----------+
+ *  |resetting | drains delete worker, then
+ *  +----+-----+ restores prior run/pause state
+ *       |
+ *       v
+ *  was_running?
+ *    yes -> running
+ *    no  -> paused
+ *
+ *  stop() from any state:
+ *
+ *  +---------+  worker done  +---------+
+ *  |stopping |-------------->| stopped |
+ *  +---------+               +---------+
+ *                             (terminal)
+ *
+ *  The running/safety_blocked distinction is not an
+ *  explicit transition. Both are phases of the worker
+ *  loop -- each iteration checks can_proceed() and
+ *  takes the corresponding branch. The state returned
+ *  by get_state() reflects whichever branch would be
+ *  taken at query time.
+ *
+ *  get_state() priority:
+ *    should_shutdown_ > resetting_ > !should_run_ >
+ *    safety_monitor_.can_proceed()
+ *
+ *  start()/pause() block while resetting_ is true.
+ */
 class level_zero_gc {
 public:
     /*
@@ -289,7 +357,8 @@ public:
       level_zero_gc_config,
       std::unique_ptr<object_storage>,
       std::unique_ptr<epoch_source>,
-      std::unique_ptr<node_info>);
+      std::unique_ptr<node_info>,
+      std::unique_ptr<safety_monitor>);
 
     /*
      * Construct with default implementations of storage and epoch providers.
@@ -352,6 +421,7 @@ public:
 private:
     level_zero_gc_config config_;
     std::unique_ptr<epoch_source> epoch_source_;
+    std::unique_ptr<safety_monitor> safety_monitor_;
 
     bool should_run_;
     bool should_shutdown_;

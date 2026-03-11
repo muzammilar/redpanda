@@ -187,6 +187,14 @@ private:
     size_t total_shards_{1};
 };
 
+class safety_monitor_test_impl
+  : public cloud_topics::level_zero_gc::safety_monitor {
+public:
+    result can_proceed() const override {
+        return {.ok = true, .reason = std::nullopt};
+    }
+};
+
 class LevelZeroGCTest : public testing::Test {
 public:
     LevelZeroGCTest(
@@ -208,7 +216,8 @@ public:
           },
           std::move(storage),
           std::make_unique<epoch_source_test_impl>(&max_epoch),
-          std::make_unique<node_info_test_impl>());
+          std::make_unique<node_info_test_impl>(),
+          std::make_unique<safety_monitor_test_impl>());
     }
 
     void TearDown() override { gc->stop().get(); }
@@ -775,7 +784,8 @@ public:
             &listed_, &deleted_, &cfg_),
           std::make_unique<epoch_source_test_impl>(&max_epoch_),
           std::make_unique<node_info_test_impl>(
-            std::get<0>(GetParam()), std::get<1>(GetParam()))) {}
+            std::get<0>(GetParam()), std::get<1>(GetParam())),
+          std::make_unique<safety_monitor_test_impl>()) {}
 
     void TearDown() override { gc_.stop().get(); }
 

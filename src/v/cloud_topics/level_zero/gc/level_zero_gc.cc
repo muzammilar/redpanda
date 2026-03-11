@@ -687,9 +687,11 @@ level_zero_gc::level_zero_gc(
   level_zero_gc_config config,
   std::unique_ptr<object_storage> storage,
   std::unique_ptr<epoch_source> epoch_source,
-  std::unique_ptr<node_info> node_info)
+  std::unique_ptr<node_info> node_info,
+  std::unique_ptr<safety_monitor> safety_monitor)
   : config_(std::move(config))
   , epoch_source_(std::move(epoch_source))
+  , safety_monitor_(std::move(safety_monitor))
   , should_run_(false) // begin in a stopped state
   , should_shutdown_(false)
   , worker_(worker())
@@ -722,7 +724,11 @@ level_zero_gc::level_zero_gc(
       std::make_unique<object_storage_remote_impl>(remote, std::move(bucket)),
       std::make_unique<epoch_source_impl>(
         health_monitor, controller_stm, topic_table),
-      std::make_unique<node_info_impl>(self, members_table)) {}
+      std::make_unique<node_info_impl>(self, members_table),
+      std::make_unique<cluster_safety_monitor>(
+        health_monitor,
+        config::shard_local_cfg()
+          .cloud_topics_gc_health_check_interval.bind())) {}
 
 level_zero_gc::~level_zero_gc() = default;
 
@@ -733,6 +739,7 @@ seastar::future<> level_zero_gc::start() {
     }
     vlog(cd_log.info, "Starting cloud topics L0 GC worker");
     delete_worker_->start();
+    safety_monitor_->start();
     should_run_ = true;
     worker_cv_.signal();
 }
@@ -755,6 +762,7 @@ seastar::future<> level_zero_gc::stop() {
     worker_cv_.signal();
     co_await delete_worker_->stop();
     co_await std::exchange(worker_, seastar::make_ready_future<>());
+    co_await safety_monitor_->stop();
     vlog(cd_log.info, "Stopped cloud_topics L0 GC worker");
 }
 
@@ -846,6 +854,19 @@ seastar::future<> level_zero_gc::worker() {
             // may subscribe or reset the abort source since it is able to
             // ensure that the abort source is unreferenced at this time.
             asrc_ = {};
+
+            if (auto safety = safety_monitor_->can_proceed(); !safety.ok) {
+                vlog(
+                  cd_log.debug,
+                  "L0 GC blocked by safety monitor: {}",
+                  safety.reason.value_or("unknown"));
+                probe_.safety_blocked();
+                (co_await seastar::coroutine::as_future(
+                   seastar::sleep_abortable(
+                     config_.throttle_no_progress(), asrc_)))
+                  .ignore_ready_future();
+                continue;
+            }
 
             if (backoff.count() > 0) {
                 auto t0 = ss::lowres_clock::now();
