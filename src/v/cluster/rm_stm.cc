@@ -1290,6 +1290,7 @@ model::offset rm_stm::last_stable_offset() {
     // We optimize for the case where there are no inflight transactional
     // batch to return the high water mark.
     auto last_applied = last_applied_offset();
+    auto next_to_apply = model::next_offset(last_applied);
 
     // scenario 1: still bootstrapping
     if (unlikely(
@@ -1324,31 +1325,38 @@ model::offset rm_stm::last_stable_offset() {
           last_applied);
         return _last_known_lso;
     }
+
     // Check for any in-flight transactions.
     auto first_tx_start = model::offset::max();
     if (_is_tx_enabled && !_active_tx_producers.empty()) {
         const auto& earliest_open_tx_producer = _active_tx_producers.begin();
         const auto& tx_state = earliest_open_tx_producer->transaction_state();
-        if (tx_state) {
-            first_tx_start = tx_state->first;
-        } else {
+        if (!tx_state) {
             vlog(
               _ctx_log.error,
-              "[{}] Invalid transaction state for transactional producer, lso "
-              "may be incorrect",
+              "No transaction state for transactional producer: {}, lso may be "
+              "incorrect",
               *earliest_open_tx_producer);
+            return model::invalid_lso;
+        }
+        first_tx_start = tx_state->first;
+        if (first_tx_start > _apply_watermark) {
+            vlog(
+              _ctx_log.error,
+              "An in-flight transaction for producer [{}] found above "
+              "apply watermark [{}], lso may be incorrect",
+              *earliest_open_tx_producer,
+              _apply_watermark);
+            return model::invalid_lso;
         }
     }
 
     auto synced_leader = _raft->is_leader() && _raft->term() == _insync_term;
     model::offset lso{model::invalid_lso};
     auto last_visible_index = _raft->last_visible_index();
-    auto next_to_apply = model::next_offset(last_applied);
-    if (first_tx_start <= last_visible_index) {
-        // There are in flight transactions < high water mark that may
-        // not be applied yet. We still need to consider only applied
-        // transactions.
-        lso = std::min(first_tx_start, next_to_apply);
+    if (first_tx_start != model::offset::max()) {
+        // There is an open transaction
+        lso = first_tx_start;
     } else if (synced_leader) {
         ////////////////  WARNING ///////////
         // there is a real bug lurking here that overestimates the LSO beyond
