@@ -14,6 +14,7 @@
 #include "cloud_topics/level_one/metastore/lsm/replicated_persistence.h"
 #include "cloud_topics/level_one/metastore/lsm/stm.h"
 #include "cloud_topics/logger.h"
+#include "config/configuration.h"
 #include "lsm/io/cloud_persistence.h"
 #include "lsm/io/persistence.h"
 #include "lsm/proto/manifest.proto.h"
@@ -136,7 +137,9 @@ replicated_database::open(
       lsm::database::open(
         lsm::options{
           .database_epoch = epoch(),
-          // TODO: tuning.
+          .file_deletion_delay = absl::FromChrono(
+            config::shard_local_cfg()
+              .cloud_topics_long_term_file_deletion_delay()),
         },
         std::move(io)));
     if (db_fut.failed()) {
