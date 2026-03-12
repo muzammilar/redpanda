@@ -33,6 +33,7 @@ from rptest.services.keycloak import (
     DEFAULT_AT_LIFESPAN_S,
     DEFAULT_REALM,
     KeycloakService,
+    OAuthConfig,
 )
 from rptest.services.redpanda import (
     LoggingConfig,
@@ -245,6 +246,18 @@ class RedpandaOIDCTestBase(Test):
 class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
     def __init__(self, test_context, **kwargs):
         super(RedpandaOIDCTestMethods, self).__init__(test_context, **kwargs)
+
+    def _get_visible_topics(self, cfg: OAuthConfig) -> set[str]:
+        """Get a fresh token and list visible topics."""
+        k_client = PythonLibrdkafka(
+            self.redpanda,
+            algorithm="OAUTHBEARER",
+            oauth_config=cfg,
+            tls_cert=self.client_cert,
+        )
+        producer = k_client.get_producer()
+        producer.poll(0.0)
+        return set(producer.list_topics(timeout=5).topics.keys())
 
     @cluster(num_nodes=4)
     # https://redpandadata.atlassian.net/browse/ENG-307
@@ -1000,28 +1013,16 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         assert cfg.client_secret is not None
         assert cfg.token_endpoint is not None
 
-        def get_visible_topics() -> set[str]:
-            """Get a fresh token and list visible topics."""
-            k_client = PythonLibrdkafka(
-                self.redpanda,
-                algorithm="OAUTHBEARER",
-                oauth_config=cfg,
-                tls_cert=self.client_cert,
-            )
-            producer = k_client.get_producer()
-            producer.poll(0.0)
-            return set(producer.list_topics(timeout=5).topics.keys())
-
         # Phase 1: Add service user to group1
         self.logger.info("Phase 1: Adding service user to group1")
         self.keycloak.admin.add_service_user_to_group(client_id, group1)
 
         # Verify service user can see topic1 but not topic2
         wait_until(
-            lambda: get_visible_topics() == {topic1},
+            lambda: self._get_visible_topics(cfg) == {topic1},
             timeout_sec=10,
             backoff_sec=1,
-            err_msg=f"Expected to see only {topic1} when in group1, got: {get_visible_topics()}",
+            err_msg=f"Expected to see only {topic1} when in group1, got: {self._get_visible_topics(cfg)}",
         )
         self.logger.info("Verified: service user in group1 can see topic1 only")
 
@@ -1032,10 +1033,10 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
 
         # Verify service user can now see topic2 but not topic1
         wait_until(
-            lambda: get_visible_topics() == {topic2},
+            lambda: self._get_visible_topics(cfg) == {topic2},
             timeout_sec=10,
             backoff_sec=1,
-            err_msg=f"Expected to see only {topic2} when in group2, got: {get_visible_topics()}",
+            err_msg=f"Expected to see only {topic2} when in group2, got: {self._get_visible_topics(cfg)}",
         )
         self.logger.info("Verified: service user in group2 can see topic2 only")
 
@@ -1048,10 +1049,10 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
 
         # Verify service user cannot see any topics
         wait_until(
-            lambda: get_visible_topics() == set(),
+            lambda: self._get_visible_topics(cfg) == set(),
             timeout_sec=10,
             backoff_sec=1,
-            err_msg=f"Expected to see no topics when in group3, got: {get_visible_topics()}",
+            err_msg=f"Expected to see no topics when in group3, got: {self._get_visible_topics(cfg)}",
         )
         self.logger.info(
             "Verified: service user in group3 (no permissions) cannot see any topics"
@@ -1064,10 +1065,10 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
 
         # Verify service user can see both topics
         wait_until(
-            lambda: get_visible_topics() == {topic1, topic2},
+            lambda: self._get_visible_topics(cfg) == {topic1, topic2},
             timeout_sec=10,
             backoff_sec=1,
-            err_msg=f"Expected to see both topics when in all groups, got: {get_visible_topics()}",
+            err_msg=f"Expected to see both topics when in all groups, got: {self._get_visible_topics(cfg)}",
         )
         self.logger.info("Verified: service user in all groups can see both topics")
 
@@ -1157,24 +1158,12 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         assert cfg.client_secret is not None
         assert cfg.token_endpoint is not None
 
-        def get_visible_topics() -> set[str]:
-            """Get a fresh token and list visible topics."""
-            k_client = PythonLibrdkafka(
-                self.redpanda,
-                algorithm="OAUTHBEARER",
-                oauth_config=cfg,
-                tls_cert=self.client_cert,
-            )
-            producer = k_client.get_producer()
-            producer.poll(0.0)
-            return set(producer.list_topics(timeout=5).topics.keys())
-
         # Verify user can see the topic via the group -> role authorization path
         wait_until(
-            lambda: topic_name in get_visible_topics(),
+            lambda: topic_name in self._get_visible_topics(cfg),
             timeout_sec=10,
             backoff_sec=1,
-            err_msg=f"Expected to see {topic_name} via group->role authorization, got: {get_visible_topics()}",
+            err_msg=f"Expected to see {topic_name} via group->role authorization, got: {self._get_visible_topics(cfg)}",
         )
         self.logger.info(
             f"Verified: user in group '{group_name}' can access topic via role '{role_name}'"
@@ -1263,22 +1252,10 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         # Create a Kafka client that authenticates using OIDC
         cfg = self.keycloak.generate_oauth_config(kc_node, client_id)
 
-        def get_visible_topics() -> set[str]:
-            """Get a fresh token and list visible topics."""
-            k_client = PythonLibrdkafka(
-                self.redpanda,
-                algorithm="OAUTHBEARER",
-                oauth_config=cfg,
-                tls_cert=self.client_cert,
-            )
-            producer = k_client.get_producer()
-            producer.poll(0.0)
-            return set(producer.list_topics(timeout=5).topics.keys())
-
         # Wait a bit to ensure ACLs propagate, then verify user cannot see the topic
         # (deny via role should take precedence over group allow)
         time.sleep(3)
-        visible = get_visible_topics()
+        visible = self._get_visible_topics(cfg)
         assert topic_name not in visible, (
             f"Expected topic '{topic_name}' to NOT be visible due to role deny, "
             f"but it was visible. Deny via group->role should take precedence."
@@ -1352,24 +1329,12 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
 
         cfg = self.keycloak.generate_oauth_config(kc_node, client_id)
 
-        def get_visible_topics() -> set[str]:
-            """Get a fresh token and list visible topics."""
-            k_client = PythonLibrdkafka(
-                self.redpanda,
-                algorithm="OAUTHBEARER",
-                oauth_config=cfg,
-                tls_cert=self.client_cert,
-            )
-            producer = k_client.get_producer()
-            producer.poll(0.0)
-            return set(producer.list_topics(timeout=5).topics.keys())
-
         # Test with user in group1
         self.logger.info(f"Testing with user in {group1_name}")
         self.keycloak.admin.add_service_user_to_group(client_id, group1_name)
 
         wait_until(
-            lambda: topic_name in get_visible_topics(),
+            lambda: topic_name in self._get_visible_topics(cfg),
             timeout_sec=10,
             backoff_sec=1,
             err_msg=f"User in {group1_name} should see {topic_name} via role",
@@ -1382,7 +1347,7 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         self.keycloak.admin.add_service_user_to_group(client_id, group2_name)
 
         wait_until(
-            lambda: topic_name in get_visible_topics(),
+            lambda: topic_name in self._get_visible_topics(cfg),
             timeout_sec=10,
             backoff_sec=1,
             err_msg=f"User in {group2_name} should see {topic_name} via role",
@@ -1467,24 +1432,12 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
 
         cfg = self.keycloak.generate_oauth_config(kc_node, client_id)
 
-        def get_visible_topics() -> set[str]:
-            """Get a fresh token and list visible topics."""
-            k_client = PythonLibrdkafka(
-                self.redpanda,
-                algorithm="OAUTHBEARER",
-                oauth_config=cfg,
-                tls_cert=self.client_cert,
-            )
-            producer = k_client.get_producer()
-            producer.poll(0.0)
-            return set(producer.list_topics(timeout=5).topics.keys())
-
         # Verify user can see both topics via the different role paths
         wait_until(
-            lambda: {topic1_name, topic2_name}.issubset(get_visible_topics()),
+            lambda: {topic1_name, topic2_name}.issubset(self._get_visible_topics(cfg)),
             timeout_sec=10,
             backoff_sec=1,
-            err_msg=f"Expected to see both topics via different roles, got: {get_visible_topics()}",
+            err_msg=f"Expected to see both topics via different roles, got: {self._get_visible_topics(cfg)}",
         )
         self.logger.info(
             f"Verified: user in group '{group_name}' can access both topics via different roles"
