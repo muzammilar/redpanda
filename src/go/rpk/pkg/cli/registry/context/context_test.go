@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	srcontext "github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/registry/context"
@@ -124,11 +123,12 @@ func TestContextList(t *testing.T) {
 		require.NoError(t, cmd.Execute())
 	})
 
-	// Split into lines so "." does not false-match inside ".ctx1".
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	require.Contains(t, lines, ".")
-	require.Contains(t, lines, ".ctx1")
-	require.Contains(t, lines, ".ctx2")
+	// Table output should include header and context names.
+	require.Contains(t, output, "CONTEXT")
+	require.Contains(t, output, "MODE")
+	require.Contains(t, output, "COMPATIBILITY")
+	require.Contains(t, output, ".ctx1")
+	require.Contains(t, output, ".ctx2")
 }
 
 func TestContextListEmpty(t *testing.T) {
@@ -142,7 +142,8 @@ func TestContextListEmpty(t *testing.T) {
 		require.NoError(t, cmd.Execute())
 	})
 
-	require.Equal(t, ".\n", output)
+	// Should show table with at least the default context.
+	require.Contains(t, output, "CONTEXT")
 }
 
 func TestContextListWithSchemaContext(t *testing.T) {
@@ -160,7 +161,7 @@ func TestContextListWithSchemaContext(t *testing.T) {
 	})
 
 	// GET /contexts returns all contexts regardless of --schema-context.
-	require.Contains(t, output, ".")
+	require.Contains(t, output, "CONTEXT")
 	require.Contains(t, output, ".ctx1")
 	require.Contains(t, output, ".ctx2")
 }
@@ -289,7 +290,7 @@ func TestAdminAPICheckFlagEnabled(t *testing.T) {
 	reg.SeedSchema(":.ctx1:my-subject", 1, 1, testSchema)
 
 	admin := fakeAdminAPI(t, map[string]any{
-		srcontext.QualifiedSubjectsConfigKey: true,
+		"schema_registry_enable_qualified_subjects": true,
 	})
 	defer admin.Close()
 
@@ -306,7 +307,7 @@ func TestAdminAPICheckFlagEnabled(t *testing.T) {
 
 func TestAdminAPICheckFlagDisabled(t *testing.T) {
 	admin := fakeAdminAPI(t, map[string]any{
-		srcontext.QualifiedSubjectsConfigKey: false,
+		"schema_registry_enable_qualified_subjects": false,
 	})
 	defer admin.Close()
 
@@ -323,7 +324,7 @@ profiles:
 	profile, err := p.LoadVirtualProfile(fs)
 	require.NoError(t, err)
 
-	err = srcontext.CheckQualifiedSubjectsEnabled(context.Background(), fs, profile)
+	err = srcontext.IsContextSupported(context.Background(), fs, profile, false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "schema contexts are not enabled on this cluster")
 }
@@ -377,16 +378,14 @@ func TestSubjectListNoContextColumn(t *testing.T) {
 	reg.SeedSchema("plain-topic", 1, 1, testSchema)
 	reg.SeedSchema("another-topic", 1, 2, testSchema)
 
-	// Simulate a cluster that does not support contexts (404).
-	reg.Intercept(func(w http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path == "/contexts" {
-			http.Error(w, "Not found", http.StatusNotFound)
-			return true
-		}
-		return false
+	// Simulate a cluster that does not support contexts: admin API
+	// reports qualified_subjects as false.
+	admin := fakeAdminAPI(t, map[string]any{
+		"schema_registry_enable_qualified_subjects": false,
 	})
+	defer admin.Close()
 
-	cmd := setupRegistryTest(t, reg)
+	cmd := setupRegistryTestWithAdmin(t, reg, admin.URL)
 	cmd.SetArgs([]string{"subject", "list"})
 
 	output := captureOutput(func() {
@@ -447,16 +446,14 @@ func TestSchemaListNoContextColumn(t *testing.T) {
 
 	reg.SeedSchema("plain-topic", 1, 1, testSchema)
 
-	// Simulate a cluster that does not support contexts (404).
-	reg.Intercept(func(w http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path == "/contexts" {
-			http.Error(w, "Not found", http.StatusNotFound)
-			return true
-		}
-		return false
+	// Simulate a cluster that does not support contexts: admin API
+	// reports qualified_subjects as false.
+	admin := fakeAdminAPI(t, map[string]any{
+		"schema_registry_enable_qualified_subjects": false,
 	})
+	defer admin.Close()
 
-	cmd := setupRegistryTest(t, reg)
+	cmd := setupRegistryTestWithAdmin(t, reg, admin.URL)
 	cmd.SetArgs([]string{"schema", "list"})
 
 	output := captureOutput(func() {
@@ -475,7 +472,7 @@ func TestSubjectListContextColumnWithAdminAPI(t *testing.T) {
 	reg.SeedSchema(":.ctx1:my-subject", 1, 2, testSchema)
 
 	admin := fakeAdminAPI(t, map[string]any{
-		srcontext.QualifiedSubjectsConfigKey: true,
+		"schema_registry_enable_qualified_subjects": true,
 	})
 	defer admin.Close()
 

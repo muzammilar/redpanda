@@ -41,11 +41,11 @@ func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd.PersistentFlags().StringVar(&schemaCtx, "schema-context", "", "Schema context to use for all registry operations")
 	cmd.PersistentFlags().BoolVar(&skipContextCheck, "skip-context-check", false, "Skip the admin API verification of schema context support")
 	cmd.AddCommand(
-		compatibilityLevelCommand(fs, p),
-		srcontext.NewCommand(fs, p),
-		mode.NewCommand(fs, p),
-		schema.NewCommand(fs, p),
-		subjectCommand(fs, p),
+		compatibilityLevelCommand(fs, p, &schemaCtx),
+		srcontext.NewCommand(fs, p, &schemaCtx),
+		mode.NewCommand(fs, p, &schemaCtx),
+		schema.NewCommand(fs, p, &schemaCtx),
+		subjectCommand(fs, p, &schemaCtx),
 	)
 	return cmd
 }

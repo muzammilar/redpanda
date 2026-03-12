@@ -10,11 +10,13 @@
 package context
 
 import (
-	"fmt"
 	"slices"
+	"strings"
+	"sync"
 
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
+	"github.com/twmb/franz-go/pkg/sr"
 
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/out"
@@ -42,16 +44,70 @@ func listCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			out.MaybeDie(err, "%v", err)
 
 			slices.Sort(contexts)
-			rows := make([]contextResponse, 0, len(contexts))
-			for _, c := range contexts {
-				rows = append(rows, contextResponse{Name: c})
+
+			// Fetch mode and compatibility for each context in parallel.
+			type ctxResult struct {
+				name          string
+				mode          string
+				compatibility string
 			}
+			var (
+				wg      sync.WaitGroup
+				mu      sync.Mutex
+				results []ctxResult
+			)
+			for _, c := range contexts {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+
+					subject := schemaregistry.QualifySubject(c, sr.GlobalSubject)
+
+					modeCtx := sr.WithParams(cmd.Context(), sr.DefaultToGlobal)
+					modeStr := "-"
+					modeResults := cl.Mode(modeCtx, subject)
+					if len(modeResults) > 0 && modeResults[0].Err == nil {
+						modeStr = modeResults[0].Mode.String()
+					}
+
+					compatStr := "-"
+					compatResults := cl.Compatibility(cmd.Context(), subject)
+					if len(compatResults) > 0 && compatResults[0].Err == nil {
+						compatStr = compatResults[0].Level.String()
+					}
+
+					mu.Lock()
+					defer mu.Unlock()
+					results = append(results, ctxResult{
+						name:          c,
+						mode:          modeStr,
+						compatibility: compatStr,
+					})
+				}()
+			}
+			wg.Wait()
+
+			slices.SortFunc(results, func(a, b ctxResult) int {
+				return strings.Compare(a.name, b.name)
+			})
+
+			rows := make([]contextResponse, 0, len(results))
+			for _, r := range results {
+				rows = append(rows, contextResponse{
+					Name:          r.name,
+					Mode:          r.mode,
+					Compatibility: r.compatibility,
+				})
+			}
+
 			if isText, _, s, err := f.Format(rows); !isText {
 				out.MaybeDie(err, "unable to print in the required format %q: %v", f.Kind, err)
 				out.Exit(s)
 			}
-			for _, c := range contexts {
-				fmt.Println(c)
+			tw := out.NewTable("context", "mode", "compatibility")
+			defer tw.Flush()
+			for _, r := range rows {
+				tw.PrintStructFields(r)
 			}
 		},
 	}

@@ -26,7 +26,15 @@ func deleteCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete [CONTEXT]",
 		Short: "Delete a schema registry context",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete a schema registry context.
+
+A context can only be deleted once all subjects within it have been
+hard deleted. Soft-deleted subjects still block context deletion. Use
+'rpk registry subject delete --permanent' to hard delete subjects first.
+
+The default context "." cannot be deleted.
+`,
+		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			name := args[0]
 			if len(name) == 0 || name[0] != '.' {

@@ -25,7 +25,7 @@ type deleteResponse struct {
 	Version string `json:"version" yaml:"version"`
 }
 
-func newDeleteCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func newDeleteCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var sversion string
 	var isPermanent bool
 	cmd := &cobra.Command{
@@ -46,9 +46,8 @@ func newDeleteCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			version, err := parseVersion(sversion)
 			out.MaybeDieErr(err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
 			subject := args[0]
-			qualified := schemaregistry.QualifySubject(schemaCtx, subject)
+			qualified := schemaregistry.QualifySubject(*schemaCtx, subject)
 			if isPermanent {
 				err = cl.DeleteSchema(cmd.Context(), qualified, version, sr.SoftDelete)
 				if err == nil || schemaregistry.IsSoftDeleteError(err) {

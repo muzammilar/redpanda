@@ -24,15 +24,15 @@ import (
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/schemaregistry"
 )
 
-func subjectCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func subjectCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "subject",
 		Args:  cobra.ExactArgs(0),
 		Short: "List or delete schema registry subjects",
 	}
 	cmd.AddCommand(
-		subjectListCommand(fs, p),
-		subjectDeleteCommand(fs, p),
+		subjectListCommand(fs, p, schemaCtx),
+		subjectDeleteCommand(fs, p, schemaCtx),
 	)
 	p.InstallFormatFlag(cmd)
 	return cmd
@@ -43,7 +43,7 @@ type subjectWithContext struct {
 	Subject string `json:"subject" yaml:"subject"`
 }
 
-func subjectListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func subjectListCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var deleted bool
 	cmd := &cobra.Command{
 		Use:     "list",
@@ -61,15 +61,14 @@ func subjectListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
 			skipCheck, _ := cmd.Flags().GetBool("skip-context-check")
-			showCtxCol := schemaCtx == "" && srcontext.CheckContextSupport(cmd.Context(), cl.Client, fs, p, skipCheck) == nil
+			showCtxCol := *schemaCtx == "" && srcontext.IsContextSupported(cmd.Context(), fs, p, skipCheck) == nil
 
 			var params []sr.Param
 			if deleted {
 				params = append(params, sr.ShowDeleted)
 			}
-			if pfx := schemaregistry.ContextSubjectPrefix(schemaCtx); pfx != "" {
+			if pfx := schemaregistry.ContextSubjectPrefix(*schemaCtx); pfx != "" {
 				params = append(params, sr.SubjectPrefix(pfx))
 			}
 			ctx := cmd.Context()
@@ -103,7 +102,7 @@ func subjectListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			}
 
 			for i, s := range subjects {
-				subjects[i] = schemaregistry.StripContextQualifier(schemaCtx, s)
+				subjects[i] = schemaregistry.StripContextQualifier(*schemaCtx, s)
 			}
 
 			if isText, _, s, err := f.Format(subjects); !isText {
@@ -125,7 +124,7 @@ type deleteResponse struct {
 	Err      string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
-func subjectDeleteCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func subjectDeleteCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var isPermanent bool
 	cmd := &cobra.Command{
 		Use:   "delete [SUBJECT...]",
@@ -142,8 +141,6 @@ func subjectDeleteCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
-
 			var (
 				wg      sync.WaitGroup
 				mu      sync.Mutex
@@ -151,7 +148,7 @@ func subjectDeleteCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			)
 
 			for _, subject := range subjects {
-				qualified := schemaregistry.QualifySubject(schemaCtx, subject)
+				qualified := schemaregistry.QualifySubject(*schemaCtx, subject)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()

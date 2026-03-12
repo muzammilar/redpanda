@@ -18,7 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sr"
 )
 
-func newReferencesCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func newReferencesCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var sversion string
 	var deleted bool
 	cmd := &cobra.Command{
@@ -36,8 +36,6 @@ func newReferencesCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
-
 			ctx := cmd.Context()
 			if deleted {
 				ctx = sr.WithParams(cmd.Context(), sr.ShowDeleted)
@@ -47,12 +45,12 @@ func newReferencesCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			out.MaybeDieErr(err)
 
 			subject := args[0]
-			qualified := schemaregistry.QualifySubject(schemaCtx, subject)
+			qualified := schemaregistry.QualifySubject(*schemaCtx, subject)
 			references, err := cl.SchemaReferences(ctx, qualified, version)
 			out.MaybeDie(err, "unable to check for references of subject %q and version %q: %v", subject, sversion, err)
 
 			for i := range references {
-				references[i].Subject = schemaregistry.StripContextQualifier(schemaCtx, references[i].Subject)
+				references[i].Subject = schemaregistry.StripContextQualifier(*schemaCtx, references[i].Subject)
 			}
 
 			err = printSubjectSchemaWithMetadata(f, false, false, references...)

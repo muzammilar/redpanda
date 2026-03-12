@@ -25,7 +25,7 @@ import (
 
 var supportedModes = []string{"READONLY", "READWRITE", "IMPORT"}
 
-func setCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func setCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var modeFlag string
 	var global bool
 	var force bool
@@ -80,10 +80,9 @@ Set the schema registry mode to IMPORT, overriding the emptiness check
 			err = mode.UnmarshalText([]byte(modeFlag))
 			out.MaybeDie(err, "unable to parse mode flag: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
 			for i, s := range subjects {
 				if s != sr.GlobalSubject {
-					subjects[i] = schemaregistry.QualifySubject(schemaCtx, s)
+					subjects[i] = schemaregistry.QualifySubject(*schemaCtx, s)
 				}
 			}
 
@@ -97,7 +96,7 @@ Set the schema registry mode to IMPORT, overriding the emptiness check
 			}
 			results := cl.SetMode(ctx, *mode, subjects...)
 			for i := range results {
-				results[i].Subject = schemaregistry.StripContextQualifier(schemaCtx, results[i].Subject)
+				results[i].Subject = schemaregistry.StripContextQualifier(*schemaCtx, results[i].Subject)
 			}
 
 			exit1, err := printModeResult(f, results)

@@ -40,7 +40,7 @@ type schemaResponseWithContext struct {
 	Err     string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
-func newListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func newListCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var deleted bool
 	cmd := &cobra.Command{
 		Use:     "list [SUBJECT...]",
@@ -57,9 +57,8 @@ func newListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
 			skipCheck, _ := cmd.Flags().GetBool("skip-context-check")
-			showCtxCol := schemaCtx == "" && srcontext.CheckContextSupport(cmd.Context(), cl.Client, fs, p, skipCheck) == nil
+			showCtxCol := *schemaCtx == "" && srcontext.IsContextSupported(cmd.Context(), fs, p, skipCheck) == nil
 
 			// Build params: combine ShowDeleted and SubjectPrefix in
 			// one WithParams call (params do not stack).
@@ -69,7 +68,7 @@ func newListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			}
 			ctx := cmd.Context()
 			if len(subjects) == 0 {
-				if pfx := schemaregistry.ContextSubjectPrefix(schemaCtx); pfx != "" {
+				if pfx := schemaregistry.ContextSubjectPrefix(*schemaCtx); pfx != "" {
 					params = append(params, sr.SubjectPrefix(pfx))
 				}
 				if len(params) > 0 {
@@ -79,7 +78,7 @@ func newListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 				out.MaybeDie(err, "unable to list all subjects: %v", err)
 			} else {
 				for i, s := range subjects {
-					subjects[i] = schemaregistry.QualifySubject(schemaCtx, s)
+					subjects[i] = schemaregistry.QualifySubject(*schemaCtx, s)
 				}
 				if len(params) > 0 {
 					ctx = sr.WithParams(ctx, params...)
@@ -154,13 +153,13 @@ func newListCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			response := []schemaResponse{}
 			for _, res := range results {
 				if res.err != nil {
-					sc := schemaResponse{Subject: schemaregistry.StripContextQualifier(schemaCtx, res.subject), Err: res.err.Error()}
+					sc := schemaResponse{Subject: schemaregistry.StripContextQualifier(*schemaCtx, res.subject), Err: res.err.Error()}
 					response = append(response, sc)
 					continue
 				}
 				for _, s := range res.ss {
 					sc := schemaResponse{
-						Subject: schemaregistry.StripContextQualifier(schemaCtx, s.Subject),
+						Subject: schemaregistry.StripContextQualifier(*schemaCtx, s.Subject),
 						Version: s.Version,
 						ID:      s.ID,
 						Type:    s.Type.String(),

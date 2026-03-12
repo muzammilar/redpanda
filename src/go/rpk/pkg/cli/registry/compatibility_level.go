@@ -21,15 +21,15 @@ import (
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/schemaregistry"
 )
 
-func compatibilityLevelCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func compatibilityLevelCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "compatibility-level",
 		Args:  cobra.ExactArgs(0),
 		Short: "Manage global or per-subject compatibility levels",
 	}
 	cmd.AddCommand(
-		compatGetCommand(fs, p),
-		compatSetCommand(fs, p),
+		compatGetCommand(fs, p, schemaCtx),
+		compatSetCommand(fs, p, schemaCtx),
 	)
 	p.InstallFormatFlag(cmd)
 	return cmd
@@ -41,7 +41,7 @@ type compatibilityLevelResponse struct {
 	Err     string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
-func compatGetCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func compatGetCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var global bool
 	cmd := &cobra.Command{
 		Use:   "get [SUBJECT...]",
@@ -63,10 +63,9 @@ per-subject levels.
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
 			for i, s := range subjects {
 				if s != sr.GlobalSubject {
-					subjects[i] = schemaregistry.QualifySubject(schemaCtx, s)
+					subjects[i] = schemaregistry.QualifySubject(*schemaCtx, s)
 				}
 			}
 			if len(subjects) > 0 && global {
@@ -74,7 +73,7 @@ per-subject levels.
 			}
 			results := cl.Compatibility(cmd.Context(), subjects...)
 			for i := range results {
-				results[i].Subject = schemaregistry.StripContextQualifier(schemaCtx, results[i].Subject)
+				results[i].Subject = schemaregistry.StripContextQualifier(*schemaCtx, results[i].Subject)
 			}
 
 			err = printCompatibilityResult(results, f)
@@ -86,7 +85,7 @@ per-subject levels.
 	return cmd
 }
 
-func compatSetCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func compatSetCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var global bool
 	var level string
 	cmd := &cobra.Command{
@@ -104,10 +103,9 @@ func compatSetCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
 			for i, s := range subjects {
 				if s != sr.GlobalSubject {
-					subjects[i] = schemaregistry.QualifySubject(schemaCtx, s)
+					subjects[i] = schemaregistry.QualifySubject(*schemaCtx, s)
 				}
 			}
 			if len(subjects) > 0 && global {
@@ -119,7 +117,7 @@ func compatSetCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 
 			results := cl.SetCompatibility(cmd.Context(), sr.SetCompatibility{Level: l}, subjects...)
 			for i := range results {
-				results[i].Subject = schemaregistry.StripContextQualifier(schemaCtx, results[i].Subject)
+				results[i].Subject = schemaregistry.StripContextQualifier(*schemaCtx, results[i].Subject)
 			}
 			err = printCompatibilityResult(results, f)
 			out.MaybeDieErr(err)

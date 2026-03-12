@@ -24,7 +24,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sr"
 )
 
-func newGetCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func newGetCommand(fs afero.Fs, p *config.Params, schemaCtx *string) *cobra.Command {
 	var (
 		deleted       bool
 		printSchema   bool
@@ -65,8 +65,6 @@ To print schema metadata properties, use the '--print-metadata' flag.
 			cl, err := schemaregistry.NewClient(fs, p)
 			out.MaybeDie(err, "unable to initialize schema registry client: %v", err)
 
-			schemaCtx, _ := cmd.Flags().GetString("schema-context")
-
 			var n int
 			if sversion != "" {
 				n++
@@ -93,7 +91,7 @@ To print schema metadata properties, use the '--print-metadata' flag.
 			case sversion != "":
 				version, err := parseVersion(sversion)
 				out.MaybeDieErr(err)
-				qualified := schemaregistry.QualifySubject(schemaCtx, args[0])
+				qualified := schemaregistry.QualifySubject(*schemaCtx, args[0])
 				var params []sr.Param
 				if deleted {
 					params = append(params, sr.ShowDeleted)
@@ -113,8 +111,8 @@ To print schema metadata properties, use the '--print-metadata' flag.
 					params = append(params, sr.ShowDeleted)
 				}
 				if len(args) > 0 {
-					params = append(params, sr.Subject(schemaregistry.QualifySubject(schemaCtx, args[0])))
-				} else if pfx := schemaregistry.ContextSubjectPrefix(schemaCtx); pfx != "" {
+					params = append(params, sr.Subject(schemaregistry.QualifySubject(*schemaCtx, args[0])))
+				} else if pfx := schemaregistry.ContextSubjectPrefix(*schemaCtx); pfx != "" {
 					params = append(params, sr.Subject(pfx))
 				}
 				ctx := cmd.Context()
@@ -124,7 +122,7 @@ To print schema metadata properties, use the '--print-metadata' flag.
 				ss, err = cl.SchemaUsagesByID(ctx, id)
 				out.MaybeDieErr(err)
 				if len(args) > 0 {
-					qualified := schemaregistry.QualifySubject(schemaCtx, args[0])
+					qualified := schemaregistry.QualifySubject(*schemaCtx, args[0])
 					for _, s := range ss {
 						if s.Subject == qualified {
 							ss = []sr.SubjectSchema{s}
@@ -138,7 +136,7 @@ To print schema metadata properties, use the '--print-metadata' flag.
 				out.MaybeDie(err, "unable to read %q: %v", err)
 				t, err := resolveSchemaType(schemaType, schemaFile)
 				out.MaybeDieErr(err)
-				qualified := schemaregistry.QualifySubject(schemaCtx, args[0])
+				qualified := schemaregistry.QualifySubject(*schemaCtx, args[0])
 				s, err := cl.LookupSchema(cmd.Context(), qualified, sr.Schema{
 					Schema: string(file),
 					Type:   t,
@@ -148,7 +146,7 @@ To print schema metadata properties, use the '--print-metadata' flag.
 			}
 
 			for i := range ss {
-				ss[i].Subject = schemaregistry.StripContextQualifier(schemaCtx, ss[i].Subject)
+				ss[i].Subject = schemaregistry.StripContextQualifier(*schemaCtx, ss[i].Subject)
 			}
 			if printSchema {
 				printSchemaString(ss)
