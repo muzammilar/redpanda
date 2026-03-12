@@ -291,7 +291,7 @@ class Grafana:
         self,
         binary: Path,
         directory: Path,
-        port: int = 3000,
+        port: int,
         prometheus_url: str | None = None,
     ) -> None:
         self.binary = binary
@@ -613,6 +613,12 @@ async def main() -> None:
         default=True,
     )
     parser.add_argument(
+        "--grafana-port",
+        type=int,
+        help="grafana listening port",
+        default=3000,
+    )
+    parser.add_argument(
         "--config-overrides",
         type=str,
         help="JSON dictionary of config overrides to apply to all nodes",
@@ -765,6 +771,7 @@ async def main() -> None:
         grafana = Grafana(
             args.grafana,
             grafana_dir,
+            port=args.grafana_port,
             prometheus_url=prometheus_url,
         )
         grafana_task = asyncio.create_task(grafana.run())
