@@ -25,6 +25,24 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "debug_writer",
+    srcs = [
+        "debug_writer.cc",
+    ],
+    hdrs = [
+        "debug_writer.h",
+    ],
+    implementation_deps = [
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":debug_serde",
+        ":write_batch_row",
+        "//src/v/container:chunked_vector",
+    ],
+)
+
+redpanda_cc_library(
     name = "keys",
     srcs = [
         "keys.cc",
