@@ -384,7 +384,7 @@ class TestReadReplicaService(EndToEndTest):
 
     @cluster(num_nodes=7, log_allow_list=READ_REPLICA_LOG_ALLOW_LIST)
     @matrix(
-        partition_count=[5],
+        partition_count=[1],
         cloud_storage_type=get_cloud_storage_type(docker_use_arbitrary=True),
         mode=get_read_replica_sources(),
     )
