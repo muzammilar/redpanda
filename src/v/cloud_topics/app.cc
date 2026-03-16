@@ -112,7 +112,9 @@ ss::future<> app::construct(
       ss::sharded_parameter(
         [&metadata_cache] { return &metadata_cache->local(); }),
       ss::sharded_parameter([this] { return &_l1_reader_probe.local(); }),
-      ss::sharded_parameter([this] { return &l1_reader_cache_.local(); }));
+      ss::sharded_parameter([this] { return &l1_reader_cache_.local(); }),
+      nullptr,
+      nullptr);
 
     co_await construct_service(
       topic_purge_manager,
