@@ -337,12 +337,14 @@ class Grafana:
         directory: Path,
         port: int,
         prometheus_url: str | None = None,
+        scrape_interval: str = "5s",
     ) -> None:
         self.binary = binary
         self.directory = directory
         self.stopped = False
         self.port = port
         self.prometheus_url = prometheus_url
+        self.scrape_interval = scrape_interval
         self.process: asyncio.subprocess.Process
 
     def stop(self) -> None:
@@ -383,6 +385,9 @@ class Grafana:
                         "url": self.prometheus_url,
                         "isDefault": True,
                         "editable": True,
+                        "jsonData": {
+                            "timeInterval": self.scrape_interval,
+                        },
                     }
                 ],
             }
@@ -845,6 +850,7 @@ async def main() -> None:
             grafana_dir,
             port=args.grafana_port,
             prometheus_url=prometheus_url,
+            scrape_interval=args.scrape_interval,
         )
         grafana_task = asyncio.create_task(grafana.run())
 
