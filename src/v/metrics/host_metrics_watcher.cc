@@ -53,6 +53,15 @@ struct resolved_devices {
     std::vector<diskstats_entry> partitions;
     std::vector<diskstats_entry> disks;
     std::unordered_set<ss::sstring> filter;
+
+    // Per-directory resolution results (empty string if resolution failed)
+    ss::sstring data_device;
+    ss::sstring cache_device;
+
+    // Filesystem device IDs (st_dev) for data/cache directories, used to look
+    // up Seastar IO queues. 0 if resolution failed.
+    dev_t data_dev_id{0};
+    dev_t cache_dev_id{0};
 };
 
 namespace {
@@ -161,6 +170,7 @@ host_metrics_watcher::host_metrics_watcher(
       [this]() { setup_snmp_metrics(); });
 
     setup_io_queue_config_metrics(devices.partitions);
+    setup_info_metric(devices);
 }
 
 void host_metrics_watcher::setup_diskstats_metrics(
@@ -538,10 +548,13 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
     };
 
     if (data) {
+        result.data_device = data->partition;
         add_entry(result.partitions, data->partition, data->disk, true, false);
         add_entry(result.disks, data->disk, {}, true, false);
     }
     if (cache) {
+        result.cache_device = cache->partition;
+        result.cache_dev_id = cache->dev_id;
         add_entry(
           result.partitions, cache->partition, cache->disk, false, true);
         add_entry(result.disks, cache->disk, {}, false, true);
@@ -679,6 +692,47 @@ void host_metrics_watcher::setup_io_queue_config_metrics(
               labels),
           });
     }
+}
+
+void host_metrics_watcher::setup_info_metric(const resolved_devices& devices) {
+    // Constant gauge (always 1) with labels describing the host metrics
+    // configuration. Useful for joining with other metrics in dashboards.
+    auto data_resolved = !devices.data_device.empty();
+    auto cache_resolved = !devices.cache_device.empty();
+    auto same_partition = data_resolved && cache_resolved
+                          && devices.data_device == devices.cache_device;
+
+    // Check if the data dir has a non-default IO queue (id > 0 means
+    // explicit io-properties were provided for this device).
+    bool data_has_io_queue = false;
+    if (data_resolved) {
+        try {
+            auto& queue = ss::engine().get_io_queue(devices.data_dev_id);
+            data_has_io_queue = queue.get_config().id > 0;
+        } catch (...) {
+            // No IO queue for this device — leave as false
+        }
+    }
+
+    auto lbl = [](const char* name) { return seastar::metrics::label(name); };
+
+    const std::vector<seastar::metrics::label_instance> labels = {
+      lbl("data_device")(data_resolved ? devices.data_device : ""),
+      lbl("cache_device")(cache_resolved ? devices.cache_device : ""),
+      lbl("data_resolved")(data_resolved ? "1" : "0"),
+      lbl("cache_resolved")(cache_resolved ? "1" : "0"),
+      lbl("same_partition")(same_partition ? "1" : "0"),
+      lbl("data_has_io_queue")(data_has_io_queue ? "1" : "0"),
+    };
+
+    _metrics.add_group(
+      "host_metrics",
+      {seastar::metrics::make_gauge(
+        "info",
+        [] { return 1; },
+        seastar::metrics::description(
+          "Host metrics configuration info (constant 1)"),
+        labels)});
 }
 
 } // namespace metrics

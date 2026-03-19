@@ -125,6 +125,11 @@ private:
     void setup_io_queue_config_metrics(
       const std::vector<diskstats_entry>& partition_entries);
 
+    // Register a constant gauge (value 1) with labels describing the
+    // host metrics configuration: resolved device names, whether resolution
+    // succeeded, shared-partition status, and IO queue assignment.
+    void setup_info_metric(const resolved_devices& devices);
+
     ss::logger& _logger;
 
     // All device names to include when parsing /proc/diskstats.
