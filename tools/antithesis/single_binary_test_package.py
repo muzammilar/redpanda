@@ -346,7 +346,6 @@ def build_workload_image(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx = Path(tmpdir)
-        binary_names = [b.name for b in binaries]
 
         # Bazel's output tree is all symlinks which Docker can't follow).
         # So for at least the shared libraries we're copying them into a
@@ -390,7 +389,6 @@ def build_workload_image(
                 data_files=data_files,
                 bin_paths=bin_paths,
                 driver_dir=DRIVER_DIR,
-                binary_names=binary_names,
             )
         )
 
