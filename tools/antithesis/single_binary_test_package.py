@@ -117,18 +117,34 @@ _cquery_extra_args: list[str] = []
 
 
 def _cquery_file(label: str) -> str:
-    """Resolve a bazel label to its output file path, with caching."""
+    """Resolve a bazel label to its output file path, with caching.
+
+    For built targets, uses cquery to get the output path. For source
+    files (which cquery can't resolve), falls back to locating the file
+    directly in the workspace.
+    """
     if label not in _cquery_cache:
         result = run(
             ["bazel", "cquery", "--output=files"] + _cquery_extra_args + [label],
             capture=True,
+            check=False,
         )
-        _cquery_cache[label] = result.stdout.strip().splitlines()[-1]
+        if result.returncode == 0 and result.stdout.strip():
+            _cquery_cache[label] = result.stdout.strip().splitlines()[-1]
+        else:
+            # Source file — resolve from workspace. Labels like
+            # ":foo" or "//pkg:foo" map to <pkg>/<name> in the repo.
+            pkg, name = parse_bazel_target(label)
+            src_path = pkg + "/" + name if pkg else name
+            if not (REPO_ROOT / src_path).exists():
+                sys.exit(f"Error: cannot resolve label {label}")
+            _cquery_cache[label] = src_path
     return _cquery_cache[label]
 
 
 def resolve_rootpaths(
     env: dict[str, str],
+    pkg: str,
 ) -> tuple[dict[str, str], dict[str, Path]]:
     """Resolve $(rootpath <label>) references in env var values.
 
@@ -147,7 +163,9 @@ def resolve_rootpaths(
 
         new_value = value
         for label in labels:
-            rel_path = _cquery_file(label)
+            # Qualify relative labels (e.g. ":foo") with the target's package.
+            qualified = f"//{pkg}:{label[1:]}" if label.startswith(":") else label
+            rel_path = _cquery_file(qualified)
             local_path = REPO_ROOT / rel_path
             new_value = new_value.replace(
                 f"$(rootpath {label})", f"{DATA_DIR}/{rel_path}"
@@ -305,7 +323,7 @@ def collect_binary_info(
             print(f"    Skipping {target} (not built)")
             continue
         env = {k: v for k, v in ti.env.items() if k not in _EXCLUDED_ENV}
-        env, data_files = resolve_rootpaths(env)
+        env, data_files = resolve_rootpaths(env, pkg)
         binaries.append(
             BinaryInfo(
                 label=target,
