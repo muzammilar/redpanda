@@ -496,6 +496,8 @@ def main() -> None:
     binaries = collect_binary_info(
         targets, target_info, args.binary_args, args.log_level
     )
+    if not binaries:
+        sys.exit("Error: no binaries found. Run without --skip-bazel-build?")
 
     # Build workload image.
     build_workload_image(binaries, image_tag)
