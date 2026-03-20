@@ -205,9 +205,11 @@ def query_seastar_targets(patterns: list[str]) -> set[str]:
 
 def resolve_and_query_targets(
     patterns: list[str],
+    tests_only: bool = False,
 ) -> tuple[list[str], dict[str, TargetInfo]]:
     """Resolve patterns and query target info in a single bazel query."""
-    query_expr = "kind('cc_test|cc_binary', set(" + " ".join(patterns) + "))"
+    kind_filter = "cc_test" if tests_only else "cc_test|cc_binary"
+    query_expr = f"kind('{kind_filter}', set(" + " ".join(patterns) + "))"
     print("==> Resolving and querying targets")
     result = run(["bazel", "query", "--output=xml", query_expr], capture=True)
 
@@ -456,10 +458,17 @@ def main() -> None:
         action="store_true",
         help="Skip bazel build, use existing artifacts",
     )
+    parser.add_argument(
+        "--tests-only",
+        action="store_true",
+        help="Only package cc_test targets, excluding cc_binary",
+    )
     args = parser.parse_args()
 
     # Resolve patterns and query target info.
-    targets, target_info = resolve_and_query_targets(args.targets)
+    targets, target_info = resolve_and_query_targets(
+        args.targets, tests_only=args.tests_only
+    )
 
     _, first_name = parse_bazel_target(targets[0])
     target_name = args.name or first_name
