@@ -60,6 +60,7 @@ redpanda_cc_library(
         "//src/v/lsm/core/internal:logger",
         "//src/v/lsm/core/internal:merging_iterator",
         "//src/v/lsm/sst:builder",
+        "//src/v/ssx:future_util",
         "@fmt",
     ],
     deps = [
