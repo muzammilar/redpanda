@@ -453,6 +453,11 @@ def main() -> None:
         default="",
         help="Override default log level (e.g. warn, error, info)",
     )
+    parser.add_argument(
+        "--skip-bazel-build",
+        action="store_true",
+        help="Skip bazel build, use existing artifacts",
+    )
     args = parser.parse_args()
 
     # Resolve patterns and query target info.
@@ -473,7 +478,8 @@ def main() -> None:
         extra_bazel_args.append("--config=antithesis")
 
     # Build all targets.
-    build_targets(args.targets, extra_bazel_args)
+    if not args.skip_bazel_build:
+        build_targets(args.targets, extra_bazel_args)
 
     # Ensure cquery uses the same config as the build so resolved
     # output paths match (e.g. k8-opt vs k8-fastbuild).
