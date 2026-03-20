@@ -440,7 +440,7 @@ ss::future<> impl::do_compaction() {
       &_snapshots,
       _versions.get(),
       _opts,
-      std::move(compact.value()),
+      compact->get(),
       &_as);
     m->stop();
     co_await apply_edits(std::move(edit));

@@ -179,7 +179,7 @@ public:
 
     // Pick level and inputs for a new compaction run.
     // Returns std::nullopt if there is no compaction.
-    std::optional<compaction> pick_compaction();
+    ss::optimized_optional<std::unique_ptr<compaction>> pick_compaction();
 
     // Create an iterator that reads over the compaction inputs.
     ss::future<std::unique_ptr<internal::iterator>>
@@ -221,7 +221,20 @@ private:
 
 // Encapulate information about a compaction event.
 class compaction {
+    // A private struct so that the constructor can only be used
+    // internal to version (or friended classes).
+    struct ctor {};
+
 public:
+    compaction(
+      ctor,
+      ss::lw_shared_ptr<internal::options> options,
+      ss::lw_shared_ptr<version_edit> edit,
+      internal::level level)
+      : _level(level)
+      , _edit(std::move(edit))
+      , _level_ptrs(/*n=*/options->levels.size(), /*val=*/0) {}
+
     // Return the level that is being compacted.  Inputs from "level"
     // and "level+1" will be merged to produce a set of "level+1" files.
     internal::level level() const { return _level; }
@@ -266,14 +279,6 @@ public:
 private:
     friend class version;
     friend class version_set;
-
-    compaction(
-      ss::lw_shared_ptr<internal::options> options,
-      ss::lw_shared_ptr<version_edit> edit,
-      internal::level level)
-      : _level(level)
-      , _edit(std::move(edit))
-      , _level_ptrs(/*n=*/options->levels.size(), /*val=*/0) {}
 
     internal::level _level;
     uint64_t _max_output_file_size = 0;

@@ -264,7 +264,8 @@ private:
 
 version::version(ctor, version_set* vset)
   : _vset(vset)
-  , _files(_vset->_options->levels.size()) {}
+  , _files(_vset->_options->levels.size())
+  , _compaction_scores(_vset->_options->levels.size(), 0.0) {}
 
 ss::future<> version::add_iterators(
   chunked_vector<std::unique_ptr<internal::iterator>>* iters) {
@@ -764,9 +765,10 @@ bool version_set::needs_compaction() const {
     return _current->_compaction_score >= 1 || _current->_file_to_compact;
 }
 
-std::optional<compaction> version_set::pick_compaction() {
+ss::optimized_optional<std::unique_ptr<compaction>>
+version_set::pick_compaction() {
     internal::level level;
-    std::optional<compaction> c;
+    std::unique_ptr<compaction> c;
     using which = compaction::which;
     // We prefer compactions triggered by too much data in a level over
     // compactions triggered by seeks.
@@ -777,7 +779,8 @@ std::optional<compaction> version_set::pick_compaction() {
         vassert(
           level() + 1 < _options->levels.size(),
           "cannot compact the bottom-most level");
-        c.emplace(compaction(_options, new_edit(), level));
+        c = std::make_unique<compaction>(
+          compaction::ctor{}, _options, new_edit(), level);
         // Pick the first file that comes after _compact_pointer[level]
         for (const auto& f : _current->_files[level]) {
             const auto& key = _compact_pointer[level];
@@ -793,7 +796,8 @@ std::optional<compaction> version_set::pick_compaction() {
         }
     } else if (seek_compaction) {
         level = _current->_file_to_compact_level;
-        c.emplace(compaction(_options, new_edit(), level));
+        c = std::make_unique<compaction>(
+          compaction::ctor{}, _options, new_edit(), level);
         c->_inputs[which::input_level].push_back(*_current->_file_to_compact);
     } else {
         return std::nullopt;

@@ -528,9 +528,10 @@ TEST_F(CompactionTest, PickCompactionLevel0ToLevel1) {
     add_file(1_level, 10_file_id, "b"_key, "f"_key);
     add_file(1_level, 11_file_id, "g"_key, "k"_key);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // L0 compaction includes all overlapping files
     EXPECT_THAT(input_file_ids(*c), ElementsAre(1_file_id));
@@ -546,9 +547,10 @@ TEST_F(CompactionTest, TrivialMove) {
     add_file(0_level, 4_file_id, "n"_key, "z"_key);
 
     // L1 has no files - first file can be trivially moved
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     EXPECT_THAT(input_file_ids(*c), ElementsAre(1_file_id));
     EXPECT_THAT(output_file_ids(*c), IsEmpty());
@@ -567,9 +569,10 @@ TEST_F(CompactionTest, OverlappingL0Files) {
     // Add overlapping file in L1
     add_file(1_level, 10_file_id, "d"_key, "h"_key);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // Should include all overlapping L0 files: starts with file 1, which
     // overlaps with file 2, which overlaps with file 3
@@ -599,9 +602,10 @@ TEST_F(CompactionTest, Level1ToLevel2Compaction) {
     // Add overlapping file in L2
     add_file(2_level, 100_file_id, "aa"_key, "ac"_key);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 1_level); // L1→L2 compaction
     // Expansion picks both file 1 and 2 since they both overlap with
     // the same L2 file and fit within the expansion byte limit
@@ -623,9 +627,10 @@ TEST_F(CompactionTest, GrandparentOverlapTracking) {
     add_file(2_level, 20_file_id, "a"_key, "c"_key);
     add_file(2_level, 21_file_id, "d"_key, "e"_key);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // Expansion picks both file 1 and 2 since they both overlap with
     // the same L1 file and fit within the expansion byte limit.
@@ -647,9 +652,10 @@ TEST_F(CompactionTest, InputExpansion) {
     // L1 file that covers both file 1 and file 2
     add_file(1_level, 10_file_id, "a"_key, "g"_key, 100);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // Expansion should pick both files 1 and 2 since they both overlap with
     // the same L1 file and fit within the expansion limit
@@ -671,9 +677,10 @@ TEST_F(CompactionTest, NoExpansionWhenOutputLevelGrows) {
     add_file(1_level, 10_file_id, "a"_key, "c"_key, 100);
     add_file(1_level, 11_file_id, "d"_key, "f"_key, 100);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // Only file 1 should be selected; expansion would add file 2 but also
     // require adding L1 file 11, so it's rejected
@@ -693,9 +700,10 @@ TEST_F(CompactionTest, BoundaryKeyHandling) {
     add_file(
       1_level, 11_file_id, "e"_key, "g"_key); // Starts at 'e' like file 2
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // Should include file 1 from L0
     EXPECT_THAT(input_file_ids(*c), ElementsAre(1_file_id));
@@ -712,7 +720,7 @@ TEST_F(CompactionTest, NoCompactionBelowThreshold) {
     auto c = version_set().pick_compaction();
 
     // No compaction should be triggered
-    EXPECT_FALSE(c.has_value());
+    EXPECT_FALSE(c);
 }
 
 TEST_F(CompactionTest, SameUserKeyDifferentSeqnosOverlap) {
@@ -739,9 +747,10 @@ TEST_F(CompactionTest, SameUserKeyDifferentSeqnosOverlap) {
     // File 11: "apple" at seqno 50 (could be a tombstone)
     add_file(1_level, 11_file_id, "apple@50"_key, "apple@50"_key);
 
-    auto c = version_set().pick_compaction();
+    auto maybe_c = version_set().pick_compaction();
 
-    ASSERT_TRUE(c.has_value());
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 0_level);
     // File 1 from L0 should be selected
     EXPECT_THAT(input_file_ids(*c), ElementsAre(1_file_id));
@@ -789,8 +798,9 @@ TEST_F(CompactionTest, CompactionPointerRespected) {
     version_set().log_and_apply(std::move(edit)).get();
 
     // Next compaction should pick file 3 or later, not file 1 or 2
-    auto c = version_set().pick_compaction();
-    ASSERT_TRUE(c.has_value());
+    auto maybe_c = version_set().pick_compaction();
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
     EXPECT_EQ(c->level(), 1_level);
     // Should pick file 3 (first file after the compact pointer at "d")
     EXPECT_THAT(input_file_ids(*c), ElementsAre(3_file_id));

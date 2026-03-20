@@ -107,30 +107,30 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
   snapshot_list* snapshots,
   version_set* versions,
   ss::lw_shared_ptr<internal::options> opts,
-  compaction compaction,
+  compaction* compaction,
   ss::abort_source* as) {
-    auto input_level = compaction.level();
+    auto input_level = compaction->level();
     auto output_level = input_level + 1_level;
     auto num_input_files
-      = compaction.num_input_files(compaction::which::input_level)
-        + compaction.num_input_files(compaction::which::output_level);
+      = compaction->num_input_files(compaction::which::input_level)
+        + compaction->num_input_files(compaction::which::output_level);
     vlog(
       log.trace,
       "compaction_start input_level={} output_level={} input_files={}",
       input_level,
       output_level,
       num_input_files);
-    if (compaction.is_trivial_move()) {
-        auto input_level_files = compaction.num_input_files(
+    if (compaction->is_trivial_move()) {
+        auto input_level_files = compaction->num_input_files(
           compaction::which::input_level);
         vassert(
           input_level_files == 1,
           "trivial compactions should only be for a single input file: {}",
           input_level_files);
-        auto file = compaction.input(compaction::which::input_level, 0);
-        compaction.edit()->remove_file(compaction.level(), file->handle);
-        compaction.edit()->add_file({
-          .level = compaction.level() + 1_level,
+        auto file = compaction->input(compaction::which::input_level, 0);
+        compaction->edit()->remove_file(compaction->level(), file->handle);
+        compaction->edit()->add_file({
+          .level = compaction->level() + 1_level,
           .file_handle = file->handle,
           .file_size = file->file_size,
           .smallest = file->smallest,
@@ -145,7 +145,7 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
           input_level,
           output_level,
           file->file_size);
-        co_return compaction.edit();
+        co_return compaction->edit();
     }
     compaction_state state{
       // We need to preserve intermediate data between snapshots so we can
@@ -164,14 +164,14 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
       .compression = opts->levels[output_level].compression,
     };
     try {
-        auto input = co_await versions->make_input_iterator(&compaction);
+        auto input = co_await versions->make_input_iterator(compaction);
         std::optional<internal::key> current_key;
         internal::sequence_number last_seqno_for_key
           = internal::sequence_number::max();
         co_await input->seek_to_first();
         while (input->valid() && !as->abort_requested()) {
             auto key = input->key();
-            if (compaction.should_stop_before(key) && state.builder) {
+            if (compaction->should_stop_before(key) && state.builder) {
                 co_await state.finish_current_builder();
             }
             bool drop = false;
@@ -187,7 +187,7 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
                 drop = true;
             } else if (
               key.is_tombstone() && key_seqno <= state.smallest_snapshot
-              && compaction.is_base_level_for_key(key)) {
+              && compaction->is_base_level_for_key(key)) {
                 // For this user key:
                 // (1) there is no data in higher levels
                 // (2) data in lower levels will have larger sequence numbers
@@ -201,7 +201,7 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
             last_seqno_for_key = key_seqno;
             if (!drop) {
                 if (!state.builder) {
-                    auto id = compaction.edit()->allocate_id();
+                    auto id = compaction->edit()->allocate_id();
                     vlog(log.trace, "compaction_start_new_file file_id={}", id);
                     co_await state.open_current_builder(
                       {
@@ -232,11 +232,11 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
         state.err = std::make_exception_ptr(ex);
     }
     co_await state.finish();
-    auto edit = compaction.edit();
-    compaction.add_input_deletions(edit.get());
+    auto edit = compaction->edit();
+    compaction->add_input_deletions(edit.get());
     for (auto& output : state.outputs) {
         edit->add_file({
-          .level = compaction.level() + 1_level,
+          .level = compaction->level() + 1_level,
           .file_handle = output.handle,
           .file_size = output.file_size,
           .smallest = std::move(output.smallest),
@@ -263,7 +263,7 @@ ss::future<ss::lw_shared_ptr<version_edit>> run_compaction_task(
   snapshot_list* snapshots,
   version_set* versions,
   ss::lw_shared_ptr<internal::options> opts,
-  compaction compaction,
+  compaction* compaction,
   ss::abort_source* as) {
     try {
         co_return co_await do_run_compaction_task(
