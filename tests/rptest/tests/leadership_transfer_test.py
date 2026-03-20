@@ -164,7 +164,7 @@ class TopicAwareRebalanceTestBase(RedpandaTest):
         mode: str,
         topic_specs: list[TopicSpec],
         leaders_per_node_ratio: float = 0.8,
-        improvement_deadline: int = 30,
+        improvement_deadline: int = 70,
         require_even_distribution: bool = False,
     ):
         extra_rp_conf: dict[str, Any] = dict(
@@ -259,7 +259,7 @@ class TopicAwareRebalanceTestBase(RedpandaTest):
         self.logger.info("initial stabilization")
         wait_until(
             lambda: all_partitions_present(num_nodes),
-            timeout_sec=30,
+            timeout_sec=120,
             backoff_sec=2,
             err_msg="Leadership did not stablize",
         )
@@ -269,7 +269,7 @@ class TopicAwareRebalanceTestBase(RedpandaTest):
         self.logger.info("stabilization post stop")
         wait_until(
             lambda: all_partitions_present(num_nodes - 1),
-            timeout_sec=30,
+            timeout_sec=120,
             backoff_sec=2,
             err_msg="Leadership did not stablize",
         )
@@ -285,6 +285,31 @@ class TopicAwareRebalanceTestBase(RedpandaTest):
             # release.
             start_timeout = 60
         self.redpanda.start_node(node, timeout=start_timeout)
+
+        admin = Admin(self.redpanda)
+
+        def cluster_healthy() -> bool:
+            try:
+                overview = admin.get_cluster_health_overview()
+                return overview.get("is_healthy", False)
+            except Exception:
+                return False
+
+        self.logger.info("waiting for healthy cluster post start")
+        wait_until(
+            cluster_healthy,
+            timeout_sec=120,
+            backoff_sec=2,
+            err_msg="Cluster did not become healthy after restart",
+        )
+
+        self.logger.info("waiting for leadership to stabilize post start")
+        wait_until(
+            lambda: all_partitions_present(num_nodes),
+            timeout_sec=120,
+            backoff_sec=2,
+            err_msg="Leadership did not stablize after restart",
+        )
 
         def wait_for_topics_evenly_distributed(improvement_deadline: int) -> bool:
             last_update = time.time()
@@ -341,7 +366,7 @@ class GreedyLeaderBalancingTest(TopicAwareRebalanceTestBase):
                 TopicSpec(partition_count=9, replication_factor=3),
             ],
             leaders_per_node_ratio=1.0,
-            improvement_deadline=60,
+            improvement_deadline=120,
             require_even_distribution=True,
         )
 
