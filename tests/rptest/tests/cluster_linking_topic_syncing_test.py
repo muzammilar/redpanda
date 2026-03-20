@@ -8,6 +8,7 @@
 # by the Apache License, Version 2.0
 
 from ducktape.cluster.cluster import ClusterNode
+from ducktape.mark import matrix
 from ducktape.services.service import Service
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import shadow_link_pb2
 from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2, tls_pb2
