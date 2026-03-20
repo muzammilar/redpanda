@@ -17,6 +17,7 @@
 #include "cluster/controller_stm.h"
 #include "cluster/errc.h"
 #include "cluster/logger.h"
+#include "config/configuration.h"
 #include "raft/notification.h"
 #include "ssx/abort_source.h"
 #include "ssx/future-util.h"
@@ -537,6 +538,9 @@ bool cluster_epoch_service<Clock>::cache_entry_expired() const noexcept {
 }
 template<typename Clock>
 bool cluster_epoch_service<Clock>::cache_entry_needs_updated() const noexcept {
+    const auto max_same_epoch_cache_duration
+      = config::shard_local_cfg()
+          .cloud_topics_epoch_service_max_same_epoch_duration();
     return Clock::now() > (_epoch_updated_time + max_same_epoch_cache_duration)
            || Clock::now()
                 > (_cached_epoch_time + max_same_epoch_cache_duration);

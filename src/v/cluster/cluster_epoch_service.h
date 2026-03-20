@@ -55,12 +55,6 @@ class cluster_epoch_service
     class raft0_state;
 
 public:
-    // TODO(cloud-topics): make these configuration knobs.
-    // Maximum amount of time to cache the same epoch before we block on the
-    // update.
-    constexpr static ss::lowres_clock::duration max_same_epoch_cache_duration
-      = 24 * 60min;
-
     cluster_epoch_service(
       model::node_id, ss::sharded<rpc::connection_cache>*) noexcept;
     // **For testing** support injecting a custom "remote fetch epoch" function.
