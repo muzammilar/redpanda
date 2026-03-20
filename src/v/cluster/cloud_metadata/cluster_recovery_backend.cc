@@ -366,11 +366,13 @@ ss::future<cluster::errc> cluster_recovery_backend::do_action(
                 auto& topic_label = topic_cfg.properties.remote_label;
                 if (topic_cfg.properties.remote_label != metastore_label) {
                     vlog(
-                      clusterlog.error,
-                      "Cannot create a recovery cloud topic with label {} when "
-                      "metastore label is {}",
+                      clusterlog.warn,
+                      "Skipping cloud topic {} with label {} (metastore "
+                      "label is {})",
+                      topic_cfg.tp_ns,
                       topic_label,
                       metastore_label);
+                    continue;
                 }
 
                 // Query metastore for bootstrap params and set them before
