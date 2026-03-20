@@ -83,15 +83,16 @@ TEST(DeviceUtils, DeviceForPathRootDirectory) {
         GTEST_SKIP() << "root device has major 0 (likely overlay/container)";
     }
 
-    auto device = device_resolver::device_for_path("/");
-    EXPECT_FALSE(device.empty());
+    auto resolved = device_resolver::device_for_path("/");
+    EXPECT_FALSE(resolved.name.empty());
+    EXPECT_NE(resolved.dev_id, 0);
 
     // The partition device should start with its base device name
     // (e.g. sda3 starts with sda, nvme0n1p5 starts with nvme0n1).
-    auto base = device_resolver::get_base_device(device);
-    EXPECT_TRUE(device.starts_with(base))
-      << "partition device '" << device << "' should start with base '" << base
-      << "'";
+    auto base = device_resolver::get_base_device(resolved.name);
+    EXPECT_TRUE(resolved.name.starts_with(base))
+      << "partition device '" << resolved.name << "' should start with base '"
+      << base << "'";
 }
 
 TEST(DeviceUtils, DeviceForPathNonExistent) {
@@ -108,8 +109,8 @@ TEST(DeviceUtils, DeviceForPathBaseDeviceConsistency) {
     }
 
     // get_base_device(device_for_path(path)) should yield a valid base device
-    auto device = device_resolver::device_for_path("/");
-    auto base = device_resolver::get_base_device(device);
+    auto resolved = device_resolver::device_for_path("/");
+    auto base = device_resolver::get_base_device(resolved.name);
     EXPECT_FALSE(base.empty());
 
     // Common root devices (one of these should match)

@@ -26,7 +26,8 @@
 
 namespace utils {
 
-ss::sstring device_resolver::device_for_path(const ss::sstring& path) {
+device_resolver::resolved_device
+device_resolver::device_for_path(const ss::sstring& path) {
     struct stat st{};
     if (stat(path.c_str(), &st) != 0) {
         throw std::runtime_error(
@@ -55,7 +56,7 @@ ss::sstring device_resolver::device_for_path(const ss::sstring& path) {
             target.string()));
     }
 
-    return ss::sstring{device_name};
+    return {.name = ss::sstring{device_name}, .dev_id = dev};
 }
 
 ss::sstring

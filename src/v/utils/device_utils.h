@@ -14,6 +14,7 @@
 #include <seastar/core/sstring.hh>
 
 #include <base/seastarx.h>
+#include <sys/types.h>
 
 namespace utils {
 
@@ -24,26 +25,32 @@ namespace utils {
  */
 class device_resolver {
 public:
+    struct resolved_device {
+        ss::sstring name; // device name (e.g., "sda3", "nvme0n1p1")
+        dev_t dev_id;     // device ID from stat(2) st_dev
+    };
+
     /**
-     * Resolve a filesystem path to its device name, i.e., the name
-     * of the device stat(2) returns. This device will generally be a
-     * partition, not the whole disk (unless you didn't partition your
-     * disk).
+     * Resolve a filesystem path to its device name and device ID.
      *
-     * It returns only the device name, NOT prefixed with /dev/.
+     * The device name is the name of the block device that stat(2)
+     * returns for the path. This will generally be a partition, not
+     * the whole disk (unless you didn't partition your disk).
+     *
+     * The device name is NOT prefixed with /dev/.
      *
      * @param path Directory path to resolve
-     * @return Device name (e.g., "sda3", "nvme0n1p1")
+     * @return Device name and dev_t
      * @throws std::runtime_error if the path cannot be resolved to a
      *         block device (e.g. inaccessible path, overlay/tmpfs
      *         filesystem, loop device)
      *
      * Examples:
-     * - "/var/lib/redpanda" on /dev/sda3 -> "sda3"
-     * - "/mnt/vectorized" on /dev/nvme0n1p1 -> "nvme0n1p1"
-     * - Path on whole-disk filesystem -> "sda" (no partition to strip)
+     * - "/var/lib/redpanda" on /dev/sda3 -> {"sda3", <dev_t>}
+     * - "/mnt/vectorized" on /dev/nvme0n1p1 -> {"nvme0n1p1", <dev_t>}
+     * - Path on whole-disk filesystem -> {"sda", <dev_t>}
      */
-    static ss::sstring device_for_path(const ss::sstring& path);
+    static resolved_device device_for_path(const ss::sstring& path);
 
     /**
      * Strip partition number from a device name to get the base device.
