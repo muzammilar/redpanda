@@ -23,7 +23,7 @@ If this PR is a backport, link to the original with `Backport of PR`, e.g.
 - [ ] none - papercut/not impactful enough to backport
 - [ ] v25.3.x
 - [ ] v25.2.x
-- [ ] v25.1.x
+- [ ] v26.1.x
 
 ## Release Notes
 
