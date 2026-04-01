@@ -504,6 +504,70 @@ SEASTAR_THREAD_TEST_CASE(test_next_chunk_allocation_append_iobuf) {
     BOOST_REQUIRE_EQUAL(scattered_size(msg), sz);
 }
 
+SEASTAR_THREAD_TEST_CASE(test_iobuf_to_buffer_vector_empty) {
+    iobuf buf;
+    auto bufs = iobuf_to_buffer_vector(std::move(buf));
+    BOOST_CHECK(bufs.empty());
+    BOOST_CHECK_EQUAL(scattered_size(bufs), 0);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_iobuf_to_buffer_vector_multi_fragment) {
+    // Build an iobuf with two distinct fragments using append_fragments
+    iobuf a;
+    a.append("hello", 5);
+    iobuf b;
+    b.append(" world", 6);
+    a.append_fragments(std::move(b));
+
+    auto bufs = iobuf_to_buffer_vector(std::move(a));
+    BOOST_CHECK_GE(bufs.size(), 2);
+    BOOST_CHECK_EQUAL(scattered_size(bufs), 11);
+
+    // Linearize and check content
+    std::string linear;
+    for (auto& tb : bufs) {
+        linear.append(tb.get(), tb.size());
+    }
+    BOOST_CHECK_EQUAL(linear, "hello world");
+}
+
+SEASTAR_THREAD_TEST_CASE(test_buffer_vector_to_iobuf_empty) {
+    scattered_buffer bufs;
+    auto result = buffer_vector_to_iobuf(std::move(bufs));
+    BOOST_CHECK_EQUAL(result.size_bytes(), 0);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_buffer_vector_to_iobuf_roundtrip) {
+    // Create an iobuf, convert to buffer vector and back, check equality
+    const auto s = random_generators::gen_alphanum_string(1024);
+    iobuf original;
+    original.append(s.data(), s.size());
+    auto expected = original.copy();
+
+    auto bufs = iobuf_to_buffer_vector(std::move(original));
+    auto restored = buffer_vector_to_iobuf(std::move(bufs));
+    BOOST_CHECK_EQUAL(restored, expected);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_buffer_vector_to_iobuf_multi_fragment) {
+    scattered_buffer bufs;
+    bufs.emplace_back("abc", 3);
+    bufs.emplace_back("defgh", 5);
+    bufs.emplace_back("i", 1);
+    auto result = buffer_vector_to_iobuf(std::move(bufs));
+    BOOST_CHECK_EQUAL(result.size_bytes(), 9);
+
+    iobuf expected;
+    expected.append("abcdefghi", 9);
+    BOOST_CHECK_EQUAL(result, expected);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_scattered_size_single_buffer) {
+    scattered_buffer bufs;
+    bufs.emplace_back("hello", 5);
+    BOOST_CHECK_EQUAL(scattered_size(bufs), 5);
+}
+
 SEASTAR_THREAD_TEST_CASE(test_appending_frament_takes_ownership) {
     iobuf target;
     const auto b = random_generators::gen_alphanum_string(1024);
