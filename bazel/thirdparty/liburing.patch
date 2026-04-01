@@ -11,7 +11,7 @@
 +            # exposed by bazel, system ld gets used, which can't
 +            # resolve sysroot linker scripts in the sandbox.
 +            export LDFLAGS="-c"
- 
+
 -            # switch to the package dir to execute "configure" right there
 -            pushd $$(dirname $(location configure))
 -              mkdir -p src/include/liburing
@@ -27,7 +27,7 @@
 +            ln -sf $$pkg_dir/liburing.spec liburing.spec
 +            mkdir -p src/include/liburing
 +            $$pkg_dir/configure --use-libc
- 
+
              # collect the outputs
              for out in $(OUTS); do
 -              cp $$(realpath --relative-to=$(BINDIR) $$out) $$out
@@ -41,4 +41,12 @@
 +    ],
      tools = ["configure"],
  )
- 
+
+@@ -76,6 +89,7 @@
+         "-Wall",
+         "-Wextra",
+         "-fno-stack-protector",
++        "-Wno-unused-parameter",
+         "-include config-host.h",
+     ],
+     includes = ["src/include"],
