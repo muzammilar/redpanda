@@ -116,8 +116,7 @@ default_leaders_provider::ntps(ss::abort_source& as) {
         std::exception_ptr ep;
         try {
             co_await _leaders_table.local().for_each_leader(
-              [&ntps,
-               self_node_id](auto tp_ns, auto pid, auto node_id, auto) mutable {
+              [&ntps, self_node_id](auto tp_ns, auto pid, auto node_id, auto) {
                   if (node_id == self_node_id) {
                       ntps.insert(model::ntp{tp_ns.ns, tp_ns.tp, pid});
                   }
