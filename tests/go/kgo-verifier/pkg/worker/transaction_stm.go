@@ -112,3 +112,9 @@ func (t *TransactionSTM) BeforeMessageSent() (int64, error) {
 func (t *TransactionSTM) InAbortedTransaction() bool {
 	return t.abortedTransaction
 }
+
+// WillEndTransaction returns true if the next call to BeforeMessageSent
+// will end the current transaction (msgsPerTransaction has been reached).
+func (t *TransactionSTM) WillEndTransaction() bool {
+	return t.activeTransaction && t.currentMgsProduced == t.config.msgsPerTransaction
+}
