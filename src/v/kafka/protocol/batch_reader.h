@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "base/format_to.h"
 #include "bytes/iobuf.h"
 #include "kafka/protocol/kafka_batch_adapter.h"
 #include "model/fundamental.h"
@@ -73,13 +74,6 @@ public:
 
     // Release any remaining iobuf that hasn't been consumed
     iobuf release() && { return std::move(_buf); }
-
-    friend std::ostream&
-    operator<<(std::ostream& os, const batch_reader& reader) {
-        // NOTE: this stream is intentially devoid of user data.
-        fmt::print(os, "{{size {}}}", reader.size_bytes());
-        return os;
-    }
 
 private:
     iobuf _buf;
