@@ -34,6 +34,9 @@ redpanda_cc_library(
         "io_result.h",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+    ],
 )
 
 redpanda_cc_library(
