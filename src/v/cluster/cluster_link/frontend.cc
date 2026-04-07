@@ -27,6 +27,7 @@
 namespace cluster::cluster_link {
 
 using ::cluster_link::model::add_mirror_topic_cmd;
+using ::cluster_link::model::batch_update_mirror_topic_status_cmd;
 using ::cluster_link::model::delete_mirror_topic_cmd;
 using ::cluster_link::model::id_t;
 using ::cluster_link::model::metadata;
@@ -157,6 +158,19 @@ ss::future<errc> frontend::update_mirror_topic_status(
     }
     cluster_link_cmd c{
       cluster::cluster_link_update_mirror_topic_status_cmd(id, std::move(cmd))};
+    co_return co_await do_mutation(std::move(c), timeout);
+}
+
+ss::future<errc> frontend::batch_update_mirror_topic_status(
+  id_t id,
+  batch_update_mirror_topic_status_cmd cmd,
+  model::timeout_clock::time_point timeout) {
+    if (!cluster_linking_enabled()) {
+        co_return errc::feature_disabled;
+    }
+    cluster_link_cmd c{
+      cluster::cluster_link_batch_update_mirror_topic_status_cmd(
+        id, std::move(cmd))};
     co_return co_await do_mutation(std::move(c), timeout);
 }
 
@@ -438,6 +452,29 @@ ss::future<errc> frontend::dispatch_mutation_to_remote(
                         }
                         return result<void>(r.value().ec);
                     });
+              },
+              [client, timeout](
+                cluster::cluster_link_batch_update_mirror_topic_status_cmd
+                  cmd) mutable {
+                  return client
+                    .batch_update_mirror_topic_status(
+                      cluster::batch_update_mirror_topic_status_request{
+                        .link_id = cmd.key,
+                        .cmd = std::move(cmd.value),
+                        .timeout = timeout},
+                      rpc::client_opts(timeout))
+                    .then(&rpc::get_ctx_data<
+                          cluster::batch_update_mirror_topic_status_response>)
+                    .then(
+                      [](
+                        result<
+                          cluster::batch_update_mirror_topic_status_response>
+                          r) {
+                          if (r.has_error()) {
+                              return result<void>(r.error());
+                          }
+                          return result<void>(r.value().ec);
+                      });
               },
               [client, timeout](
                 cluster::cluster_link_update_mirror_topic_properties_cmd
@@ -800,6 +837,21 @@ errc frontend::validator::validate_mutation(const cluster_link_cmd& cmd) const {
             bool(cmd.value.force_update));
       },
       [this](
+        const cluster::cluster_link_batch_update_mirror_topic_status_cmd& cmd) {
+          auto meta = _table->find_link_by_id(cmd.key);
+          if (!meta) {
+              return errc::does_not_exist;
+          }
+          for (const auto& topic : cmd.value.topics) {
+              auto ec = validate_mirror_topic_status_update(
+                cmd.key, topic, cmd.value.status, false);
+              if (ec != errc::success) {
+                  return ec;
+              }
+          }
+          return errc::success;
+      },
+      [this](
         const cluster::cluster_link_update_mirror_topic_properties_cmd& cmd) {
           auto ec = model::validate_kafka_topic_name(cmd.value.topic);
           if (ec) {
@@ -1128,6 +1180,7 @@ ss::future<errc> frontend::failover_link_topics(
             topics_to_failover.push_back(t);
         }
     }
+
     chunked_vector<errc> errors;
     errors.reserve(topics_to_failover.size());
     co_await ss::max_concurrent_for_each(
