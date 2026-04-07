@@ -17,14 +17,14 @@ from ducktape.tests.test import TestContext
 from ducktape.utils.util import wait_until
 
 from rptest.cfr_tests.cfr_test_base import (
-    ControllerForcedReconfigurationTestBase,
+    LONG_TIMEOUT,
+    MEDIUM_TIMEOUT,
     NTP,
+    REALLY_LONG_TIMEOUT,
+    REALLY_SHORT_TIMEOUT,
+    SHORT_TIMEOUT,
+    ControllerForcedReconfigurationTestBase,
     TimeoutConfig,
-    long_timeout,
-    medium_timeout,
-    really_long_timeout,
-    really_short_timeout,
-    short_timeout,
 )
 from rptest.clients.kcl import KCL
 from rptest.clients.rpk import RpkTool
@@ -152,8 +152,8 @@ class ControllerForcedReconfigurationApiTestBase(
                         replication_factor=topic.replication_factor,
                         killed_node_ids=killed_node_ids,
                     ),
-                    timeout_sec=120,
-                    backoff_sec=1,
+                    timeout_sec=LONG_TIMEOUT.timeout_s,
+                    backoff_sec=LONG_TIMEOUT.backoff_s,
                 )
         return True
 
@@ -177,7 +177,7 @@ class ControllerForcedReconfigurationApiTestBase(
                 self.redpanda._admin.get_majority_lost_partitions_from_nodes(
                     dead_brokers=dead_node_ids,
                     node=node,
-                    timeout=medium_timeout.timeout_s,
+                    timeout=MEDIUM_TIMEOUT.timeout_s,
                 )
             )
             self.redpanda.logger.debug(
@@ -229,8 +229,8 @@ class ControllerForcedReconfigurationApiTestBase(
 
         wait_until(
             no_pending_force_reconfigurations,
-            timeout_sec=long_timeout.timeout_s,
-            backoff_sec=long_timeout.backoff_s,
+            timeout_sec=LONG_TIMEOUT.timeout_s,
+            backoff_sec=LONG_TIMEOUT.backoff_s,
             err_msg="reported force recovery count is non zero",
             retry_on_exc=True,
         )
@@ -241,7 +241,7 @@ class ControllerForcedReconfigurationApiTestBase(
             self.redpanda,
             decommissioned_id,
             self.logger,
-            progress_timeout=medium_timeout.timeout_s,
+            progress_timeout=MEDIUM_TIMEOUT.timeout_s,
         )
         waiter.wait_for_removal()
 
@@ -364,7 +364,7 @@ class ControllerForcedReconfiguration_SmokeTest(
         )
 
         killed, living = self._stop_majority_nodes(
-            ntp=controller_ntp, timeout=short_timeout, replication=cluster_size
+            ntp=controller_ntp, timeout=SHORT_TIMEOUT, replication=cluster_size
         )
 
         killed_node_ids = [dead_node.node_id for dead_node in killed]
@@ -379,7 +379,7 @@ class ControllerForcedReconfiguration_SmokeTest(
 
         self._toggle_recovery_mode(
             node=designated_survivor,
-            timeout=medium_timeout,
+            timeout=MEDIUM_TIMEOUT,
             recovery_mode_enabled=True,
         )
 
@@ -400,8 +400,8 @@ class ControllerForcedReconfiguration_SmokeTest(
         self.redpanda.logger.debug("waiting for controller to recover")
         wait_until(
             lambda: controller_available(),
-            timeout_sec=really_long_timeout.timeout_s,
-            backoff_sec=really_long_timeout.backoff_s,
+            timeout_sec=REALLY_LONG_TIMEOUT.timeout_s,
+            backoff_sec=REALLY_LONG_TIMEOUT.backoff_s,
             err_msg="Controller never came back",
         )
         self.redpanda.logger.debug("controller recovered")
@@ -415,7 +415,7 @@ class ControllerForcedReconfiguration_SmokeTest(
 
         self._toggle_recovery_mode(
             node=designated_survivor,
-            timeout=medium_timeout,
+            timeout=MEDIUM_TIMEOUT,
             recovery_mode_enabled=False,
         )
 
@@ -437,8 +437,8 @@ class ControllerForcedReconfiguration_SmokeTest(
             lambda: self._check_topic_recovered(
                 topic=topic, killed_node_ids=killed_node_ids
             ),
-            timeout_sec=really_long_timeout.timeout_s,
-            backoff_sec=really_long_timeout.backoff_s,
+            timeout_sec=REALLY_LONG_TIMEOUT.timeout_s,
+            backoff_sec=REALLY_LONG_TIMEOUT.backoff_s,
             retry_on_exc=True,
         )
 
@@ -491,8 +491,8 @@ class ControllerForcedReconfiguration_Size5(
         # wait until redpanda reports complete
         wait_until(
             condition=node_assignments_converged,
-            timeout_sec=medium_timeout.timeout_s,
-            backoff_sec=medium_timeout.backoff_s,
+            timeout_sec=MEDIUM_TIMEOUT.timeout_s,
+            backoff_sec=MEDIUM_TIMEOUT.backoff_s,
         )
 
     def __init__(self, test_context: TestContext, *args: Any, **kwargs: Any):
@@ -559,7 +559,7 @@ class ControllerForcedReconfiguration_Size5(
 
         """ setup 3: divide the cluster into a majority which will be destroyed, and a minority which will survive """
         to_kill, living = self._split_cluster(
-            ntp=controller_ntp, timeout=short_timeout, replication=cluster_size
+            ntp=controller_ntp, timeout=SHORT_TIMEOUT, replication=cluster_size
         )
         # derived lists for convenience
         killed_node_ids = [dead_node.node_id for dead_node in to_kill]
@@ -582,7 +582,7 @@ class ControllerForcedReconfiguration_Size5(
         self._pin_partition_to_dying_brokers(dead_node_ids=killed_node_ids, topic=topic)
 
         """ meat 1: kill majority"""
-        self._do_stop_nodes(ntp=controller_ntp, to_kill=to_kill, timeout=short_timeout)
+        self._do_stop_nodes(ntp=controller_ntp, to_kill=to_kill, timeout=SHORT_TIMEOUT)
         self.redpanda.logger.debug(
             f"killed nodes: {killed_node_ids}, living nodes: {living_node_ids}"
         )
@@ -593,7 +593,7 @@ class ControllerForcedReconfiguration_Size5(
         """ meat 2: reboot survivors into recovery mode"""
         self._bulk_toggle_recovery_mode(
             nodes=designated_survivors,
-            timeout=medium_timeout,
+            timeout=MEDIUM_TIMEOUT,
             recovery_mode_enabled=True,
         )
 
@@ -630,11 +630,11 @@ class ControllerForcedReconfiguration_Size5(
 
         """ meat 5: unset recovery mode"""
         self._bulk_toggle_recovery_mode(
-            self.redpanda.started_nodes(), medium_timeout, recovery_mode_enabled=False
+            self.redpanda.started_nodes(), MEDIUM_TIMEOUT, recovery_mode_enabled=False
         )
 
         wait_until(
-            controller_available, medium_timeout.timeout_s, medium_timeout.backoff_s
+            controller_available, MEDIUM_TIMEOUT.timeout_s, MEDIUM_TIMEOUT.backoff_s
         )
 
         """ meat 6: nodewise recovery"""
@@ -686,7 +686,7 @@ class ControllerForcedReconfiguration_Size5(
         # the new configuration version
         self.redpanda.set_cluster_config(
             {"raft_learner_recovery_rate": 1 << 30},
-            timeout=really_long_timeout.timeout_s,
+            timeout=REALLY_LONG_TIMEOUT.timeout_s,
         )
 
         """ validation 2: check that the created topic recovered"""
@@ -694,18 +694,18 @@ class ControllerForcedReconfiguration_Size5(
             lambda: self._check_topic_recovered(
                 topic=topic, killed_node_ids=killed_node_ids
             ),
-            timeout_sec=really_long_timeout.timeout_s,
-            backoff_sec=really_long_timeout.backoff_s,
+            timeout_sec=REALLY_LONG_TIMEOUT.timeout_s,
+            backoff_sec=REALLY_LONG_TIMEOUT.backoff_s,
             retry_on_exc=True,
         )
 
         """ validation 3: check that all partitions have quorum"""
         wait_until(
             lambda: self._no_majority_lost_partitions(
-                designated_survivors[0], killed_node_ids, really_short_timeout
+                designated_survivors[0], killed_node_ids, REALLY_SHORT_TIMEOUT
             ),
-            timeout_sec=long_timeout.timeout_s,
-            backoff_sec=long_timeout.backoff_s,
+            timeout_sec=LONG_TIMEOUT.timeout_s,
+            backoff_sec=LONG_TIMEOUT.backoff_s,
         )
 
         """ validation 4: check that we can produce again"""
@@ -717,7 +717,7 @@ class ControllerForcedReconfiguration_Size5(
             msg_count=3000,
         )
         producer.start(clean=True)
-        producer.wait(timeout_sec=medium_timeout.timeout_s)
+        producer.wait(timeout_sec=MEDIUM_TIMEOUT.timeout_s)
         status = producer.produce_status
         assert status.sent == 3000
 
@@ -787,25 +787,25 @@ class ControllerForcedReconfiguration_Size6(
 
         """ step B: stop step_b_shut_down_nodes """
         for stop_node in step_b_shut_down_nodes:
-            self.redpanda.stop_node(stop_node, timeout=really_short_timeout.timeout_s)
+            self.redpanda.stop_node(stop_node, timeout=REALLY_SHORT_TIMEOUT.timeout_s)
 
         """ step C: create topic some"""
         self.client().create_topic(some_topic_spec)
 
         """ step D: stop step_d_shut_down_nodes """
         for stop_node in step_d_shut_down_nodes:
-            self.redpanda.stop_node(stop_node, timeout=really_short_timeout.timeout_s)
+            self.redpanda.stop_node(stop_node, timeout=REALLY_SHORT_TIMEOUT.timeout_s)
 
         """ step E: start step_e_start_up_nodes """
         for start_node in step_e_start_up_nodes:
-            self.redpanda.start_node(start_node, timeout=short_timeout.timeout_s)
+            self.redpanda.start_node(start_node, timeout=SHORT_TIMEOUT.timeout_s)
 
         """ step F: CFR the surviving nodes"""
 
         """ bulk reboot into recovery mode """
         self._bulk_toggle_recovery_mode(
             nodes=step_f_survivor_nodes,
-            timeout=medium_timeout,
+            timeout=MEDIUM_TIMEOUT,
             recovery_mode_enabled=True,
         )
 
@@ -827,8 +827,8 @@ class ControllerForcedReconfiguration_Size6(
         self.redpanda.logger.debug("waiting for controller to recover")
         wait_until(
             lambda: controller_available(),
-            timeout_sec=long_timeout.timeout_s,
-            backoff_sec=long_timeout.backoff_s,
+            timeout_sec=LONG_TIMEOUT.timeout_s,
+            backoff_sec=LONG_TIMEOUT.backoff_s,
             err_msg="Controller never came back",
         )
         self.redpanda.logger.debug("controller recovered")

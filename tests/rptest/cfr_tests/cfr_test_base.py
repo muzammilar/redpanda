@@ -42,11 +42,11 @@ class TimeoutConfig:
     backoff_s: int
 
 
-really_short_timeout = TimeoutConfig(timeout_s=5, backoff_s=1)
-short_timeout = TimeoutConfig(timeout_s=30, backoff_s=2)
-medium_timeout = TimeoutConfig(timeout_s=60, backoff_s=2)
-long_timeout = TimeoutConfig(timeout_s=120, backoff_s=10)
-really_long_timeout = TimeoutConfig(timeout_s=300, backoff_s=10)
+REALLY_SHORT_TIMEOUT = TimeoutConfig(timeout_s=5, backoff_s=1)
+SHORT_TIMEOUT = TimeoutConfig(timeout_s=30, backoff_s=2)
+MEDIUM_TIMEOUT = TimeoutConfig(timeout_s=60, backoff_s=2)
+LONG_TIMEOUT = TimeoutConfig(timeout_s=120, backoff_s=2)
+REALLY_LONG_TIMEOUT = TimeoutConfig(timeout_s=300, backoff_s=10)
 
 
 class ControllerForcedReconfigurationTestBase(RedpandaTest):
@@ -226,7 +226,7 @@ class ControllerForcedReconfigurationTestBase(RedpandaTest):
         )
         wait_until(
             lambda: self.redpanda.registered(joiner_node),
-            timeout_sec=120,
-            backoff_sec=5,
+            timeout_sec=LONG_TIMEOUT.timeout_s,
+            backoff_sec=LONG_TIMEOUT.backoff_s,
         )
         return joiner_node_id
