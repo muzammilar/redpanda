@@ -67,6 +67,8 @@ class ControllerForcedReconfigurationApiTestBase(
             **kwargs,
         )
 
+    # ── CFR via protobuf API ─────────────────────────────────────────────
+
     def _do_request(
         self,
         client: breakglass_pb2_connect.BreakglassServiceClient,
