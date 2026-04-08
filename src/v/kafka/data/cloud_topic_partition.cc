@@ -173,6 +173,11 @@ raft::replicate_stages cloud_topic_partition::replicate(
     return _fe->replicate(batch_id, std::move(batch), opts);
 }
 
+std::unique_ptr<exact_offset_replicator>
+cloud_topic_partition::make_exact_offset_replicator() && {
+    throw std::runtime_error("not implemented");
+}
+
 ss::future<std::optional<model::offset>>
 cloud_topic_partition::get_leader_epoch_last_offset(
   kafka::leader_epoch epoch) const {

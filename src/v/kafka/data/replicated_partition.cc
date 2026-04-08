@@ -409,6 +409,11 @@ raft::replicate_stages replicated_partition::replicate(
     return out;
 }
 
+std::unique_ptr<exact_offset_replicator>
+replicated_partition::make_exact_offset_replicator() && {
+    throw std::runtime_error("not implemented");
+}
+
 model::offset replicated_partition::partition_kafka_start_offset() const {
     if (
       _partition->is_read_replica_mode_enabled()
