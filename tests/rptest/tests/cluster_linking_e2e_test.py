@@ -21,7 +21,6 @@ from ducktape.cluster.cluster import ClusterNode
 from ducktape.cluster.cluster_spec import ClusterSpec
 from connectrpc.errors import ConnectError, ConnectErrorCode
 from ducktape.mark import matrix
-from ducktape.mark import ignore
 
 from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2, tls_pb2
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
@@ -63,6 +62,7 @@ from rptest.services.redpanda import (
 )
 from rptest.services.tls import TLSCertManager
 from rptest.tests.cluster_linking_test_base import (
+    ALL_STORAGE_MODES,
     CONTROLLER_LOCKED_TASKS,
     DEFAULT_SYNCED_TOPIC_PROPERTIES,
     DISALLOWED_SYNCED_TOPIC_PROPERTIES,
@@ -1707,14 +1707,20 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_replication_basic(self, shuffle_leadership, source_cluster_spec):
+    def test_replication_basic(
+        self, shuffle_leadership, source_cluster_spec, storage_mode
+    ):
+        if not self.source_cluster.is_redpanda:
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         partition_count = 5
         topic = TopicSpec(
             name="source-topic", partition_count=partition_count, replication_factor=3
         )
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -1746,13 +1752,14 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             re.compile(".*Failed to sync write_at_offset_stm for partition"),
         ],
     )
-    def test_replication_with_failures(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_replication_with_failures(self, storage_mode):
         partition_count = 5
         topic = TopicSpec(
             name="source-topic", partition_count=partition_count, replication_factor=3
         )
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -1788,11 +1795,15 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_topic_delete(self, source_cluster_spec):
+    def test_topic_delete(self, source_cluster_spec, storage_mode):
+        if not self.source_cluster.is_redpanda:
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -1862,10 +1873,11 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             self.verify()
 
     @cluster(num_nodes=7)
-    def test_replication_with_transactions(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_replication_with_transactions(self, storage_mode):
         topic = TopicSpec(name="source-topic", partition_count=1, replication_factor=3)
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -1885,9 +1897,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             self.verify()
 
     @cluster(num_nodes=8)
-    def test_replication_with_truncated_topic(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_replication_with_truncated_topic(self, storage_mode):
         topic = TopicSpec(name="source-topic", partition_count=1, replication_factor=3)
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         # Populate some data
         KgoVerifierProducer.oneshot(
             self.test_context,
@@ -2005,12 +2018,6 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             )
 
     @cluster(num_nodes=7)
-    @ignore(
-        with_failures=True,
-        source_cluster_spec=SecondaryClusterSpec(
-            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
-        ),
-    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -2019,14 +2026,23 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_auto_prefix_trimming(self, with_failures, source_cluster_spec):
+    def test_auto_prefix_trimming(
+        self, with_failures, source_cluster_spec, storage_mode
+    ):
+        if not self.source_cluster.is_redpanda:
+            if with_failures:
+                _ = self.preallocated_nodes
+                return
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         partition_count = 5
         topic = TopicSpec(
             name="source-topic", partition_count=partition_count, replication_factor=3
         )
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -2041,12 +2057,6 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 self._perform_auto_prefix_trimming(topic.name, partition_count)
 
     @cluster(num_nodes=7)
-    @ignore(
-        with_failures=True,
-        source_cluster_spec=SecondaryClusterSpec(
-            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
-        ),
-    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -2055,8 +2065,11 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_start_offset_catch_up(self, with_failures, source_cluster_spec):
+    def test_start_offset_catch_up(
+        self, with_failures, source_cluster_spec, storage_mode
+    ):
         """
         Test that verifies shadow link can catch up to a source topic that has been
         prefix-trimmed to its HWM (i.e., all data has been trimmed).
@@ -2070,11 +2083,17 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         7. Write data to the source partitions
         8. Verify that the shadow partitions replicate that data
         """
+        if not self.source_cluster.is_redpanda:
+            if with_failures:
+                _ = self.preallocated_nodes
+                return
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         partition_count = 5
         topic = TopicSpec(
             name="source-topic", partition_count=partition_count, replication_factor=3
         )
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
 
         # Step 2: Write data to the topic across all partitions
         initial_msg_count = 1000
@@ -2217,8 +2236,14 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_replication_timestamps_match(self, timestamp_type, source_cluster_spec):
+    def test_replication_timestamps_match(
+        self, timestamp_type, source_cluster_spec, storage_mode
+    ):
+        if not self.source_cluster.is_redpanda:
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         partition_count = 1
         topic = TopicSpec(
             name="source-topic",
@@ -2228,7 +2253,7 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             retention_ms=-1,
         )
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -2287,7 +2312,8 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         )
 
     @cluster(num_nodes=7)
-    def test_replication_with_large_msgs(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_replication_with_large_msgs(self, storage_mode):
         msg_size = 2 * 1024 * 1024
         max_bytes = 10 * msg_size
         topic = TopicSpec(
@@ -2297,7 +2323,7 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             max_message_bytes=max_bytes,
         )
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         self.create_link("test-link")
 
         self.target_cluster.service.wait_until(
@@ -2316,7 +2342,8 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             self.verify()
 
     @cluster(num_nodes=7)
-    def test_replication_with_compaction(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_replication_with_compaction(self, storage_mode):
         self.logger.info(
             "Create a topic with compaction settings set but without compaction and tombstone removal enabled"
         )
@@ -2328,7 +2355,7 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             max_compaction_lag_ms=1000,
             min_cleanable_dirty_ratio=0.0,
         )
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
 
         req = self.create_default_link_request("test-link")
         req.shadow_link.configurations.topic_metadata_sync_options.synced_shadow_topic_properties.extend(
@@ -2441,7 +2468,8 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         )
 
     @cluster(num_nodes=7)
-    def test_with_restart(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_with_restart(self, storage_mode):
         self.create_link("test-link")
 
         def restart_nodes(service):
@@ -2452,7 +2480,7 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         topic_1 = TopicSpec(
             name="source-topic-1", partition_count=3, replication_factor=1
         )
-        self.source_default_client().create_topic(topic_1)
+        self.create_source_topic(topic_1, storage_mode)
         with self.producer_consumer(topic=topic_1.name, msg_size=128, msg_cnt=100000):
             restart_nodes(self.target_cluster_service)
             self.verify()
@@ -2460,7 +2488,7 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         topic_2 = TopicSpec(
             name="source-topic-2", partition_count=3, replication_factor=1
         )
-        self.source_default_client().create_topic(topic_2)
+        self.create_source_topic(topic_2, storage_mode)
         with self.producer_consumer(topic=topic_2.name, msg_size=128, msg_cnt=100000):
             restart_nodes(self.source_cluster_service)
             self.verify()
@@ -2508,12 +2536,16 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             SecondaryClusterSpec(
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
-        ]
+        ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_consumer_groups_mirroring(self, source_cluster_spec):
+    def test_consumer_groups_mirroring(self, source_cluster_spec, storage_mode):
+        if not self.source_cluster.is_redpanda:
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         # produce some data to the source cluster
 
         KgoVerifierProducer.oneshot(
@@ -2556,12 +2588,6 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
         )
 
     @cluster(num_nodes=7)
-    @ignore(
-        with_failures=True,
-        source_cluster_spec=SecondaryClusterSpec(
-            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
-        ),
-    )
     @matrix(
         with_failures=[
             True,
@@ -2573,8 +2599,15 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_continuous_group_sync(self, with_failures, source_cluster_spec):
+    def test_continuous_group_sync(
+        self, with_failures, source_cluster_spec, storage_mode
+    ):
+        if not self.source_cluster.is_redpanda:
+            if with_failures:
+                return
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
         partition_count = 120
         topic_count = 6
         failure_duration = 10 if with_failures else 0
@@ -2680,7 +2713,7 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                 )
 
         for t in topics:
-            self.source_default_client().create_topic(t)
+            self.create_source_topic(t, storage_mode)
 
         for t in topics:
             KgoVerifierProducer.oneshot(
@@ -2765,8 +2798,12 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_consumer_group_rebalance(self, source_cluster_spec):
+    def test_consumer_group_rebalance(self, source_cluster_spec, storage_mode):
+        if not self.source_cluster.is_redpanda:
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         partition_count = 120
 
         topic = TopicSpec(
@@ -2782,7 +2819,7 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
 
         n_messages = 1024 * 1024
 
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
 
         producer = KgoVerifierProducer(
             self.test_context,
@@ -3298,12 +3335,6 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 producer.do_free()
 
     @cluster(num_nodes=7)
-    @ignore(
-        with_failures=True,
-        source_cluster_spec=SecondaryClusterSpec(
-            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
-        ),
-    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -3312,8 +3343,17 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_link_topic_failover(self, with_failures, source_cluster_spec):
+    def test_link_topic_failover(
+        self, with_failures, source_cluster_spec, storage_mode
+    ):
+        if not self.source_cluster.is_redpanda:
+            if with_failures:
+                _ = self.preallocated_nodes
+                return
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         num_failover_topics = random.choice([1, 3, 5, 10])
         num_non_failover_topics = random.choice([0, 3, 5, 10])
 
@@ -3337,7 +3377,7 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
 
         all_topics = failover_topics + non_failover_topics
         for topic in all_topics:
-            self.source_default_client().create_topic(topic)
+            self.create_source_topic(topic, storage_mode)
 
         count = 1000
 
@@ -3424,12 +3464,6 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
             )
 
     @cluster(num_nodes=7)
-    @ignore(
-        with_failures=True,
-        source_cluster_spec=SecondaryClusterSpec(
-            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
-        ),
-    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -3438,8 +3472,15 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
             ),
         ],
+        storage_mode=ALL_STORAGE_MODES,
     )
-    def test_link_failover(self, with_failures, source_cluster_spec):
+    def test_link_failover(self, with_failures, source_cluster_spec, storage_mode):
+        if not self.source_cluster.is_redpanda:
+            if with_failures:
+                _ = self.preallocated_nodes
+                return
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         self.create_link("test-link")
         num_topics = random.choice([0, 1, 3, 5, 10])
         if num_topics == 0:
@@ -3455,7 +3496,7 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
             for i in range(num_topics)
         ]
         for t in topics:
-            self.source_default_client().create_topic(t)
+            self.create_source_topic(t, storage_mode)
 
         self._produce_to_topics(
             topics, self.source_cluster.service, expect_failures=False
@@ -3485,11 +3526,12 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
         )
 
     @cluster(num_nodes=7)
-    def test_producer_ids_failover(self):
+    @matrix(storage_mode=ALL_STORAGE_MODES)
+    def test_producer_ids_failover(self, storage_mode):
         self.create_link("test-link")
         num_messages = 2
         topic = TopicSpec(name="test-topic", partition_count=1, replication_factor=3)
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
 
         def produce(n: int, redpanda: MultiService):
             KgoVerifierProducer.oneshot(
@@ -3926,10 +3968,12 @@ class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
     timequery_offset = "timestamp"
     max_records = 10000
 
-    def setup_starting_offset(self, topic: TopicSpec) -> tuple[float, float]:
+    def setup_starting_offset(
+        self, topic: TopicSpec, storage_mode: str | None = None
+    ) -> tuple[float, float]:
         initial = 1000
         assert self.max_records > initial
-        self.source_default_client().create_topic(topic)
+        self.create_source_topic(topic, storage_mode)
         start_time = time.time()
         KgoVerifierProducer.oneshot(
             self.test_context,
@@ -4026,12 +4070,14 @@ class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
         ],
         starting_offset=["earliest", "latest", "timestamp"],
         failures=[True, False],
+        storage_mode=ALL_STORAGE_MODES,
     )
     def test_starting_offset(
         self,
         source_cluster_spec: SecondaryClusterSpec,
         starting_offset: str,
         failures: bool,
+        storage_mode: str,
     ):
         """
         This test will verify the starting offset configuration.
@@ -4041,6 +4087,9 @@ class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
         3. Create a shadow link with a specified starting offset
         4. Verify that the shadow topic is starting at the specified starting offset
         """
+        if not self.source_cluster.is_redpanda:
+            storage_mode = TopicSpec.STORAGE_MODE_LOCAL
+
         if failures and (
             source_cluster_spec.cluster_type == ServiceType.KAFKA
             or starting_offset == "latest"
@@ -4055,7 +4104,9 @@ class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
             return
         topic = TopicSpec(name="source-topic", partition_count=1, replication_factor=3)
 
-        (start_time, end_time) = self.setup_starting_offset(topic=topic)
+        (start_time, end_time) = self.setup_starting_offset(
+            topic=topic, storage_mode=storage_mode
+        )
 
         req = self.create_default_link_request("test-link")
 
