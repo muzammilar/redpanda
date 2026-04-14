@@ -26,15 +26,15 @@ TEST(ConfigurationTest, Roundtrip) {
     YAML::Node root_out = to_yaml(cfg, redact_secrets::no);
 
     lg.debug(
-      "Configuration as YAML: {}", fmt::format("{}", fmt::streamed(root_out)));
+      "Configuration as YAML: {}", fmt::format("{}", fmt_streamed(root_out)));
 
     try {
         cfg.read_yaml(root_out);
         YAML::Node root_in = to_yaml(cfg, redact_secrets::no);
 
         // Compare the two YAML strings.
-        auto yaml_out = fmt::format("{}", fmt::streamed(root_out));
-        auto yaml_in = fmt::format("{}", fmt::streamed(root_in));
+        auto yaml_out = fmt::format("{}", fmt_streamed(root_out));
+        auto yaml_in = fmt::format("{}", fmt_streamed(root_in));
         EXPECT_EQ(yaml_out, yaml_in);
     } catch (const std::exception& e) {
         FAIL() << e.what();

@@ -52,7 +52,7 @@ struct sanitizer_op
           it,
           "{{sanitizer_op: {}, backtrace:\n{}\n}}",
           name_op,
-          fmt::streamed(bt));
+          fmt_streamed(bt));
     }
 };
 

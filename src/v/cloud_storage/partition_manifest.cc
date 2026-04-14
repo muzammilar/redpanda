@@ -2864,7 +2864,7 @@ fmt::iterator partition_manifest::format_to(fmt::iterator it) const {
     return fmt::format_to(
       it,
       "{{manifest: {}; last segment: {}}}",
-      fmt::streamed(manifest_json_view{*this}),
+      fmt_streamed(manifest_json_view{*this}),
       last_segment());
 }
 

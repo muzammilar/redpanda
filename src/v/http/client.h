@@ -391,7 +391,7 @@ struct fmt::formatter<http::client::request_header> {
     auto format(const http::client::request_header& h, FormatContext& ctx) const
       -> decltype(ctx.out()) {
         auto redacted = http::redacted_header(h);
-        return fmt::format_to(ctx.out(), "{}", fmt::streamed(redacted));
+        return fmt::format_to(ctx.out(), "{}", fmt_streamed(redacted));
     }
 };
 
@@ -402,6 +402,6 @@ struct fmt::formatter<http::client::response_header> {
     }
 
     auto format(const http::client::response_header& h, auto& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", fmt::streamed(h));
+        return fmt::format_to(ctx.out(), "{}", fmt_streamed(h));
     }
 };

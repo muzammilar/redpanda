@@ -39,7 +39,7 @@ namespace kafka::client {
 bool operator==(const configuration& lhs, const configuration& rhs) {
     auto to_str = [](const configuration& c) {
         return fmt::format(
-          "{}", fmt::streamed(config::to_yaml(c, config::redact_secrets::no)));
+          "{}", fmt_streamed(config::to_yaml(c, config::redact_secrets::no)));
     };
     return to_str(lhs) == to_str(rhs);
 }

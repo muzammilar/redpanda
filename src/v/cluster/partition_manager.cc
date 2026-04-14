@@ -566,7 +566,7 @@ fmt::iterator partition_manager::format_to(fmt::iterator it) const {
       it,
       "{{shard:{}, mngr:{{{}}}, ntp_table.size:{}, raft_table.size:{}}}",
       ss::this_shard_id(),
-      fmt::streamed(_storage.log_mgr()),
+      fmt_streamed(_storage.log_mgr()),
       _ntp_table.size(),
       _raft_table.size());
 }

@@ -119,6 +119,28 @@ struct formatter<T> {
 
 } // namespace fmt
 
+/// Checked wrapper around fmt::streamed().
+///
+/// fmt::streamed(x) formats x via operator<<.  But types that satisfy
+/// HasFormatToMethod / HasFormatToFreeFunction have a blanket operator<<
+/// (below) that delegates back to fmt, creating an infinite recursion:
+///
+///   format_to() -> streamed(x) -> operator<< -> fmt::print -> format_to()
+///
+/// If a type is formattable through format_to, just use fmt::format("{}", x)
+/// directly — there is no need for streamed().  This wrapper enforces that
+/// invariant at compile time.
+template<typename T>
+auto fmt_streamed(const T& val) {
+    using raw = std::remove_cvref_t<T>;
+    static_assert(
+      !fmt::HasFormatToMethod<raw> && !fmt::HasFormatToFreeFunction<raw>,
+      "Do not use fmt::streamed() / fmt_streamed() on types with format_to — "
+      "use fmt::format(\"{}\", val) instead.  streamed() triggers operator<< "
+      "which calls back into fmt, causing infinite recursion.");
+    return fmt::streamed(val);
+}
+
 namespace std {
 // For both googletest and for other external libraries that may use
 // `operator<<` to print stuff, give a blanket implementation that delegates to
@@ -126,6 +148,11 @@ namespace std {
 //
 // We have to put this in the std namespace for overload resolution rules to be
 // able to find it for arbitrary T.
+//
+// WARNING: this creates a potential infinite-recursion footgun with
+// fmt::streamed().  Never pass a type that has format_to through
+// fmt::streamed() — use fmt_streamed() (above) which static_asserts against
+// it, or just use fmt::format("{}", val) directly.
 template<typename T>
 requires fmt::HasFormatToMethod<T> || fmt::HasFormatToFreeFunction<T>
 // NOLINTNEXTLINE(*-dcl58-*)

@@ -86,7 +86,7 @@ conversion_outcome<std::optional<iceberg::field_type>>
 inner_field_type_from_avro(const avro::NodePtr& node, state& state) {
     if (is_recursive_type(state, node)) {
         return conversion_exception(
-          fmt::format("Unsupported recursive type: {}", fmt::streamed(*node)));
+          fmt::format("Unsupported recursive type: {}", fmt_streamed(*node)));
     }
     if (state.type_hierarchy.size() >= max_schema_depth) {
         return conversion_exception(
