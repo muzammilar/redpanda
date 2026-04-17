@@ -102,6 +102,27 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "json_test_suite_test",
+    timeout = "short",
+    srcs = [
+        "json_test_suite_test.cc",
+    ],
+    cpu = 1,
+    data = ["@nst_json_test_suite//:test_parsing"],
+    deps = [
+        ":test_cases",
+        "//src/v/bytes:iobuf",
+        "//src/v/serde/json:parser",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:runfiles",
+        "//src/v/utils:file_io",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+        "@seastar",
+    ],
+)
+
 redpanda_test_cc_library(
     name = "data",
     srcs = [
