@@ -61,6 +61,11 @@ func NewClient(fs afero.Fs, p *config.RpkProfile) (*rpsr.Client, error) {
 	}
 
 	switch {
+	// OAUTHBEARER must be matched before the HasSASLCredentials() case below:
+	// HasSASLCredentials() returns false for OAUTHBEARER today (no username),
+	// so the current ordering happens to work, but if that check ever loosens
+	// or the cases are reordered, OAUTHBEARER tokens would be sent as a
+	// BasicAuth password.
 	case p.KafkaAPI.SASL != nil && strings.EqualFold(p.KafkaAPI.SASL.Mechanism, adminapi.OAuthBearer):
 		token := adminapi.OAuthBearerToken(p.KafkaAPI.SASL.Password)
 		if token == "" {
