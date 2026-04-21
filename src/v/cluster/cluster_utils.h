@@ -10,10 +10,8 @@
  */
 
 #pragma once
-#include "cluster/controller_utils.h"
 #include "cluster/errc.h"
 #include "cluster/members_table.h"
-#include "cluster/rpc_utils.h"
 #include "cluster/types.h"
 #include "model/metadata.h"
 #include "raft/fundamental.h"

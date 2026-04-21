@@ -11,9 +11,9 @@
 
 #include "cluster/node_status_backend.h"
 
-#include "cluster/cluster_utils.h"
 #include "cluster/errc.h"
 #include "cluster/logger.h"
+#include "cluster/members_table.h"
 #include "cluster/node_status_rpc_service.h"
 #include "cluster/node_status_table.h"
 #include "config/node_config.h"
