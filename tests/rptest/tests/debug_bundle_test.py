@@ -598,6 +598,69 @@ class DebugBundleTest(DebugBundleTestBase):
             f"Failed to find {search_str}"
         )
 
+    @cluster(num_nodes=1)
+    def test_proc_file_sampling(self):
+        """
+        Verify that /proc/interrupts and /proc/softirqs are captured as
+        N-sample snapshots under proc/<name>/t{N}.txt. Other /proc files
+        stay at their flat legacy paths, and metrics samples appear at
+        the same cadence.
+        """
+        node = random.choice(self.redpanda.started_nodes())
+        samples = 2
+
+        job_id = uuid4()
+        self._run_debug_bundle(
+            job_id=job_id,
+            node=node,
+            config=DebugBundleStartConfigParams(
+                metrics_samples=samples,
+                metrics_interval_seconds=1,
+            ),
+        )
+
+        zip_bytes = self._retrieve_file(node=node)
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+            names = zf.namelist()
+            self.logger.debug(f"zip entries: {names}")
+
+            # Strip the single top-level bundle-root directory from each entry.
+            entries = {n.split("/", 1)[1]: n for n in names if "/" in n}
+
+            for proc_name in ("interrupts", "softirqs"):
+                contents = []
+                for n in range(samples):
+                    path = f"proc/{proc_name}/t{n}.txt"
+                    assert path in entries, (
+                        f"Expected {path} in bundle; got {sorted(entries)}"
+                    )
+                    with zf.open(entries[path]) as f:
+                        data = f.read()
+                    assert data, f"Expected {path} to be non-empty"
+                    contents.append(data)
+                # At least one counter must differ between samples. Timer IRQs
+                # / TIMER softirqs tick continuously on any running kernel, so
+                # identical content across t0/t1 means the sampler didn't take
+                # two real snapshots.
+                assert contents[0] != contents[-1], (
+                    f"Expected proc/{proc_name} to change between t0 and "
+                    f"t{samples - 1}; content was identical"
+                )
+
+            for flat in ("proc/cpuinfo", "proc/cmdline", "proc/mounts"):
+                assert flat in entries, (
+                    f"Expected legacy flat path {flat}; got {sorted(entries)}"
+                )
+
+            for n in range(samples):
+                metric_samples = [
+                    e for e in entries if e.startswith("metrics/") and f"/t{n}_" in e
+                ]
+                assert len(metric_samples) >= 2, (
+                    f"Expected t{n} samples for both metrics and public_metrics; "
+                    f"got {sorted(metric_samples)}"
+                )
+
 
 class DebugBundleSCRAMAuthn(DebugBundleTestBase):
     """
