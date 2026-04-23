@@ -7,6 +7,7 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Set
@@ -66,6 +67,12 @@ class DatabricksWorkspace(Service):
         name_prefix controls the catalog name prefix, e.g. "panda" produces
         "panda-catalog-{uuid}" and "oxla" produces "oxla-catalog-{uuid}".
         """
+
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name_prefix):
+            raise ValueError(
+                f"name_prefix must be non-empty and contain only alphanumeric "
+                f"characters, hyphens, or underscores; got: {name_prefix!r}"
+            )
 
         self._location_names.add(bucket)
 
