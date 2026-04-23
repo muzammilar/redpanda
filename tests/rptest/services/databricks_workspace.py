@@ -57,9 +57,14 @@ class DatabricksWorkspace(Service):
         self._cleanup_dbx_locations()
         super().stop(**kwargs)
 
-    def create_catalog(self, bucket: str) -> "DatabricksCatalogInfo":
+    def create_catalog(
+        self, bucket: str, name_prefix: str = "panda"
+    ) -> "DatabricksCatalogInfo":
         """
         Creates a brand new catalog in the databricks workspace.
+
+        name_prefix controls the catalog name prefix, e.g. "panda" produces
+        "panda-catalog-{uuid}" and "oxla" produces "oxla-catalog-{uuid}".
         """
 
         self._location_names.add(bucket)
@@ -76,7 +81,7 @@ class DatabricksWorkspace(Service):
             self.logger.error(f"Failed to create external location: {str(e)}")
             raise
 
-        requested_catalog_name = f"panda-catalog-{uuid.uuid1()}"
+        requested_catalog_name = f"{name_prefix}-catalog-{uuid.uuid1()}"
         self._catalog_names.add(requested_catalog_name)
 
         catalog_info: CatalogInfo = self._client.catalogs.create(
