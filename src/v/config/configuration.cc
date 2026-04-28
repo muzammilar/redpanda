@@ -3582,8 +3582,13 @@ configuration::configuration()
   , features_auto_enable(
       *this,
       "features_auto_enable",
-      "Whether new feature flags auto-activate after upgrades (true) or must "
-      "wait for manual activation via the Admin API (false).",
+      "Whether features whose `available_policy` is `always` or "
+      "`new_clusters_only` are auto-activated by the controller after the "
+      "cluster active logical version reaches their required version. When "
+      "false, the cluster active version still advances normally, but each "
+      "such feature must be activated explicitly via the Admin API. Does not "
+      "affect features with `available_policy::explicit_only`, which always "
+      "require explicit activation.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       true)
   , enable_rack_awareness(
