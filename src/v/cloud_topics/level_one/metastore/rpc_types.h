@@ -62,21 +62,21 @@ struct add_objects_request
     term_state_update_t new_terms;
 };
 
-struct replace_objects_reply
+struct compact_objects_reply
   : serde::envelope<
-      replace_objects_reply,
+      compact_objects_reply,
       serde::version<0>,
       serde::compat_version<0>> {
     auto serde_fields() { return std::tie(ec); }
 
     errc ec;
 };
-struct replace_objects_request
+struct compact_objects_request
   : serde::envelope<
-      replace_objects_request,
+      compact_objects_request,
       serde::version<0>,
       serde::compat_version<0>> {
-    using resp_t = replace_objects_reply;
+    using resp_t = compact_objects_reply;
     auto serde_fields() {
         return std::tie(metastore_partition, new_objects, compaction_updates);
     }

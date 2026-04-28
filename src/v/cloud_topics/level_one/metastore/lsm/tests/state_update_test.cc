@@ -148,8 +148,8 @@ make_add_objects_update(const term_specs& terms, Objects... objects) {
 }
 
 template<typename... Objects>
-replace_objects_db_update
-make_replace_objects_update(const compact_specs& cs, Objects... objects) {
+compact_objects_db_update
+make_compact_objects_update(const compact_specs& cs, Objects... objects) {
     chunked_hash_map<
       model::topic_id,
       chunked_hash_map<model::partition_id, compaction_state_update>>
@@ -174,7 +174,7 @@ make_replace_objects_update(const compact_specs& cs, Objects... objects) {
     }
 
     auto new_objects = make_new_objects(objects...);
-    return replace_objects_db_update{
+    return compact_objects_db_update{
       .new_objects = std::move(new_objects),
       .compaction_updates = std::move(compaction_updates),
     };
@@ -270,7 +270,7 @@ protected:
         db_->apply(std::move(wb)).get();
     }
 
-    void apply_replace_update(replace_objects_db_update& update) {
+    void apply_compact_update(compact_objects_db_update& update) {
         preregister_new_objects(update.new_objects);
         auto reader = make_reader();
         chunked_vector<write_batch_row> rows;
@@ -439,9 +439,9 @@ protected:
     }
 
     template<typename... Objects>
-    void replace_objects(compact_specs cs, Objects... objects) {
-        auto db_update = make_replace_objects_update(std::move(cs), objects...);
-        apply_replace_update(db_update);
+    void compact_objects(compact_specs cs, Objects... objects) {
+        auto db_update = make_compact_objects_update(std::move(cs), objects...);
+        apply_compact_update(db_update);
     }
 
     template<typename... Objects>
@@ -904,7 +904,7 @@ TEST_F(
     auto tidp1 = make_tidp(1);
 
     // Compaction update for tidp1, but extents only for tidp0.
-    auto db_update = make_replace_objects_update(
+    auto db_update = make_compact_objects_update(
       {{compact_spec{
         .tidp = tidp1,
         .cleaned = {{0, 99, false}},
@@ -922,7 +922,7 @@ TEST_F(
 TEST_F(
   StateUpdateTest, TestCompactObjectsRejectsCleanedRangeExceedsExtentsEnd) {
     // Cleaned range [0-299], but extents only [0-199].
-    auto db_update = make_replace_objects_update(
+    auto db_update = make_compact_objects_update(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{0, 299, false}},
@@ -940,7 +940,7 @@ TEST_F(
 TEST_F(
   StateUpdateTest, TestCompactObjectsRejectsCleanedRangeStartsBeforeExtents) {
     // Extents start at 100, but cleaned range starts at 50.
-    auto db_update = make_replace_objects_update(
+    auto db_update = make_compact_objects_update(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{50, 199, false}},
@@ -981,7 +981,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsRejectsOverlappingCleanedRanges) {
       make_object(make_oid(), tp(tidp0, 0, 99).pos(0, 1023)));
 
     // Add a cleaned range [0-49].
-    replace_objects(
+    compact_objects(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{0, 49, true}},
@@ -999,7 +999,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsRejectsOverlappingCleanedRanges) {
     prereg_oids.push_back(overlap_oid);
     preregister_objects(std::move(prereg_oids), model::timestamp(1000));
 
-    auto db_update = make_replace_objects_update(
+    auto db_update = make_compact_objects_update(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned_at = 2000,
@@ -1030,7 +1030,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsRejectsRemovingUntrackedTombstones) {
     prereg_oids.push_back(tomb_oid);
     preregister_objects(std::move(prereg_oids), model::timestamp(1000));
 
-    auto db_update = make_replace_objects_update(
+    auto db_update = make_compact_objects_update(
       {{compact_spec{
         .tidp = tidp0,
         .rm_tombstones = {{0, 49}},
@@ -1056,7 +1056,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsWithCompactionAndTombstones) {
 
     // First compact with cleaned range with tombstones [0-99].
     auto new_oid1 = make_oid();
-    replace_objects(
+    compact_objects(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned_at = 1000,
@@ -1077,7 +1077,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsWithCompactionAndTombstones) {
     // [150-199], and remove tombstones from [0-49].
     // epoch=1 because the first compaction incremented it from 0 to 1.
     auto new_oid2 = make_oid();
-    replace_objects(
+    compact_objects(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned_at = 2000,
@@ -1113,7 +1113,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsRejectsCleanedRangeNotAtLogStart) {
     prereg_oids.push_back(partial_oid);
     preregister_objects(std::move(prereg_oids), model::timestamp(1000));
 
-    auto db_update = make_replace_objects_update(
+    auto db_update = make_compact_objects_update(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{100, 199, false}},
@@ -1130,7 +1130,7 @@ TEST_F(StateUpdateTest, TestCompactObjectsRejectsCleanedRangeNotAtLogStart) {
       HasSubstr("does not replace to the beginning of the log"));
 
     // Now validate that compacting down to 0 works.
-    replace_objects(
+    compact_objects(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{100, 199, false}},
@@ -1308,7 +1308,7 @@ TEST_F(StateUpdateTest, TestSetStartOffsetTruncatesCompactionState) {
       {terms(tidp0, {{0, 1}})},
       make_object(oid1, tp(tidp0, 0, 99).pos(0, 1023)));
 
-    replace_objects(
+    compact_objects(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{20, 80, true}},
@@ -1397,7 +1397,7 @@ TEST_F(StateUpdateTest, TestRemoveTopicsWithCompaction) {
       make_object(oid, tp(tidp0, 0, 99).pos(0, 1023)));
 
     // Add a cleaned range.
-    replace_objects(
+    compact_objects(
       {{compact_spec{
         .tidp = tidp0,
         .cleaned = {{0, 49, true}},

@@ -23,7 +23,7 @@ namespace cloud_topics::l1 {
 
 enum class update_key : uint8_t {
     add_objects = 0,
-    replace_objects = 1,
+    compact_objects = 1,
     set_start_offset = 2,
     remove_objects = 3,
     remove_topics = 4,
@@ -144,17 +144,17 @@ struct compaction_state_update
     partition_state::compaction_epoch_t expected_compaction_epoch;
 };
 
-struct replace_objects_update
+struct compact_objects_update
   : public serde::envelope<
-      replace_objects_update,
+      compact_objects_update,
       serde::version<0>,
       serde::compat_version<0>> {
     friend bool operator==(
-      const replace_objects_update&, const replace_objects_update&) = default;
+      const compact_objects_update&, const compact_objects_update&) = default;
     auto serde_fields() { return std::tie(new_objects, compaction_updates); }
 
-    static constexpr auto key{update_key::replace_objects};
-    static std::expected<replace_objects_update, stm_update_error> build(
+    static constexpr auto key{update_key::compact_objects};
+    static std::expected<compact_objects_update, stm_update_error> build(
       const state&,
       chunked_vector<new_object>,
       chunked_hash_map<model::topic_id_partition, compaction_state_update>
@@ -323,8 +323,8 @@ struct fmt::formatter<cloud_topics::l1::update_key> final
         switch (k) {
         case cloud_topics::l1::update_key::add_objects:
             return formatter<string_view>::format("add_objects", ctx);
-        case cloud_topics::l1::update_key::replace_objects:
-            return formatter<string_view>::format("replace_objects", ctx);
+        case cloud_topics::l1::update_key::compact_objects:
+            return formatter<string_view>::format("compact_objects", ctx);
         case cloud_topics::l1::update_key::set_start_offset:
             return formatter<string_view>::format("set_start_offset", ctx);
         case cloud_topics::l1::update_key::remove_objects:

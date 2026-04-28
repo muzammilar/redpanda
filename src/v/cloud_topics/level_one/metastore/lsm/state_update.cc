@@ -907,7 +907,7 @@ add_objects_db_update::validate_inputs() const {
 }
 
 ss::future<std::expected<void, db_update_error>>
-replace_objects_db_update::build_rows(
+compact_objects_db_update::build_rows(
   state_reader& state, chunked_vector<write_batch_row>& out) const {
     auto validate_res = validate_inputs();
     if (!validate_res.has_value()) {
@@ -989,7 +989,7 @@ replace_objects_db_update::build_rows(
 }
 
 ss::future<std::expected<absl::btree_set<object_id>, db_update_error>>
-replace_objects_db_update::discover_replaced_object_ids(
+compact_objects_db_update::discover_replaced_object_ids(
   state_reader& state) const {
     auto validate_res = validate_inputs();
     if (!validate_res.has_value()) {
@@ -1000,7 +1000,7 @@ replace_objects_db_update::discover_replaced_object_ids(
 }
 
 std::expected<void, db_update_error>
-replace_objects_db_update::validate_inputs() const {
+compact_objects_db_update::validate_inputs() const {
     auto layout_res = validate_new_objects_extent_layout(new_objects);
     if (!layout_res.has_value()) {
         return std::unexpected(layout_res.error());

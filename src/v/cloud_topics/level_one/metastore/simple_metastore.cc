@@ -558,7 +558,7 @@ simple_metastore::compact_objects(
         compaction_updates[tp] = std::move(p_update);
     }
 
-    auto update_res = replace_objects_update::build(
+    auto update_res = compact_objects_update::build(
       state_, std::move(new_objects), std::move(compaction_updates));
     if (!update_res.has_value()) {
         vlog(cd_log.debug, "Object replacement failed: {}", update_res.error());

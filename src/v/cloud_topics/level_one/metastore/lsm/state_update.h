@@ -84,7 +84,7 @@ struct replace_objects_no_compact_db_update {
       expected_epochs;
 };
 
-struct replace_objects_db_update {
+struct compact_objects_db_update {
     ss::future<std::expected<void, db_update_error>>
     build_rows(state_reader&, chunked_vector<write_batch_row>&) const;
 

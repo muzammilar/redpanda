@@ -32,8 +32,8 @@ public:
     ss::future<replace_objects_no_compact_reply> replace_objects_no_compact(
       replace_objects_no_compact_request, ::rpc::streaming_context&) override;
 
-    ss::future<replace_objects_reply> replace_objects(
-      replace_objects_request, ::rpc::streaming_context&) override;
+    ss::future<compact_objects_reply> compact_objects(
+      compact_objects_request, ::rpc::streaming_context&) override;
 
     ss::future<set_start_offset_reply> set_start_offset(
       set_start_offset_request, ::rpc::streaming_context&) override;

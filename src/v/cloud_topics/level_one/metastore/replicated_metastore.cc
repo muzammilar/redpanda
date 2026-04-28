@@ -756,7 +756,7 @@ replicated_metastore::compact_objects(
     }
     for (auto& [partition_id, partition_objects] :
          replicated_builder.partitions_) {
-        rpc::replace_objects_request req;
+        rpc::compact_objects_request req;
         req.metastore_partition = partition_id;
         chunked_vector<new_object> new_objects;
         for (auto& obj : partition_objects.finished_objects_) {
@@ -767,7 +767,7 @@ replicated_metastore::compact_objects(
         req.compaction_updates = std::move(
           compaction_updates_by_partition.at(partition_id));
         auto reply_fut = co_await ss::coroutine::as_future(
-          fe_.replace_objects(std::move(req)));
+          fe_.compact_objects(std::move(req)));
         if (reply_fut.failed()) {
             auto ex = reply_fut.get_exception();
             vlog(cd_log.warn, "Error while sending request: {}", ex);

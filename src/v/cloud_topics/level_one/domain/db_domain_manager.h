@@ -54,8 +54,8 @@ public:
       replace_objects_no_compact(
         rpc::replace_objects_no_compact_request) override;
 
-    ss::future<rpc::replace_objects_reply>
-      replace_objects(rpc::replace_objects_request) override;
+    ss::future<rpc::compact_objects_reply>
+      compact_objects(rpc::compact_objects_request) override;
 
     ss::future<rpc::get_first_offset_ge_reply>
       get_first_offset_ge(rpc::get_first_offset_ge_request) override;

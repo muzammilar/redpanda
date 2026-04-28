@@ -34,9 +34,9 @@ service::replace_objects_no_compact(
       std::move(request), leader_router::local_only::yes);
 }
 
-ss::future<replace_objects_reply> service::replace_objects(
-  replace_objects_request request, ::rpc::streaming_context&) {
-    return _leader_router->local().replace_objects(
+ss::future<compact_objects_reply> service::compact_objects(
+  compact_objects_request request, ::rpc::streaming_context&) {
+    return _leader_router->local().compact_objects(
       std::move(request), leader_router::local_only::yes);
 }
 

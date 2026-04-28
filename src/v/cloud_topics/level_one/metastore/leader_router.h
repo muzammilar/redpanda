@@ -64,8 +64,8 @@ public:
       replace_objects_no_compact(
         rpc::replace_objects_no_compact_request, local_only = local_only::no);
 
-    ss::future<rpc::replace_objects_reply> replace_objects(
-      rpc::replace_objects_request, local_only = local_only::no);
+    ss::future<rpc::compact_objects_reply> compact_objects(
+      rpc::compact_objects_request, local_only = local_only::no);
 
     ss::future<rpc::get_first_offset_ge_reply> get_first_offset_ge(
       rpc::get_first_offset_ge_request, local_only = local_only::no);
@@ -161,8 +161,8 @@ private:
       const model::ntp& metastore_ntp,
       ss::shard_id);
 
-    ss::future<rpc::replace_objects_reply> replace_objects_locally(
-      rpc::replace_objects_request,
+    ss::future<rpc::compact_objects_reply> compact_objects_locally(
+      rpc::compact_objects_request,
       const model::ntp& metastore_ntp,
       ss::shard_id);
 
