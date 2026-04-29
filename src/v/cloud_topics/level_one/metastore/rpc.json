@@ -12,7 +12,17 @@
             "output_type": "add_objects_reply"
         },
         {
-            "name": "replace_objects",
+            "name": "compact_objects",
+            "input_type": "compact_objects_request",
+            "output_type": "compact_objects_reply",
+            "legacy_id": {
+                "name": "replace_objects",
+                "input_type": "replace_objects_request",
+                "output_type": "replace_objects_reply"
+            }
+        },
+        {
+            "name": "replace_objects_no_compact",
             "input_type": "replace_objects_request",
             "output_type": "replace_objects_reply"
         },
