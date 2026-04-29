@@ -21,9 +21,10 @@ import (
 // NewCommand returns the config admin command.
 func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "View or modify Redpanda configuration through the admin listener",
-		Args:  cobra.ExactArgs(0),
+		Use:    "config",
+		Short:  "View or modify Redpanda configuration through the admin listener",
+		Args:   cobra.ExactArgs(0),
+		Hidden: true,
 	}
 	cmd.AddCommand(
 		cobraext.DeprecateCmd(newPrintCommand(fs, p), "rpk cluster config list --node-id <ID>"),

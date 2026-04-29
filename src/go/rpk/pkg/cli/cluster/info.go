@@ -17,7 +17,6 @@ import (
 	"io"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/docker/go-units"
@@ -342,7 +341,7 @@ func printDiskSpace(w io.Writer, info *adminBrokerInfo) {
 	for id := range info.byNodeID {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	for _, id := range ids {
 		b := info.byNodeID[id]
 		for _, d := range b.DiskSpace {

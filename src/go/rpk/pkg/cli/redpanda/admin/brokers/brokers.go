@@ -21,9 +21,10 @@ import (
 // NewCommand returns the brokers admin command.
 func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "brokers",
-		Short: "View and configure Redpanda brokers through the admin listener",
-		Args:  cobra.ExactArgs(0),
+		Use:    "brokers",
+		Short:  "View and configure Redpanda brokers through the admin listener",
+		Args:   cobra.ExactArgs(0),
+		Hidden: true,
 	}
 	cmd.AddCommand(
 		cobraext.DeprecateCmd(newListCommand(fs, p), "rpk cluster info -b --detailed"),
