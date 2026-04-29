@@ -32,6 +32,7 @@ from rptest.services.kafka import KafkaServiceAdapter
 from rptest.services.rpk_consumer import RpkConsumer
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import wait_until_result
+from ducktape.mark import parametrize
 
 
 # --- ListOffsets v4 (API key 2) ---
@@ -641,9 +642,19 @@ class ListOffsetsLeaderEpochRedpandaTest(RedpandaTest, BaseListOffsetsLeaderEpoc
         self._test_list_offsets_epoch(self.redpanda, expect_incorrect_behavior=True)
 
     @cluster(num_nodes=3)
-    def test_list_offsets_epoch_empty_partition(self):
+    @parametrize(correct_epoch=False)
+    @parametrize(correct_epoch=True)
+    def test_list_offsets_epoch_empty_partition(self, correct_epoch):
+        if correct_epoch:
+            # enable_listoffsets_historical_leader_epoch is gated as a
+            # development feature; opt in to dev features before flipping it.
+            self.redpanda.enable_development_feature_support()
+            self.redpanda.set_cluster_config(
+                {"enable_listoffsets_historical_leader_epoch": True}
+            )
         self._test_empty_partition_list_offsets_epoch(
-            self.redpanda, expect_incorrect_behavior=True
+            self.redpanda,
+            expect_incorrect_behavior=not correct_epoch,
         )
 
     @cluster(num_nodes=4)
