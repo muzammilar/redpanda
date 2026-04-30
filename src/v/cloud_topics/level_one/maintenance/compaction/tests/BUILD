@@ -28,7 +28,6 @@ redpanda_test_cc_library(
         "//src/v/compaction:reducer",
         "//src/v/container:chunked_vector",
         "//src/v/model",
-        "//src/v/model:batch_compression",
         "@seastar",
     ],
 )
@@ -49,6 +48,7 @@ redpanda_cc_gtest(
         "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/cloud_topics/level_one/common:object_utils",
         "//src/v/cloud_topics/level_one/frontend_reader/tests:l1_reader_fixture",
+        "//src/v/cloud_topics/level_one/maintenance:logger",
         "//src/v/cloud_topics/level_one/maintenance:meta",
         "//src/v/cloud_topics/level_one/maintenance:worker_probe",
         "//src/v/cloud_topics/level_one/maintenance/compaction:compaction_filter",
@@ -68,6 +68,7 @@ redpanda_cc_gtest(
         "//src/v/ssx:when_all",
         "//src/v/storage/tests:batch_generators",
         "//src/v/test_utils:gtest",
+        "//src/v/utils:prefix_logger",
         "@googletest//:gtest",
         "@seastar",
     ],
