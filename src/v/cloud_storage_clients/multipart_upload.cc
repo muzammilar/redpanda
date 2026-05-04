@@ -26,7 +26,7 @@ public:
     explicit multipart_data_sink_impl(multipart_upload_ref upload)
       : _upload(std::move(upload)) {}
 
-    ss::future<> put(std::span<ss::temporary_buffer<char>> data) final {
+    ss::future<> put(scattered_buffer_view data) final {
         iobuf iobuf_data;
         for (auto& buf : data) {
             iobuf_data.append(std::move(buf));

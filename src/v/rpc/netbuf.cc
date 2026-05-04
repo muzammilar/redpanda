@@ -9,7 +9,6 @@
 
 #include "base/vassert.h"
 #include "bytes/iobuf.h"
-#include "bytes/scattered_message.h"
 #include "compression/async_stream_zstd.h"
 #include "hashing/xx.h"
 #include "reflection/adl.h"
@@ -53,7 +52,7 @@ ss::future<scattered_buffer> netbuf::as_scattered() && {
     out_buf.prepend(header_as_iobuf(hdr));
 
     // prepare for output
-    co_return iobuf_to_buffer_vector(std::move(out_buf));
+    co_return std::move(out_buf).as_scattered();
 }
 
 } // namespace rpc

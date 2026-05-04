@@ -10,7 +10,7 @@
 #include "net/connection.h"
 
 #include "base/seastarx.h"
-#include "bytes/scattered_message.h"
+#include "bytes/iobuf.h"
 #include "net/exceptions.h"
 #include "net/types.h"
 #include "ssx/abort_source.h"
@@ -201,7 +201,7 @@ ss::future<> connection::shutdown() {
 }
 
 ss::future<> connection::write(scattered_buffer bufs) {
-    _probe.add_bytes_sent(scattered_size(bufs));
+    _probe.add_bytes_sent(iobuf::scattered_size(bufs));
     return _out.write(std::move(bufs)).discard_result();
 }
 

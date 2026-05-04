@@ -11,7 +11,6 @@
 
 #include "bytes/iobuf.h"
 #include "bytes/iobuf_parser.h"
-#include "bytes/scattered_message.h"
 #include "kafka/protocol/flex_versions.h"
 #include "strings/utf8.h"
 
@@ -99,7 +98,7 @@ parse_v1_header(ss::input_stream<char>& src) {
 }
 
 ss::future<std::optional<request_header>>
-parse_header(ss::input_stream<char>& src) {
+parse_header(ss::input_stream<char>& src, size_t request_size) {
     auto header = co_await parse_v1_header(src);
     if (header) {
         /// Conditionally handle v1 (flex) header
@@ -107,9 +106,9 @@ parse_header(ss::input_stream<char>& src) {
             /// User provided unsupported an invalid key that does not map
             /// to any known kafka requests, code will throw when it eventually
             /// reaches the request router
-        } else if (flex_versions::is_flexible_request(
-                     header->key, header->version)) {
-            auto [tags, bytes_read] = co_await parse_tags(src);
+        } else if (
+          flex_versions::is_flexible_request(header->key, header->version)) {
+            auto [tags, bytes_read] = co_await parse_tags(src, request_size);
             header->tags = std::move(tags);
             header->tags_size_bytes = bytes_read;
         }
@@ -142,7 +141,7 @@ scattered_buffer response_as_scattered(response_ptr response) {
     auto& buf = response->buf();
     buf.prepend(std::move(header));
 
-    return iobuf_to_buffer_vector(std::move(buf));
+    return std::move(buf).as_scattered();
 }
 
 } // namespace kafka

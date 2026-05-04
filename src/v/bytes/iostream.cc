@@ -38,7 +38,7 @@ ss::output_stream<char> make_iobuf_ref_output_stream(iobuf& io) {
     struct iobuf_output_stream final : ss::data_sink_impl {
         explicit iobuf_output_stream(iobuf& i)
           : io(i) {}
-        ss::future<> put(std::span<ss::temporary_buffer<char>> data) final {
+        ss::future<> put(scattered_buffer_view data) final {
             for (auto& b : data) {
                 io.append(std::move(b));
             }

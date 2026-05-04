@@ -340,7 +340,7 @@ client::request_header redacted_header(client::request_header original);
 
 template<class BufferSeq>
 inline ss::future<> client::forward(client* client, BufferSeq&& seq) {
-    auto bufs = iobuf_to_buffer_vector(std::forward<BufferSeq>(seq));
+    auto bufs = std::forward<BufferSeq>(seq).as_scattered();
     return client->send(std::move(bufs));
 }
 

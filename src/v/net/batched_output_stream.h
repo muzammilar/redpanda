@@ -12,7 +12,7 @@
 #pragma once
 
 #include "base/seastarx.h"
-#include "bytes/scattered_message.h"
+#include "bytes/iobuf.h"
 #include "ssx/semaphore.h"
 
 #include <seastar/core/iostream.hh>

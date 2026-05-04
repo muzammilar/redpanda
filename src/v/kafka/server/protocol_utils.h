@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "bytes/scattered_message.h"
+#include "bytes/iobuf.h"
 #include "kafka/server/request_context.h"
 #include "kafka/server/response.h"
 #include "net/types.h"

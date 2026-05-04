@@ -20,7 +20,6 @@
 #include "base/units.h"
 #include "base/vassert.h"
 #include "bytes/iobuf.h"
-#include "bytes/scattered_message.h"
 
 #include <deque>
 #include <exception>
@@ -488,11 +487,11 @@ public:
     }
 
     void iobuf_as_scattered() {
-        auto bufs = ::iobuf_to_buffer_vector(buf.share(0, buf.size_bytes()));
-        auto tmp = ::buffer_vector_to_iobuf(std::move(bufs));
+        auto bufs = buf.share(0, buf.size_bytes()).as_scattered();
+        auto tmp = iobuf(std::move(bufs));
         if (tmp != buf) {
             throw std::runtime_error(
-              "iobuf_to_buffer_vector doesn't match original data");
+              "as_scattered roundtrip doesn't match original data");
         }
     }
 

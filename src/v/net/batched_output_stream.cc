@@ -11,7 +11,6 @@
 
 #include "base/likely.h"
 #include "base/vassert.h"
-#include "bytes/scattered_message.h"
 #include "ssx/semaphore.h"
 
 #include <seastar/core/future.hh>
@@ -31,11 +30,10 @@ batched_output_stream::batched_output_stream(
 [[gnu::cold]] static ss::future<bool>
 already_closed_error(scattered_buffer& bufs) {
     return ss::make_exception_future<bool>(
-      batched_output_stream_closed(scattered_size(bufs)));
+      batched_output_stream_closed(iobuf::scattered_size(bufs)));
 }
 
-ss::future<bool>
-batched_output_stream::write(scattered_buffer bufs) {
+ss::future<bool> batched_output_stream::write(scattered_buffer bufs) {
     if (unlikely(_closed)) {
         return already_closed_error(bufs);
     }
@@ -44,7 +42,7 @@ batched_output_stream::write(scattered_buffer bufs) {
           if (unlikely(_closed)) {
               return already_closed_error(v);
           }
-          const size_t vbytes = scattered_size(v);
+          const size_t vbytes = iobuf::scattered_size(v);
           return _out.write(std::span{v}).then([this, vbytes] {
               _unflushed_bytes += vbytes;
               if (

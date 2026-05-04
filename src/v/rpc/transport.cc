@@ -12,7 +12,7 @@
 #include "base/likely.h"
 #include "base/vassert.h"
 #include "base/vlog.h"
-#include "bytes/scattered_message.h"
+#include "bytes/iobuf.h"
 #include "net/connection.h"
 #include "rpc/logger.h"
 #include "rpc/parse_utils.h"
@@ -242,15 +242,13 @@ transport::do_send(sequence_t seq, netbuf b, rpc::client_opts opts) {
                     timing.memory_reserved_at = clock_type::now();
                 }
                 return std::move(b).as_scattered().then(
-                  [u = std::move(units)](
-                    scattered_buffer bufs) mutable {
+                  [u = std::move(units)](scattered_buffer bufs) mutable {
                       return std::make_tuple(std::move(u), std::move(bufs));
                   });
             })
             .then_unpack(
               [this, f = std::move(f), seq, corr](
-                ssx::semaphore_units units,
-                scattered_buffer bufs) mutable {
+                ssx::semaphore_units units, scattered_buffer bufs) mutable {
                   auto e = std::make_unique<entry>(std::move(bufs), corr);
                   _requests_queue.emplace(seq, std::move(e));
 
@@ -338,7 +336,7 @@ ss::future<> transport::do_dispatch_send() {
           // is the intent of holding on to the units up until this
           // point.
           auto units = std::move(resp_entry->resource_units);
-          auto msg_size = scattered_size(v);
+          auto msg_size = iobuf::scattered_size(v);
 
           auto f = out().write(std::move(v));
           resp_entry->timing.dispatched_at = clock_type::now();

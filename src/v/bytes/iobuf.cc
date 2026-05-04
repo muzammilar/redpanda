@@ -19,6 +19,23 @@
 #include <iostream>
 #include <string_view>
 
+scattered_buffer iobuf::as_scattered() && {
+    scattered_buffer bufs;
+    bufs.reserve(std::distance(begin(), end()));
+    for (auto& frag : *this) {
+        bufs.push_back(frag.share());
+    }
+    return bufs;
+}
+
+size_t iobuf::scattered_size(const scattered_buffer& bufs) {
+    size_t total = 0;
+    for (const auto& buf : bufs) {
+        total += buf.size();
+    }
+    return total;
+}
+
 iobuf iobuf::copy() const {
     auto in = iobuf::iterator_consumer(cbegin(), cend());
     return iobuf_copy(in, _size);
