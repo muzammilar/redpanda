@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <compare>
 #include <cstddef>
-#include <iostream>
+#include <sstream>
 #include <string_view>
 
 scattered_buffer iobuf::as_scattered() && {
