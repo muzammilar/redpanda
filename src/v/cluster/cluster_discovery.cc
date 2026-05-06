@@ -209,6 +209,67 @@ cluster_discovery::dispatch_node_uuid_registration_to_seeds() {
     co_return std::nullopt;
 }
 
+ss::future<std::optional<iobuf>>
+cluster_discovery::fetch_controller_snapshot_from_leader(
+  const std::vector<model::broker>& peers) {
+    constexpr auto fetch_timeout = std::chrono::seconds(2);
+    for (const auto& broker : peers) {
+        const auto& addr = broker.rpc_address();
+        vlog(
+          clusterlog.info,
+          "Fetching controller snapshot from {} ({})",
+          broker.id(),
+          addr);
+        result<fetch_controller_snapshot_reply> r(
+          fetch_controller_snapshot_reply{});
+        try {
+            r = co_await do_with_client_one_shot<controller_client_protocol>(
+              addr,
+              config::node().rpc_server_tls(),
+              fetch_timeout,
+              rpc::transport_version::v2,
+              [fetch_timeout](controller_client_protocol c) {
+                  return c
+                    .fetch_controller_snapshot(
+                      fetch_controller_snapshot_request{
+                        features::feature_table::get_earliest_logical_version(),
+                        features::feature_table::get_latest_logical_version()},
+                      rpc::client_opts(rpc::clock_type::now() + fetch_timeout))
+                    .then(&rpc::get_ctx_data<fetch_controller_snapshot_reply>);
+              });
+        } catch (...) {
+            vlog(
+              clusterlog.warn,
+              "Error fetching controller snapshot from {} ({}), retrying: {}",
+              broker.id(),
+              addr,
+              std::current_exception());
+            continue;
+        }
+        if (r.has_error()) {
+            vlog(
+              clusterlog.warn,
+              "Error fetching controller snapshot from {} ({}): {}, retrying",
+              broker.id(),
+              addr,
+              r.error().message());
+            continue;
+        }
+        auto& reply = r.value();
+        if (!reply.controller_snapshot.has_value()) {
+            vlog(
+              clusterlog.debug,
+              "Peer {} ({}) not ready to produce controller snapshot, trying "
+              "next peer",
+              broker.id(),
+              addr);
+            continue;
+        }
+        co_return std::move(reply.controller_snapshot);
+    }
+    co_return std::nullopt;
+}
+
 ss::future<cluster_bootstrap_info_reply>
 cluster_discovery::request_cluster_bootstrap_info_single(
   net::unresolved_address addr) const {

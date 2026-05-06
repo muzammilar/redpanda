@@ -152,6 +152,16 @@ public:
     ss::future<result<join_node_reply>>
     handle_join_request(const join_node_request r);
 
+    // Produce a controller_join_snapshot for a peer's
+    // fetch_controller_snapshot RPC, dispatching to the leader if this
+    // node is not the leader. The leader's view is authoritative; serving
+    // a follower's potentially-stale state is the bug this avoids. The
+    // reply's snapshot is std::nullopt on dispatch failure (no leader
+    // known, RPC error, etc.) so the client can fall through to the next
+    // seed.
+    ss::future<fetch_controller_snapshot_reply>
+    handle_fetch_controller_snapshot(fetch_controller_snapshot_request r);
+
     // Applies a committed record batch, specializing handling based on the
     // batch type.
     ss::future<std::error_code> apply_update(model::record_batch);

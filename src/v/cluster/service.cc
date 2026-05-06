@@ -164,6 +164,28 @@ service::join_node(join_node_request req, rpc::streaming_context&) {
       });
 }
 
+ss::future<fetch_controller_snapshot_reply> service::fetch_controller_snapshot(
+  fetch_controller_snapshot_request req, rpc::streaming_context&) {
+    if (!is_request_logical_version_compatible(
+          _feature_table.local(),
+          req.earliest_logical_version,
+          req.latest_logical_version,
+          "fetch_controller_snapshot request")) {
+        return ss::make_ready_future<fetch_controller_snapshot_reply>(
+          fetch_controller_snapshot_reply{});
+    }
+
+    return ss::with_scheduling_group(
+      get_scheduling_group(), [this, req]() mutable {
+          return _members_manager.invoke_on(
+            members_manager::shard,
+            get_smp_service_group(),
+            [req](members_manager& mm) mutable {
+                return mm.handle_fetch_controller_snapshot(req);
+            });
+      });
+}
+
 ss::future<create_topics_reply>
 service::create_topics(create_topics_request r, rpc::streaming_context&) {
     return ss::with_scheduling_group(

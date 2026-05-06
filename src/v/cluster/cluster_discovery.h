@@ -20,10 +20,6 @@
 #include <optional>
 #include <vector>
 
-namespace storage {
-class kvstore;
-} // namespace storage
-
 namespace cluster {
 struct cluster_bootstrap_info_reply;
 
@@ -124,6 +120,22 @@ public:
     // \pre is_cluster_founder() future has been completed
     // \pre get_node_ids_by_uuid() has never been called
     node_ids_by_uuid& get_node_ids_by_uuid();
+
+    // Fetch a fresh controller_join_snapshot from a peer. Used by
+    // restarting nodes (those that already have a node_id and are not
+    // going through register_with_cluster) so that bootstrap can apply
+    // the current cluster-config view to shard_local_cfg before any
+    // downstream service reads it.
+    //
+    // Iterates `peers` in order, returning the first valid response.
+    // The responder forwards to the controller leader if it is not the
+    // leader itself, so the result is leader-authoritative regardless
+    // of which peer answered. Returns nullopt if every peer fails or
+    // none have a snapshot ready; the caller falls through to whatever
+    // shard_local_cfg view was loaded from the local cache.
+    static ss::future<std::optional<iobuf>>
+    fetch_controller_snapshot_from_leader(
+      const std::vector<model::broker>& peers);
 
 private:
     // Sends requests to each seed server to register the local node UUID
