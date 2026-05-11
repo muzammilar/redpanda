@@ -48,7 +48,8 @@ redpanda_test_cc_library(
         "compatibility_avro.h",
     ],
     deps = [
-        "//src/v/pandaproxy/schema_registry:api",
+        "//src/v/pandaproxy/schema_registry:avro",
+        "//src/v/pandaproxy/schema_registry:compatibility",
         "//src/v/pandaproxy/schema_registry:types",
     ],
 )
@@ -60,7 +61,8 @@ redpanda_test_cc_library(
     ],
     deps = [
         ":store_fixture",
-        "//src/v/pandaproxy/schema_registry:api",
+        "//src/v/pandaproxy/schema_registry:compatibility",
+        "//src/v/pandaproxy/schema_registry:protobuf_schema",
         "//src/v/pandaproxy/schema_registry:types",
     ],
 )
@@ -71,7 +73,7 @@ redpanda_test_cc_library(
         "compatibility_common.h",
     ],
     deps = [
-        "//src/v/pandaproxy/schema_registry:api",
+        "//src/v/pandaproxy/schema_registry:compatibility",
         "//src/v/pandaproxy/schema_registry:types",
     ],
 )
