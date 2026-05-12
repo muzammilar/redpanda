@@ -29,8 +29,10 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":offset_interval_set",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
+        "//src/v/serde",
+        "@fmt",
     ],
 )
 
@@ -145,6 +147,7 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":leveling_range_builder",
         ":metastore_manifest",
         ":offset_interval_set",
         "//src/v/base",
@@ -205,6 +208,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":domain_uuid",
+        ":leveling_range_builder",
         ":offset_interval_set",
         ":state_update",
         "//src/v/cloud_topics/level_one/common:object_id",
@@ -223,6 +227,7 @@ redpanda_cc_library(
         "simple_metastore.h",
     ],
     implementation_deps = [
+        ":leveling_range_builder",
         ":state_update",
         "//src/v/cloud_topics:logger",
     ],
