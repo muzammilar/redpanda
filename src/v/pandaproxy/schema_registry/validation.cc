@@ -16,6 +16,7 @@
 #include "model/batch_compression.h"
 #include "model/record.h"
 #include "pandaproxy/logger.h"
+#include "pandaproxy/schema_registry/api.h"
 #include "pandaproxy/schema_registry/avro.h"
 #include "pandaproxy/schema_registry/json.h"
 #include "pandaproxy/schema_registry/protobuf.h"
