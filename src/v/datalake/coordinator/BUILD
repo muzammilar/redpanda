@@ -35,9 +35,9 @@ redpanda_cc_library(
         "coordinator.h",
     ],
     implementation_deps = [
+        ":catalog_config",
         ":iceberg_snapshot_remover",
         "//src/v/datalake:catalog_schema_manager",
-        "//src/v/iceberg:field_name_comparison",
         "//src/v/datalake:logger",
         "//src/v/datalake:partition_spec_parser",
         "//src/v/datalake:record_schema_resolver",
@@ -45,6 +45,7 @@ redpanda_cc_library(
         "//src/v/datalake:schema_identifier",
         "//src/v/datalake:table_id_provider",
         "//src/v/datalake:types",
+        "//src/v/iceberg:field_name_comparison",
         "//src/v/ssx:future_util",
         "//src/v/ssx:sleep_abortable",
         "//src/v/storage:record_batch_builder",
@@ -116,6 +117,24 @@ redpanda_cc_library(
         "//src/v/pandaproxy/schema_registry:fwd",
         "//src/v/raft",
         "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "catalog_config",
+    srcs = [
+        "catalog_config.cc",
+    ],
+    hdrs = [
+        "catalog_config.h",
+    ],
+    implementation_deps = [
+        "//src/v/config",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/iceberg:field_name_comparison",
+        "//src/v/model",
     ],
 )
 
