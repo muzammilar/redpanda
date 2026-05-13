@@ -16,7 +16,6 @@
 #include "base/outcome.h"
 #include "base/seastarx.h"
 #include "container/chunked_vector.h"
-#include "kafka/protocol/errors.h"
 #include "model/fundamental.h"
 #include "strings/string_switch.h"
 #include "utils/named_type.h"
@@ -24,10 +23,12 @@
 #include <seastar/core/sstring.hh>
 #include <seastar/util/bool_class.hh>
 
-#include <avro/ValidSchema.hh>
-
 #include <iosfwd>
 #include <type_traits>
+
+namespace avro {
+class ValidSchema;
+} // namespace avro
 
 namespace pandaproxy::schema_registry {
 
@@ -394,6 +395,9 @@ private:
 ///\brief The definition of an avro schema.
 class avro_schema_definition {
 public:
+    struct impl;
+    using pimpl = ss::shared_ptr<const impl>;
+
     explicit avro_schema_definition(
       avro::ValidSchema vs,
       schema_definition::references refs,
@@ -419,7 +423,7 @@ public:
     ss::sstring name() const;
 
 private:
-    avro::ValidSchema _impl;
+    pimpl _impl;
     schema_definition::references _refs;
     std::optional<schema_metadata> _meta;
 };
@@ -456,8 +460,7 @@ public:
         return protobuf_schema_definition{_impl, _refs.copy(), _meta};
     }
 
-    ::result<ss::sstring, kafka::error_code>
-    name(const std::vector<int>& fields) const;
+    std::optional<ss::sstring> name(const std::vector<int>& fields) const;
 
 private:
     pimpl _impl;

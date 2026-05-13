@@ -13,7 +13,6 @@
 
 #include "base/seastarx.h"
 #include "cluster/metrics_reporter.h"
-#include "kafka/client/configuration.h"
 #include "model/metadata.h"
 #include "pandaproxy/schema_registry/fwd.h"
 #include "security/fwd.h"
@@ -29,6 +28,10 @@ namespace cluster {
 class controller;
 class metadata_cache;
 } // namespace cluster
+
+namespace kafka::client {
+struct configuration;
+} // namespace kafka::client
 
 namespace schema {
 class registry;
