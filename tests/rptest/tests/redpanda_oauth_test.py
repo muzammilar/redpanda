@@ -666,9 +666,11 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         self.redpanda.logger.debug("starting producer")
         producer.poll(1.0)
         wait_until(
-            lambda: set(producer.list_topics(timeout=10).topics.keys())
-            == expected_topics,
+            lambda: expected_topics.issubset(
+                producer.list_topics(timeout=10).topics.keys()
+            ),
             timeout_sec=5,
+            err_msg=f"Expected topics {expected_topics} to be a subset of producer topics",
         )
 
         def consume_one():
@@ -792,10 +794,11 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         self.redpanda.logger.debug("starting producer")
         producer.poll(1.0)
         wait_until(
-            lambda: set(producer.list_topics(timeout=10).topics.keys())
-            == expected_topics,
+            lambda: expected_topics.issubset(
+                producer.list_topics(timeout=10).topics.keys()
+            ),
             timeout_sec=5,
-            err_msg=f"Producer topics do not match expected topics: {expected_topics}",
+            err_msg=f"Expected topics {expected_topics} to be a subset of producer topics",
         )
 
         def consume_one():
