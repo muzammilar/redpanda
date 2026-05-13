@@ -981,10 +981,6 @@ class TopicCompactionEnabled(Expression):
                 "TopicCompactionEnable_producer_config",
                 {"key_set_cardinality": 250, "msg_count": 200000},
             ),
-            ClusterConfigInput(
-                "TopicCompactionEnabled_rp_config",
-                dict(max_compacted_log_segment_size=LOG_SEGMENT_SIZE),
-            ),
         ]
 
 
@@ -1585,17 +1581,6 @@ class EnableSegmentMs(Expression):
                 "segment.bytes",
                 str(1024 * 1024 * 128),
                 stage=TestRunStage.Startup,
-            ),
-            # The 'segment.ms' is applied during the local storage housekeeping
-            # so the actual segments won't be rolled as frequently as 'segment.ms'
-            # suggests.
-            ClusterConfigInput(
-                "SetLowCompactionInterval_rp_conf",
-                {"log_compaction_interval_ms": "1000"},
-            ),
-            # Update lower clamp applied to segment.ms for testing
-            ClusterConfigInput(
-                "SetLogSegmentMsMin_rp_conf", {"log_segment_ms_min": "60000"}
             ),
         ]
 
