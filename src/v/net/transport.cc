@@ -282,6 +282,12 @@ void base_transport::set_keepalive(bool keepalive) {
     }
 }
 
+void base_transport::set_nodelay(bool nodelay) {
+    if (_fd) {
+        _fd->set_nodelay(nodelay);
+    }
+}
+
 ss::future<>
 base_transport::connect(clock_type::time_point connection_timeout) {
     // in order to hold concurrency correctness invariants we must guarantee 3
