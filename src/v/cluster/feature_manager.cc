@@ -148,6 +148,17 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
             vlog(
               clusterlog.debug, "Controller leader notification term {}", term);
             _am_controller_leader = leader_id == *config::node().node_id();
+            if (_am_controller_leader) {
+                _leader_term = term;
+            } else {
+                _leader_term.reset();
+            }
+            // Force the background loop to re-establish a linearizable
+            // barrier on every leadership transition: cluster-config
+            // values it consults must not be read until we have applied
+            // every controller log entry committed at the time we took
+            // leadership.
+            _caught_up_for_term.reset();
 
             // This hook avoids the need for the controller leader to receive
             // its own health report to generate a call to update_node_version.
@@ -556,14 +567,70 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
     const bool was_manual_finalize_pending = std::exchange(
       _manual_finalize_pending, false);
 
-    // Consume any accumulated updates.  Important to do this even if
-    // not leader, so that we drain it and allow maybe_update_active_version
-    // to sleep on _update_wait.
-    auto updates = std::exchange(_updates, {});
-
     if (!_am_controller_leader) {
+        // Drop accumulated updates to bound memory while we're not
+        // the leader; updates_pending() already short-circuits when
+        // not leader, so this isn't load-bearing for the loop's
+        // sleep on _update_wait.
+        _updates.clear();
         co_return;
     }
+
+    // The controller replays committed entries through the muxed
+    // config_manager concurrently with this loop, so without a barrier
+    // we can observe intermediate cluster-config states mid-replay —
+    // for example a transient value of features_auto_finalization
+    // before the operator's override has been applied. Wait once per
+    // term for the STM to apply through a linearizable barrier offset;
+    // while leadership is held, subsequent committed entries replicate
+    // through us, so per-tick barriers aren't needed. On transient
+    // barrier failure we throw rather than return so the outer loop
+    // sleeps status_retry before retrying (avoiding a tight spin when
+    // the barrier fails synchronously), and so that _updates is
+    // preserved for the next attempt.
+    if (
+      !_caught_up_for_term.has_value() || _caught_up_for_term != _leader_term) {
+        vassert(_leader_term.has_value(), "leader without term");
+        const auto target_term = *_leader_term;
+        auto deadline = model::timeout_clock::now() + status_retry;
+        auto barrier = co_await _stm.local().insert_linearizable_barrier(
+          deadline);
+        if (!barrier) {
+            throw std::runtime_error(
+              fmt::format("Linearizable barrier failed: {}", barrier.error()));
+        }
+        if (!_am_controller_leader || _leader_term != target_term) {
+            // Leadership changed mid-barrier. Don't throw — this isn't
+            // a transient error to retry against, it's a state change.
+            // The next loop iteration handles it cleanly: if we're no
+            // longer leader, the !_am_controller_leader branch above
+            // drains _updates and returns; if we're leader in a fresh
+            // term, the leadership notification handler already reset
+            // _caught_up_for_term, so we re-run the barrier for the
+            // new term before draining and applying updates. We
+            // deliberately do not set _caught_up_for_term here: the
+            // offset we observed was acknowledged under the old term
+            // and is not safe to treat as caught-up for the new one.
+            vlog(
+              clusterlog.debug,
+              "Deferring active version update: leadership changed "
+              "during barrier (was term {}, now {})",
+              target_term,
+              _leader_term);
+            co_return;
+        }
+        _caught_up_for_term = target_term;
+        vlog(
+          clusterlog.debug,
+          "Controller STM caught up to barrier offset {} in term {}",
+          barrier.value().first,
+          target_term);
+    }
+
+    // Consume accumulated updates now that the barrier has confirmed
+    // we are caught up. Deferring the drain until here means a
+    // transient barrier failure doesn't discard pending updates.
+    auto updates = std::exchange(_updates, {});
 
     // Apply updates into _node_versions
     for (const auto& i : updates) {
