@@ -22,9 +22,9 @@ def data_dependency():
     http_archive(
         name = "avro",
         build_file = "//bazel/thirdparty:avro.BUILD",
-        sha256 = "791d9f163f458d0ba4c94251f58ef5af9157952a9569ce0968d89aeb585af34f",
-        strip_prefix = "avro-46fe1e36f680d75219cba46368de38321f1810ed",
-        url = "https://github.com/redpanda-data/avro/archive/46fe1e36f680d75219cba46368de38321f1810ed.tar.gz",
+        sha256 = "1c09dd94cc8fcac0fa99359254507cfd538c527bcb8b5066d16b6289ac87ea93",
+        strip_prefix = "avro-6821e2b454401308d4e3819c0569d0fe7f2a66fa",
+        url = "https://github.com/redpanda-data/avro/archive/6821e2b454401308d4e3819c0569d0fe7f2a66fa.tar.gz",
         patches = [
             "//bazel/thirdparty:avro-snappy-includes.patch",
             "//bazel/thirdparty:avro-fmt-const.patch",
