@@ -16,13 +16,17 @@
 #include "compression/compression.h"
 #include "container/chunked_vector.h"
 #include "hashing/crc32.h"
+#include "hashing/xx.h"
+#include "serde/parquet/bloom_filter.h"
 #include "serde/parquet/column_stats_collector.h"
 #include "serde/parquet/encoding.h"
 #include "strings/utf8.h"
 
+#include <seastar/core/byteorder.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/util/variant_utils.hh>
 
+#include <bit>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
@@ -123,11 +127,55 @@ crc::crc32 compute_crc32(Args&&... args) {
     return crc;
 }
 
+// Hash a parquet value to uint64_t using xxHash64 (seed=0), as required by
+// the Parquet bloom filter spec. Fixed-size values are hashed as their
+// little-endian byte representation; variable-length values are hashed
+// directly over their bytes.
+uint64_t hash_for_bloom(int32_value v) {
+    auto le = ss::cpu_to_le(v.val);
+    return xxhash_64(reinterpret_cast<const char*>(&le), sizeof(le));
+}
+uint64_t hash_for_bloom(int64_value v) {
+    auto le = ss::cpu_to_le(v.val);
+    return xxhash_64(reinterpret_cast<const char*>(&le), sizeof(le));
+}
+uint64_t hash_for_bloom(float32_value v) {
+    auto bits = ss::cpu_to_le(std::bit_cast<uint32_t>(v.val));
+    return xxhash_64(reinterpret_cast<const char*>(&bits), sizeof(bits));
+}
+uint64_t hash_for_bloom(float64_value v) {
+    auto bits = ss::cpu_to_le(std::bit_cast<uint64_t>(v.val));
+    return xxhash_64(reinterpret_cast<const char*>(&bits), sizeof(bits));
+}
+uint64_t hash_for_bloom(const byte_array_value& v) {
+    incremental_xxhash64 h;
+    for (const auto& frag : v.val) {
+        h.update(frag.get(), frag.size());
+    }
+    return h.digest();
+}
+uint64_t hash_for_bloom(const fixed_byte_array_value& v) {
+    incremental_xxhash64 h;
+    for (const auto& frag : v.val) {
+        h.update(frag.get(), frag.size());
+    }
+    return h.digest();
+}
+// Boolean columns never have bloom filters (see constructor below).
+// This overload exists only so the template compiles for boolean_value.
+uint64_t hash_for_bloom(boolean_value) {
+    vassert(false, "unreachable: boolean columns are never bloom-filtered");
+}
+
 template<typename value_type, auto comparator>
 class buffered_column_writer final : public column_writer::impl {
 public:
     buffered_column_writer(const schema_element& schema_element, options opts)
-      : _max_rep_level(schema_element.max_repetition_level)
+      : _bloom_filter(
+          opts.bloom_filter_ndv > 0
+            ? std::make_optional<bloom_filter>(opts.bloom_filter_ndv)
+            : std::nullopt)
+      , _max_rep_level(schema_element.max_repetition_level)
       , _max_def_level(schema_element.max_definition_level)
       , _opts(opts) {}
 
@@ -150,6 +198,9 @@ public:
                   value_memory_usage = sizeof(value_type);
               }
               _current_page_stats.record_value(v);
+              if (_bloom_filter) {
+                  _bloom_filter->insert(hash_for_bloom(v));
+              }
               _value_buffer.add_value(std::move(v));
           },
           [this](null_value) {
@@ -316,15 +367,30 @@ public:
         }
         _flushed_stats.reset();
         _total_memory_usage = 0;
+        iobuf bf;
+        if (_bloom_filter) {
+            // Discard the filter if it is too full: FPP ≈ fill_ratio()^8,
+            // so the default threshold of 0.75 corresponds to ~10% FPP,
+            // at which point the filter is unlikely to be useful for
+            // skipping row groups.
+            if (
+              _bloom_filter->fill_ratio()
+              <= _opts.bloom_filter_max_fill_ratio) {
+                _bloom_filter->serialize(bf);
+            }
+            _bloom_filter->reset();
+        }
         co_return flushed_pages{
           .pages = std::exchange(_flushed_pages, {}),
           .stats = std::move(full_stats),
+          .bloom_filter = std::move(bf),
         };
     }
 
 private:
     column_stats_collector<value_type, comparator> _current_page_stats;
     column_stats_collector<value_type, comparator> _flushed_stats;
+    std::optional<bloom_filter> _bloom_filter;
     int64_t _total_memory_usage = 0;
     plain_encoder<value_type> _value_buffer;
     chunked_vector<def_level> _def_levels;

@@ -176,6 +176,23 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
+    name = "bloom_filter_test",
+    timeout = "short",
+    srcs = [
+        "bloom_filter_test.cc",
+    ],
+    cpu = 1,
+    memory = "64MiB",
+    deps = [
+        "//src/v/hashing:xx",
+        "//src/v/serde/parquet:bloom_filter",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
     name = "column_stats_collector_test",
     timeout = "short",
     srcs = [
