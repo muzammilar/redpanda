@@ -89,7 +89,7 @@ void application::start_runtime_services(
           pm.register_factory<datalake::translation::stm_factory>(
             config::shard_local_cfg().iceberg_enabled());
           if (
-            config::shard_local_cfg().cloud_topics_enabled()
+            config::shard_local_cfg().cloud_storage_enabled()
             && !ct_test_cfg.disable_cloud_topics) {
               pm.register_factory<cloud_topics::l0::ctp_stm_factory>();
               pm.register_factory<cloud_topics::read_replica::stm_factory>();

@@ -338,8 +338,6 @@ OIDC_ALLOW_LIST = [
     re.compile("security - .* - Error updating"),
 ]
 
-CLOUD_TOPICS_CONFIG_STR = "cloud_topics_enabled"
-
 
 class RemoteClusterNode(Protocol):
     account: RemoteAccount

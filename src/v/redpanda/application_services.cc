@@ -281,7 +281,7 @@ void application::wire_up_redpanda_services(
       .get();
 
     if (
-      config::shard_local_cfg().cloud_topics_enabled()
+      config::shard_local_cfg().cloud_storage_enabled()
       && !ct_test_cfg.disable_cloud_topics) {
         vassert(
           archival_storage_enabled(),

@@ -30,7 +30,6 @@ from rptest.services.producer_swarm import ProducerSwarm
 from rptest.services.redpanda import (
     ResourceSettings,
     SISettings,
-    CLOUD_TOPICS_CONFIG_STR,
 )
 from rptest.services.rpk_producer import RpkProducer
 from rptest.tests.cluster_config_test import wait_for_version_sync
@@ -55,7 +54,6 @@ class RapidTopicRecreateTest(RedpandaTest):
             ),
             extra_rp_conf={
                 "iceberg_enabled": True,  # to create relevant STMs
-                CLOUD_TOPICS_CONFIG_STR: True,
             },
         )
         self.rpk = RpkTool(self.redpanda)
@@ -129,7 +127,6 @@ class TopicRecreateTest(RedpandaTest):
             extra_rp_conf={
                 "auto_create_topics_enabled": False,
                 "max_compacted_log_segment_size": 5 * (2 << 20),
-                CLOUD_TOPICS_CONFIG_STR: True,
             },
         )
 
