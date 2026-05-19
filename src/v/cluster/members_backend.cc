@@ -717,13 +717,13 @@ ss::future<std::error_code> members_backend::update_raft0_configuration(
         const bool should_cancel = in_flight.has_value()
                                    && in_flight->is_to_add(updated_vnode);
 
-        // members backend currently only allows single node add, or single node
-        // removal if this ever changes, refuse to cancel a configuration which
-        // may have unintended side effects
-        const bool cancellation_has_no_side_effects
-          = should_cancel && in_flight->replicas_to_add.size() == 1
-            && in_flight->replicas_to_remove.empty();
         if (should_cancel) {
+            // members backend currently only allows single node add, or single
+            // node removal, if this ever changes, refuse to cancel a
+            // configuration which may have unintended side effects
+            const bool cancellation_has_no_side_effects
+              = in_flight->replicas_to_add.size() == 1
+                && in_flight->replicas_to_remove.empty();
             if (cancellation_has_no_side_effects) {
                 co_return co_await cancel_raft0_add(update.id, revision);
             }
