@@ -509,8 +509,8 @@ feature_manager::auto_activate_features(
     return result;
 }
 
-ss::future<>
-feature_manager::replicate_feature_update_cmd(feature_update_cmd_data data) {
+ss::future<> feature_manager::replicate_feature_update_cmd(
+  feature_update_cmd_data data, std::optional<model::term_id> term) {
     auto new_version = data.logical_version;
     auto cmd = feature_update_cmd(
       std::move(data),
@@ -518,7 +518,8 @@ feature_manager::replicate_feature_update_cmd(feature_update_cmd_data data) {
     );
 
     auto timeout = model::timeout_clock::now() + status_retry;
-    auto err = co_await replicate_and_wait(_stm, _as, std::move(cmd), timeout);
+    auto err = co_await replicate_and_wait(
+      _stm, _as, std::move(cmd), timeout, term);
     if (err == errc::not_leader) {
         // Harmless, we lost leadership so the new controller
         // leader is responsible for picking up where we left off.
@@ -589,8 +590,8 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
     // hold leadership for.
     const bool need_barrier = !_caught_up_for_term.has_value()
                               || *_caught_up_for_term != *_is_leader_of;
+    const auto target_term = *_is_leader_of;
     if (need_barrier) {
-        const auto target_term = *_is_leader_of;
         auto deadline = model::timeout_clock::now() + status_retry;
         auto barrier = co_await _stm.local().insert_linearizable_barrier(
           deadline);
@@ -744,7 +745,7 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
             .action = feature_update_action::action_t::activate});
     }
 
-    co_await replicate_feature_update_cmd(std::move(data));
+    co_await replicate_feature_update_cmd(std::move(data), target_term);
 
     vlog(clusterlog.info, "Updated cluster (logical version {})", max_version);
 }

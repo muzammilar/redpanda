@@ -178,7 +178,9 @@ private:
 
     // Compose a command struct, replicate it via raft and wait for apply.
     // Silently swallow not_leader errors, raise on other errors;
-    ss::future<> replicate_feature_update_cmd(feature_update_cmd_data data);
+    ss::future<> replicate_feature_update_cmd(
+      feature_update_cmd_data data,
+      std::optional<model::term_id> term = std::nullopt);
 
     // Discover features that may now be auto-activated: usually this happens
     // when we activate a new logical version, but it may also happen if we
