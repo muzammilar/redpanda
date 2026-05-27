@@ -337,12 +337,9 @@ void log_info_collector::populate_logs_with_compaction_info(
     }
 }
 
-ss::future<> log_info_collector::collect_leveling_info(
-  chunked_vector<log_compaction_meta_ptr> logs) const {
-    if (logs.empty()) {
-        co_return;
-    }
-
+chunked_vector<metastore::leveling_info_spec>
+log_info_collector::build_leveling_specs(
+  log_list_t& logs_list, model::timestamp collection_timestamp) const {
     auto target_size
       = config::shard_local_cfg().cloud_topics_reconciliation_max_object_size();
     // TODO: Replace with cluster config.
@@ -351,10 +348,38 @@ ss::future<> log_info_collector::collect_leveling_info(
       static_cast<double>(target_size) * leveling_object_size_threshold);
 
     chunked_vector<metastore::leveling_info_spec> specs;
-    specs.reserve(logs.size());
-    for (const auto& log : logs) {
+    for (auto& log : logs_list) {
+        if (log.leveling.info_and_ts.has_value()) {
+            // TODO: replace with cluster config
+            auto sample_interval = 10min;
+            auto delta = to_time_point(collection_timestamp)
+                         - to_time_point(
+                           log.leveling.info_and_ts->collected_at);
+            if (delta <= sample_interval) {
+                vlog(
+                  compaction_log.debug,
+                  "Skipping leveling info collection for CTP {}, delta is "
+                  "less than sample interval.",
+                  log.ntp);
+                continue;
+            }
+        }
         specs.emplace_back(
-          metastore::leveling_info_spec{log->tidp, min_acceptable});
+          metastore::leveling_info_spec{log.tidp, min_acceptable});
+    }
+    return specs;
+}
+
+ss::future<> log_info_collector::collect_leveling_info(
+  log_set_t& logs_set,
+  log_list_t& logs_list,
+  leveling_queue& leveling_queue) const {
+    auto now = model::timestamp::now();
+
+    auto specs = build_leveling_specs(logs_list, now);
+
+    if (specs.empty()) {
+        co_return;
     }
 
     auto leveling_infos_res = co_await _metastore->get_leveling_infos(specs);
@@ -366,32 +391,63 @@ ss::future<> log_info_collector::collect_leveling_info(
         co_return;
     }
 
-    auto& leveling_infos = leveling_infos_res.value();
-    auto now = model::timestamp::now();
-    for (const auto& log : logs) {
-        auto it = leveling_infos.find(log->tidp);
-        if (it == leveling_infos.end()) {
+    auto leveling_infos = std::move(leveling_infos_res).value();
+
+    populate_logs_with_leveling_info(
+      leveling_infos, logs_set, leveling_queue, now);
+}
+
+void log_info_collector::populate_logs_with_leveling_info(
+  metastore::leveling_info_map& leveling_infos,
+  log_set_t& logs_set,
+  leveling_queue& leveling_queue,
+  model::timestamp collection_timestamp) const {
+    for (auto& [tidp, leveling_info] : leveling_infos) {
+        auto log_it = logs_set.find(tidp);
+        if (log_it == logs_set.end()) {
+            // CTP was concurrently unmanaged while the RPC was in flight.
             continue;
         }
+        auto& log = *log_it;
+        if (!leveling_info.has_value()) {
+            // Minimize logging on benign `missing_ntp` errors in case
+            // the `metastore` does not yet have any reconciled data for the log
+            // in question.
+            auto err = leveling_info.error();
+            auto lvl = err == metastore::errc::missing_ntp
+                           && !log->has_seen_reconciled_data
+                         ? ss::log_level::debug
+                         : ss::log_level::warn;
 
-        auto& result = it->second;
-        if (!result.has_value()) {
-            vlog(
-              compaction_log.warn,
+            vlogl(
+              compaction_log,
+              lvl,
               "Failed to collect leveling info for CTP {}: {}",
               log->ntp,
-              result.error());
+              err);
             continue;
         }
 
+        log->has_seen_reconciled_data = true;
         log->leveling.info_and_ts = leveling_info_and_timestamp{
-          .info = std::move(result).value(), .collected_at = now};
+          .info = std::move(leveling_info).value(),
+          .collected_at = collection_timestamp};
 
         vlog(
           compaction_log.debug,
           "Leveling info for CTP {} returned {}",
           log->ntp,
           log->leveling.info_and_ts->info);
+
+        // Queue per-range jobs and clear range data while preserving
+        // collected_at as a rate-limit cookie for the next tick.
+        auto& info = log->leveling.info_and_ts->info;
+        for (auto& range : info.ranges) {
+            auto job = ss::make_lw_shared<leveling_job>(log, range, info.epoch);
+            leveling_queue.push(job);
+            ++(log->leveling.outstanding_ranges);
+        }
+        info.ranges.clear();
     }
 }
 

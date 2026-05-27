@@ -11,7 +11,9 @@
 #include "cloud_topics/level_one/frontend_reader/tests/l1_reader_fixture.h"
 #include "cloud_topics/level_one/maintenance/log_info_collector.h"
 #include "cloud_topics/level_one/maintenance/meta.h"
+#include "cloud_topics/level_one/maintenance/scheduling_policies.h"
 #include "cluster/topic_configuration.h"
+#include "config/property.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
 #include "model/tests/random_batch.h"
@@ -116,17 +118,27 @@ TEST_F(LogInfoCollectorTestFixture, TestSampleLevelingInfo) {
         make_l1_objects(std::move(bs)).get();
     }
 
-    chunked_vector<l1::log_compaction_meta_ptr> logs;
-    logs.push_back(log_ptr);
+    l1::log_set_t logs_set;
+    auto [it, inserted] = logs_set.insert(log_ptr);
+    ASSERT_TRUE(inserted);
+    l1::log_list_t logs_list;
+    logs_list.push_back(*log_ptr);
+    l1::leveling_extent_reclamation_policy policy{
+      config::mock_binding<size_t>(size_t{1024} * 1024)};
+    l1::leveling_queue queue(policy.get_comparator());
 
-    log_info_collector.collect_leveling_info(std::move(logs)).get();
+    log_info_collector.collect_leveling_info(logs_set, logs_list, queue).get();
 
     ASSERT_TRUE(log_ptr->leveling.info_and_ts.has_value());
-    const auto& ranges = log_ptr->leveling.info_and_ts->info.ranges;
-    ASSERT_FALSE(ranges.empty());
+    // info.ranges is cleared after queueing; only the timestamp cookie is
+    // retained for the next tick.
+    ASSERT_TRUE(log_ptr->leveling.info_and_ts->info.ranges.empty());
+    ASSERT_GT(queue.size(), 0u);
+    ASSERT_EQ(queue.size(), log_ptr->leveling.outstanding_ranges);
     size_t total_size_bytes = 0;
-    for (const auto& r : ranges) {
-        total_size_bytes += r.size_bytes;
+    while (!queue.empty()) {
+        total_size_bytes += queue.top()->range.size_bytes;
+        queue.pop();
     }
     ASSERT_GT(total_size_bytes, 0u);
 }
