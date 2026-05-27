@@ -83,13 +83,13 @@ public:
       std::unique_ptr<topic_cfg_provider>,
       std::unique_ptr<max_compactible_offset_provider>);
 
-    // Populates `compaction_info_and_ts` within `log_compaction_meta`s from
+    // Populates `compaction.info_and_ts` within `log_compaction_meta`s from
     // the provided `log_list_t` by collecting each log's compaction info from
     // the metastore. It is not guaranteed that every log present in
-    // `log_list_t` will have its `compaction_info_and_ts` set e.g. due to
+    // `log_list_t` will have its `compaction.info_and_ts` set e.g. due to
     // concurrent removal or metastore errors. If a log already has
-    // `compaction_info_and_ts` set, it will not be collected again until an
-    // interval has elapsed and the current `compaction_info_and_ts` is
+    // `compaction.info_and_ts` set, it will not be collected again until an
+    // interval has elapsed and the current `compaction.info_and_ts` is
     // determined stale. Additionally, logs that have an inflight compaction in
     // process do not need to be collected. Logs that have their information
     // collected and deemed eligible for compaction will also have their

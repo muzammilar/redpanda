@@ -96,21 +96,22 @@ TEST_F(WorkerManagerTestFixture, AcquireWork) {
     auto meta = ss::make_lw_shared<l1::log_compaction_meta>(
       test_tidp, test_ntp);
     list.push_back(*meta);
-    using state = l1::log_compaction_meta::log_state;
-    meta->state = state::queued;
+    using status = l1::log_compaction_state::status;
+    meta->compaction.s = status::queued;
     pq.emplace(meta);
 
     auto work_opt = manager.try_acquire_work(ss::this_shard_id());
     ASSERT_TRUE(work_opt.has_value());
     ASSERT_EQ(work_opt.value()->ntp, test_ntp);
     ASSERT_EQ(work_opt.value()->tidp, test_tidp);
-    ASSERT_TRUE(work_opt.value()->inflight_shard.has_value());
-    ASSERT_EQ(work_opt.value()->state, state::inflight);
-    ASSERT_EQ(work_opt.value()->inflight_shard.value(), ss::this_shard_id());
+    ASSERT_TRUE(work_opt.value()->compaction.inflight_shard.has_value());
+    ASSERT_EQ(work_opt.value()->compaction.s, status::inflight);
+    ASSERT_EQ(
+      work_opt.value()->compaction.inflight_shard.value(), ss::this_shard_id());
 
     manager.complete_work(work_opt.value().get());
-    ASSERT_FALSE(work_opt.value()->inflight_shard.has_value());
-    ASSERT_EQ(work_opt.value()->state, state::idle);
+    ASSERT_FALSE(work_opt.value()->compaction.inflight_shard.has_value());
+    ASSERT_EQ(work_opt.value()->compaction.s, status::idle);
 }
 
 // Verifies that `dirty_ratio_scheduling_policy` orders partitions from
@@ -124,7 +125,7 @@ TEST(DirtyRatioSchedulingPolicyTest, OrdersHighestDirtyRatioFirst) {
         auto tidp = model::topic_id_partition(
           model::topic_id(uuid_t::create()), ntp.tp.partition);
         auto m = ss::make_lw_shared<l1::log_compaction_meta>(tidp, ntp);
-        m->compaction_info_and_ts = l1::compaction_info_and_timestamp{
+        m->compaction.info_and_ts = l1::compaction_info_and_timestamp{
           .info = {.dirty_ratio = ratio},
           .collected_at = model::timestamp::now(),
           .max_compactible_offset = kafka::offset::max(),
@@ -143,11 +144,11 @@ TEST(DirtyRatioSchedulingPolicyTest, OrdersHighestDirtyRatioFirst) {
     q.push(high);
 
     // Pop order should be: most dirty -> least dirty.
-    ASSERT_DOUBLE_EQ(q.top()->compaction_info_and_ts->info.dirty_ratio, 0.9);
+    ASSERT_DOUBLE_EQ(q.top()->compaction.info_and_ts->info.dirty_ratio, 0.9);
     q.pop();
-    ASSERT_DOUBLE_EQ(q.top()->compaction_info_and_ts->info.dirty_ratio, 0.5);
+    ASSERT_DOUBLE_EQ(q.top()->compaction.info_and_ts->info.dirty_ratio, 0.5);
     q.pop();
-    ASSERT_DOUBLE_EQ(q.top()->compaction_info_and_ts->info.dirty_ratio, 0.1);
+    ASSERT_DOUBLE_EQ(q.top()->compaction.info_and_ts->info.dirty_ratio, 0.1);
 }
 
 // Verifies that `compaction_lag_scheduling_policy` orders partitions from
@@ -161,7 +162,7 @@ TEST(CompactionLagSchedulingPolicyTest, OrdersHighestLagFirst) {
         auto tidp = model::topic_id_partition(
           model::topic_id(uuid_t::create()), ntp.tp.partition);
         auto m = ss::make_lw_shared<l1::log_compaction_meta>(tidp, ntp);
-        m->compaction_info_and_ts = l1::compaction_info_and_timestamp{
+        m->compaction.info_and_ts = l1::compaction_info_and_timestamp{
           .info = {.earliest_dirty_ts = ts},
           .collected_at = model::timestamp::now(),
           .max_compactible_offset = kafka::offset::max(),
@@ -182,14 +183,14 @@ TEST(CompactionLagSchedulingPolicyTest, OrdersHighestLagFirst) {
 
     // Pop order should be: oldest (highest lag) -> newest (lowest lag).
     ASSERT_EQ(
-      q.top()->compaction_info_and_ts->info.earliest_dirty_ts,
+      q.top()->compaction.info_and_ts->info.earliest_dirty_ts,
       model::timestamp{1000});
     q.pop();
     ASSERT_EQ(
-      q.top()->compaction_info_and_ts->info.earliest_dirty_ts,
+      q.top()->compaction.info_and_ts->info.earliest_dirty_ts,
       model::timestamp{5000});
     q.pop();
     ASSERT_EQ(
-      q.top()->compaction_info_and_ts->info.earliest_dirty_ts,
+      q.top()->compaction.info_and_ts->info.earliest_dirty_ts,
       model::timestamp{9000});
 }

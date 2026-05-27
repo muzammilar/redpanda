@@ -39,9 +39,9 @@ inline bool needs_compaction(
           ? topic_mcl.value()
           : config::shard_local_cfg().max_compaction_lag_ms();
     return compaction::log_needs_compaction(
-      log.compaction_info_and_ts->info.dirty_ratio,
+      log.compaction.info_and_ts->info.dirty_ratio,
       min_cleanable_dirty_ratio,
-      log.compaction_info_and_ts->info.earliest_dirty_ts,
+      log.compaction.info_and_ts->info.earliest_dirty_ts,
       max_compaction_lag_ms);
 }
 
@@ -181,7 +181,7 @@ log_info_collector::build_compaction_specs(
     specs.reserve(size);
 
     for (const auto& log : logs_list) {
-        if (log.state == log_compaction_meta::log_state::inflight) {
+        if (log.compaction.s == log_compaction_state::status::inflight) {
             // No need to sample inflight logs
             vlog(
               compaction_log.debug,
@@ -190,12 +190,12 @@ log_info_collector::build_compaction_specs(
             continue;
         }
 
-        if (log.compaction_info_and_ts.has_value()) {
+        if (log.compaction.info_and_ts.has_value()) {
             auto sample_interval
               = config::shard_local_cfg().cloud_topics_compaction_interval_ms();
             auto delta = to_time_point(collection_timestamp)
                          - to_time_point(
-                           log.compaction_info_and_ts->collected_at);
+                           log.compaction.info_and_ts->collected_at);
             if (delta <= sample_interval) {
                 vlog(
                   compaction_log.debug,
@@ -257,7 +257,7 @@ void log_info_collector::populate_logs_with_compaction_info(
     ntp_to_max_compactible_offset,
   model::timestamp collection_timestamp) const {
     for (auto& log : logs_list) {
-        if (log.state == log_compaction_meta::log_state::inflight) {
+        if (log.compaction.s == log_compaction_state::status::inflight) {
             // Don't step on compaction info that is actively being used.
             continue;
         }
@@ -300,7 +300,7 @@ void log_info_collector::populate_logs_with_compaction_info(
         auto max_compactible_offset = offset_it->second;
 
         log.has_seen_reconciled_data = true;
-        log.compaction_info_and_ts = compaction_info_and_timestamp{
+        log.compaction.info_and_ts = compaction_info_and_timestamp{
           .info = std::move(compaction_info).value(),
           .collected_at = collection_timestamp,
           .max_compactible_offset = max_compactible_offset};
@@ -310,10 +310,10 @@ void log_info_collector::populate_logs_with_compaction_info(
           "Compaction info for CTP {} returned {} with max_compactible_offset: "
           "{}",
           log.ntp,
-          log.compaction_info_and_ts->info,
+          log.compaction.info_and_ts->info,
           max_compactible_offset);
 
-        if (log.state != log_compaction_meta::log_state::idle) {
+        if (log.compaction.s != log_compaction_state::status::idle) {
             // We don't need to queue an already queued log.
             continue;
         }
@@ -330,7 +330,7 @@ void log_info_collector::populate_logs_with_compaction_info(
         if (needs_compaction(log, topic_cfg)) {
             auto ptr_it = logs_set.find(log.tidp);
             if (ptr_it != logs_set.end()) {
-                log.state = log_compaction_meta::log_state::queued;
+                log.compaction.s = log_compaction_state::status::queued;
                 compaction_queue.push(*ptr_it);
             }
         }
@@ -384,14 +384,14 @@ ss::future<> log_info_collector::collect_leveling_info(
             continue;
         }
 
-        log->leveling_info_and_ts = leveling_info_and_timestamp{
+        log->leveling.info_and_ts = leveling_info_and_timestamp{
           .info = std::move(result).value(), .collected_at = now};
 
         vlog(
           compaction_log.debug,
           "Leveling info for CTP {} returned {}",
           log->ntp,
-          log->leveling_info_and_ts->info);
+          log->leveling.info_and_ts->info);
     }
 }
 

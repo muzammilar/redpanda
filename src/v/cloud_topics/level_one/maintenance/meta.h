@@ -40,6 +40,32 @@ struct leveling_info_and_timestamp {
     model::timestamp collected_at;
 };
 
+// Per-CTP state for the compaction maintenance subsystem.
+struct log_compaction_state {
+    // Whether this log is:
+    // 1. `idle` (not yet queued for compaction)
+    // 2. `queued` (present in the scheduler's `log_compaction_queue`)
+    // 3. `inflight` (currently undergoing a compaction on a worker shard)
+    enum class status { idle, queued, inflight };
+    status s{status::idle};
+
+    // If set, this is cached compaction metadata obtained from the metastore
+    // at the `collected_at` time. Guaranteed to have a value if
+    // `s == queued` or `s == inflight`.
+    std::optional<compaction_info_and_timestamp> info_and_ts{std::nullopt};
+
+    // If set, this is the shard on which the log is currently undergoing an
+    // inflight compaction. Guaranteed to have a value if `s == inflight`.
+    std::optional<ss::shard_id> inflight_shard{std::nullopt};
+};
+
+// Per-CTP state for the leveling maintenance subsystem.
+struct log_leveling_state {
+    // If set, leveling metadata obtained from the metastore at
+    // `collected_at` time.
+    std::optional<leveling_info_and_timestamp> info_and_ts{std::nullopt};
+};
+
 struct log_compaction_meta {
     log_compaction_meta(model::topic_id_partition tidp, model::ntp ntp)
       : tidp(std::move(tidp))
@@ -47,28 +73,13 @@ struct log_compaction_meta {
 
     model::topic_id_partition tidp;
     model::ntp ntp;
-    // Whether this log is:
-    // 1. `idle` (not yet queued for compaction)
-    // 2. `queued` (present in the scheduler's `log_compaction_queue`)
-    // 3. `inflight` (currently undergoing a compaction on a worker shard)
-    enum class log_state { idle, queued, inflight } state{log_state::idle};
-    // If set, this is cached compaction metadata obtained from the metastore at
-    // the `collected_at` time. Guaranteed to have a value if `state == queued`
-    // or `state == inflight`.
-    std::optional<compaction_info_and_timestamp> compaction_info_and_ts{
-      std::nullopt};
-    // If set, leveling metadata for this log obtained from the metastore at
-    // `collected_at` time. Guaranteed to have a value if this log is queued
-    // or inflight as a leveling job.
-    std::optional<leveling_info_and_timestamp> leveling_info_and_ts{
-      std::nullopt};
-    // If set, this is the shard on which the log is currently undergoing an
-    // inflight compaction. Guaranteed to have a value if `state == inflight`.
-    std::optional<ss::shard_id> inflight_shard{std::nullopt};
     intrusive_list_hook link;
-    // If `true`, we have been able to sample compaction info from the
-    // `metastore` previously.
+    // If `true`, we have been able to sample info from the `metastore` for this
+    // CTP previously.
     bool has_seen_reconciled_data{false};
+
+    log_compaction_state compaction;
+    log_leveling_state leveling;
 };
 
 using log_compaction_meta_ptr = ss::lw_shared_ptr<log_compaction_meta>;

@@ -78,10 +78,10 @@ TEST_F(LogInfoCollectorTestFixture, TestInfoCollector) {
     while (!cached_metadata.empty()) {
         auto sample = cached_metadata.top();
         cached_metadata.pop();
-        ASSERT_TRUE(sample->compaction_info_and_ts.has_value());
-        ASSERT_FLOAT_EQ(sample->compaction_info_and_ts->info.dirty_ratio, 1.0);
+        ASSERT_TRUE(sample->compaction.info_and_ts.has_value());
+        ASSERT_FLOAT_EQ(sample->compaction.info_and_ts->info.dirty_ratio, 1.0);
         ASSERT_TRUE(
-          sample->compaction_info_and_ts->info.earliest_dirty_ts.has_value());
+          sample->compaction.info_and_ts->info.earliest_dirty_ts.has_value());
     }
 }
 
@@ -121,8 +121,8 @@ TEST_F(LogInfoCollectorTestFixture, TestSampleLevelingInfo) {
 
     log_info_collector.collect_leveling_info(std::move(logs)).get();
 
-    ASSERT_TRUE(log_ptr->leveling_info_and_ts.has_value());
-    const auto& ranges = log_ptr->leveling_info_and_ts->info.ranges;
+    ASSERT_TRUE(log_ptr->leveling.info_and_ts.has_value());
+    const auto& ranges = log_ptr->leveling.info_and_ts->info.ranges;
     ASSERT_FALSE(ranges.empty());
     size_t total_size_bytes = 0;
     for (const auto& r : ranges) {
