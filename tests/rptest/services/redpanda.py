@@ -6337,6 +6337,14 @@ class RedpandaService(Service, RedpandaServiceABC):
                 # Leadership moves may perturb the scrub, so disable it to
                 # streamline the actions below.
                 "enable_leader_balancer": False,
+                # Replica-set reassignments by the partition autobalancer
+                # (triggered by e.g. a recent decommission) can move a
+                # partition off the leader that just completed a full
+                # scrub, dropping `last_complete_scrub` from the new
+                # leader's manifest view and causing the polling loop
+                # below to time out. Disable replica autobalancing for
+                # the duration of the scrub. See CORE-15146.
+                "partition_autobalancing_mode": "off",
             },
             tolerate_stopped_nodes=True,
         )
