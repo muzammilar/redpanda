@@ -22,7 +22,7 @@ namespace cloud_storage {
 
 // each frame contains up to #cstore_max_frame_size elements, compressed with
 // deltafor
-constexpr size_t cstore_max_frame_size = 0x400;
+inline constexpr size_t cstore_max_frame_size = 1024;
 // Every #cstore_sampling_rate FOR (frame-of-reference), the byte position in
 // the outer frame is recorded to speed up random access. The distance in
 // elements between consecutive hints is FOR size * cstore_sampling_rate.
