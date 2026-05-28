@@ -684,7 +684,7 @@ class CreateTopicsResponseTest(RedpandaTest):
         topic_response = create_topics_response[0]
 
         res = self.kcl_client.describe_topic(topic_name)
-        describe_configs = [line.split() for line in res.strip().split("\n")]
+        describe_configs = [line.split() for line in res]
 
         for key, value, source in describe_configs:
             topic_config = self.get_config_by_name(topic_response, key)

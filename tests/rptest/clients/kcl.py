@@ -262,12 +262,12 @@ class KCL:
         with_docs: bool = False,
         with_types: bool = False,
         node: Any | None = None,
-    ) -> str:
+    ) -> list[str]:
         """
         :param topic: the name of the topic to describe
         :param with_docs: if true, include documention strings in the response
         :param with_types: if true, include config type information in the reponse
-        :return: stdout string
+        :return: output lines
         """
         cmd = ["admin", "configs", "describe", topic, "--type", "topic"]
         if with_docs:
@@ -278,12 +278,11 @@ class KCL:
         # describe puts the property table on stdout and (when --with-docs is
         # set) the doc-strings on stderr; merge so callers get one blob.
         stderr = subprocess.STDOUT if with_docs else subprocess.PIPE
-        output = self._cmd(cmd, attempts=1, node=node, stderr=stderr)
+        lines = self._cmd(cmd, attempts=1, node=node, stderr=stderr).splitlines()
         # Drop the "KEY TYPE VALUE SOURCE" header row prefixing the table.
-        first_line, sep, rest = output.partition("\n")
-        if sep and first_line.lstrip().startswith("KEY"):
-            output = rest
-        return output
+        if lines and lines[0].lstrip().startswith("KEY"):
+            lines = lines[1:]
+        return lines
 
     def offset_delete(
         self, group: str, topic_partitions: dict[str, list[int]]
