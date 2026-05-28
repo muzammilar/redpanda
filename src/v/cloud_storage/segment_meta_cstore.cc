@@ -384,10 +384,13 @@ public:
                 // no hint will be saved
                 return _hints.end();
             }
-            --frame_it; // go back to last frame that will be cloned
-            for (; frame_it != _base_offset._frames.begin(); --frame_it) {
-                // go back until we have a non-empty frame. this should be just
-                // an iteration
+            // walk back from the first frame that is *not* cloned until we
+            // find a non-empty cloned frame, then map its last value to the
+            // hint range we want to preserve. The loop has to include
+            // _frames.begin() itself, otherwise the single-cloned-frame case
+            // falls through and drops every hint in the cloned region.
+            do {
+                --frame_it;
                 if (auto frame_max_offset = frame_it->last_value()) {
                     auto to_clone_hint = _hints.lower_bound(
                       frame_max_offset.value());
@@ -399,7 +402,7 @@ public:
                       frame_max_offset.value());
                     return to_clone_hint;
                 }
-            }
+            } while (frame_it != _base_offset._frames.begin());
             return _hints.end();
         }();
 

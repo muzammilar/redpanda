@@ -869,10 +869,9 @@ BOOST_AUTO_TEST_CASE(slow_path_drops_hints_from_cloned_frame) {
     BOOST_TEST_MESSAGE(
       "hints_before=" << hints_before << " hints_after=" << hints_after);
 
-    // Captures the current (buggy) state: the rebuild walks frame 0 as a
-    // shared frame but drops every hint that belonged to it; only the
-    // single hint re-emitted at the start of frame 1 when rebuilding it
-    // survives.
+    // Frame 0's hints survive the share_frame clone; frame 1's first-element
+    // hint is re-emitted when frame 1 is rebuilt by re-appending its
+    // segments. Total is unchanged by the replacement.
     BOOST_REQUIRE_EQUAL(hints_before, expected_hints);
-    BOOST_REQUIRE_EQUAL(hints_after, 1);
+    BOOST_REQUIRE_EQUAL(hints_after, expected_hints);
 }
