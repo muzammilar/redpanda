@@ -64,6 +64,15 @@ public:
         // Matches Arrow's DEFAULT_MAX_STATISTICS_SIZE.
         static constexpr int32_t default_max_stats_length = 4096;
         int32_t max_stats_truncate_length = default_max_stats_length;
+
+        // Expected number of distinct values per column per row group, used
+        // to size bloom filters for non-boolean columns. 0 disables bloom
+        // filters. When enabled, default_bloom_filter_ndv (~12 KiB per
+        // column) is a reasonable starting point: filters are automatically
+        // discarded at flush if the fill ratio indicates FPP > ~10%, which
+        // occurs at roughly 1.5× the configured NDV (~15K for the default).
+        static constexpr size_t default_bloom_filter_ndv = 10'000;
+        size_t bloom_filter_ndv = 0;
     };
 
     // Create a new parquet file writer using the given options that
