@@ -27,3 +27,20 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "instance_info",
+    srcs = [
+        "instance_info.cc",
+        "instance_info_table.cc",
+    ],
+    hdrs = [
+        "instance_info.h",
+        "instance_info_impl.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)

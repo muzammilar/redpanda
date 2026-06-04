@@ -28,3 +28,17 @@ redpanda_cc_gtest(
         "@googletest//:gtest",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "instance_info_test",
+    timeout = "short",
+    srcs = [
+        "instance_info_test.cc",
+    ],
+    deps = [
+        "//src/v/metrics:instance_info",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
