@@ -42,3 +42,22 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "instance_type_detector_test",
+    timeout = "short",
+    srcs = [
+        "instance_type_detector_test.cc",
+        "//src/v/metrics:instance_type_detector_impl.h",
+    ],
+    deps = [
+        "//src/v/base",
+        "//src/v/bytes:iobuf",
+        "//src/v/http",
+        "//src/v/metrics:instance_type_detector",
+        "//src/v/test_utils:gtest",
+        "@boost//:beast",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)

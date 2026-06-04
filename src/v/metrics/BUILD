@@ -44,3 +44,35 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+# Private to the instance_type_detector library, but its unit test compiles it
+# directly to exercise query_ec2_instance_type().
+exports_files(
+    ["instance_type_detector_impl.h"],
+    visibility = ["//src/v/metrics/tests:__pkg__"],
+)
+
+redpanda_cc_library(
+    name = "instance_type_detector",
+    srcs = [
+        "instance_type_detector.cc",
+        "instance_type_detector_impl.h",
+    ],
+    hdrs = [
+        "instance_type_detector.h",
+    ],
+    implementation_deps = [
+        "//src/v/bytes:iobuf",
+        "//src/v/http",
+        "//src/v/net",
+        "//src/v/ssx:future_util",
+        "//src/v/utils:unresolved_address",
+        "@boost//:beast",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":instance_info",
+        "//src/v/base",
+        "@seastar",
+    ],
+)
