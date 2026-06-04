@@ -439,13 +439,43 @@ void log_info_collector::populate_logs_with_leveling_info(
           log->ntp,
           log->leveling.info_and_ts->info);
 
-        // Queue per-range jobs and clear range data while preserving
-        // collected_at as a rate-limit cookie for the next tick.
+        // This fresh metastore sample supersedes whatever we previously queued
+        // for the CTP, so drop its existing queue and rebuild it below from the
+        // newly collected ranges.
+        leveling_queue.clear(tidp);
+
+        // Consult the CTP's inflight ranges (dequeued for leveling but not yet
+        // committed) when rebuilding the queue.
+        auto& inflight = log->leveling.inflight_ranges;
+
+        // First, evict entries whose completion timestamp came before
+        // collection_timestamp, since the metastore logically knows about these
+        // updates already.
+        offset_interval_map<std::optional<model::timestamp>> retained;
+        auto inflight_stream = inflight.make_stream();
+        while (inflight_stream.has_next()) {
+            auto range = inflight_stream.next();
+            const auto& committed_at = range.value;
+            const bool expired
+              = committed_at.has_value()
+                && (collection_timestamp > committed_at.value());
+            if (!expired) {
+                retained.insert(
+                  range.base_offset, range.last_offset, committed_at);
+            }
+        }
+        inflight = std::move(retained);
+
         auto& info = log->leveling.info_and_ts->info;
         for (auto& range : info.ranges) {
+            // Skip any range that overlaps one already inflight; its rewrite
+            // has not yet committed, so the metastore still reports it as
+            // levelable. Inflight ranges are recorded on dequeue, not here.
+            if (inflight.overlaps(range.base_offset, range.last_offset)) {
+                continue;
+            }
             auto job = ss::make_lw_shared<leveling_job>(log, range, info.epoch);
             leveling_queue.push(job);
-            ++(log->leveling.outstanding_ranges);
         }
         info.ranges.clear();
     }

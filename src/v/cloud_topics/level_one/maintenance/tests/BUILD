@@ -36,6 +36,7 @@ redpanda_cc_gtest(
         "//src/v/cloud_topics/level_one/maintenance:log_info_collector",
         "//src/v/cloud_topics/level_one/maintenance:meta",
         "//src/v/cloud_topics/level_one/maintenance:scheduling_policies",
+        "//src/v/cloud_topics/level_one/metastore:offset_interval_map",
         "//src/v/cluster:fwd",
         "//src/v/cluster:members_table",
         "//src/v/cluster:partition_leaders_table",
