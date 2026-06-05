@@ -145,7 +145,7 @@ using log_set_t = chunked_hash_set<
 using log_list_t
   = intrusive_list<log_compaction_meta, &log_compaction_meta::link>;
 
-using cmp_t = std::function<bool(
+using compaction_cmp_t = std::function<bool(
   const log_compaction_meta_ptr&, const log_compaction_meta_ptr&)>;
 using log_compaction_queue = std::priority_queue<
   log_compaction_meta_ptr,

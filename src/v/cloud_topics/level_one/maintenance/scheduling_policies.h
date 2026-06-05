@@ -28,14 +28,14 @@ public:
     scheduling_policy& operator=(scheduling_policy&&) noexcept = default;
     virtual ~scheduling_policy() = default;
 
-    virtual cmp_t get_comparator() const noexcept = 0;
+    virtual compaction_cmp_t get_comparator() const noexcept = 0;
 };
 
 // Compacts partitions from highest dirty ratio (the ratio of unclean bytes in
 // the log to the total log size) to lowest.
 class dirty_ratio_scheduling_policy : public scheduling_policy {
 public:
-    cmp_t get_comparator() const noexcept final;
+    compaction_cmp_t get_comparator() const noexcept final;
 
 private:
     struct sort_policy {
@@ -57,7 +57,7 @@ private:
 // the first uncompacted record) to lowest.
 class compaction_lag_scheduling_policy : public scheduling_policy {
 public:
-    cmp_t get_comparator() const noexcept final;
+    compaction_cmp_t get_comparator() const noexcept final;
 
 private:
     struct sort_policy {
