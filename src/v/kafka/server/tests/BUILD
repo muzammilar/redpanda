@@ -450,6 +450,7 @@ redpanda_cc_btest(
         "//src/v/cluster:node_status_backend",
         "//src/v/cluster:self_test",
         "//src/v/cluster:topic_metrics_watcher",
+        "//src/v/kafka/protocol",
         "//src/v/kafka/server",
         "//src/v/redpanda/tests:fixture",
         "//src/v/test_utils:seastar_boost",
