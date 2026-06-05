@@ -8,6 +8,7 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "cloud_topics/level_one/maintenance/leveling/leveling_queue.h"
 #include "cloud_topics/level_one/maintenance/meta.h"
 #include "cloud_topics/level_one/maintenance/scheduler_probe.h"
 #include "cloud_topics/level_one/maintenance/scheduling_policies.h"
@@ -48,7 +49,7 @@ public:
     work_fut_has_value(l1::worker_manager& manager, ss::shard_id shard) {
         return manager._workers.invoke_on(
           shard, [](l1::compaction_worker& worker) {
-              return worker._work_fut.has_value();
+              return worker._compaction_work_fut.has_value();
           });
     }
 };
@@ -101,7 +102,7 @@ TEST_F(WorkerManagerTestFixture, AcquireWork) {
     meta->compaction.s = status::queued;
     pq.emplace(meta);
 
-    auto work_opt = manager.try_acquire_work(ss::this_shard_id());
+    auto work_opt = manager.try_acquire_compaction_work(ss::this_shard_id());
     ASSERT_TRUE(work_opt.has_value());
     ASSERT_EQ(work_opt.value()->ntp, test_ntp);
     ASSERT_EQ(work_opt.value()->tidp, test_tidp);
@@ -110,7 +111,7 @@ TEST_F(WorkerManagerTestFixture, AcquireWork) {
     ASSERT_EQ(
       work_opt.value()->compaction.inflight_shard.value(), ss::this_shard_id());
 
-    manager.complete_work(work_opt.value().get());
+    manager.complete_compaction_work(work_opt.value().get());
     ASSERT_FALSE(work_opt.value()->compaction.inflight_shard.has_value());
     ASSERT_EQ(work_opt.value()->compaction.s, status::idle);
 }

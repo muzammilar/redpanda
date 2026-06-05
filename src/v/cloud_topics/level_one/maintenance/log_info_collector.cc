@@ -190,22 +190,6 @@ log_info_collector::build_compaction_specs(
             continue;
         }
 
-        if (log.compaction.info_and_ts.has_value()) {
-            auto sample_interval
-              = config::shard_local_cfg().cloud_topics_compaction_interval_ms();
-            auto delta = to_time_point(collection_timestamp)
-                         - to_time_point(
-                           log.compaction.info_and_ts->collected_at);
-            if (delta <= sample_interval) {
-                vlog(
-                  compaction_log.debug,
-                  "Skipping compaction info collection for CTP {}, delta is "
-                  "less than sample interval.",
-                  log.ntp);
-                continue;
-            }
-        }
-
         auto topic_cfg_opt = _topic_metadata_provider->get_topic_cfg(
           model::topic_namespace_view(log.ntp));
 
@@ -338,32 +322,16 @@ void log_info_collector::populate_logs_with_compaction_info(
 }
 
 chunked_vector<metastore::leveling_info_spec>
-log_info_collector::build_leveling_specs(
-  log_list_t& logs_list, model::timestamp collection_timestamp) const {
+log_info_collector::build_leveling_specs(log_list_t& logs_list) const {
     auto target_size
       = config::shard_local_cfg().cloud_topics_reconciliation_max_object_size();
-    // TODO: Replace with cluster config.
-    constexpr double leveling_object_size_threshold = 0.5;
+    auto ratio
+      = config::shard_local_cfg().cloud_topics_leveling_min_extent_size_ratio();
     auto min_acceptable = static_cast<size_t>(
-      static_cast<double>(target_size) * leveling_object_size_threshold);
+      static_cast<double>(target_size) * ratio);
 
     chunked_vector<metastore::leveling_info_spec> specs;
     for (auto& log : logs_list) {
-        if (log.leveling.info_and_ts.has_value()) {
-            // TODO: replace with cluster config
-            auto sample_interval = 10min;
-            auto delta = to_time_point(collection_timestamp)
-                         - to_time_point(
-                           log.leveling.info_and_ts->collected_at);
-            if (delta <= sample_interval) {
-                vlog(
-                  compaction_log.debug,
-                  "Skipping leveling info collection for CTP {}, delta is "
-                  "less than sample interval.",
-                  log.ntp);
-                continue;
-            }
-        }
         specs.emplace_back(
           metastore::leveling_info_spec{log.tidp, min_acceptable});
     }
@@ -376,7 +344,7 @@ ss::future<> log_info_collector::collect_leveling_info(
   leveling_queue& leveling_queue) const {
     auto now = model::timestamp::now();
 
-    auto specs = build_leveling_specs(logs_list, now);
+    auto specs = build_leveling_specs(logs_list);
 
     if (specs.empty()) {
         co_return;
@@ -439,13 +407,43 @@ void log_info_collector::populate_logs_with_leveling_info(
           log->ntp,
           log->leveling.info_and_ts->info);
 
-        // Queue per-range jobs and clear range data while preserving
-        // collected_at as a rate-limit cookie for the next tick.
+        // This fresh metastore sample supersedes whatever we previously queued
+        // for the CTP, so drop its existing queue and rebuild it below from the
+        // newly collected ranges.
+        leveling_queue.clear(tidp);
+
+        // Consult the CTP's inflight ranges (dequeued for leveling but not yet
+        // committed) when rebuilding the queue.
+        auto& inflight = log->leveling.inflight_ranges;
+
+        // First, evict entries whose completion timestamp came before
+        // collection_timestamp, since the metastore logically knows about these
+        // updates already.
+        offset_interval_map<std::optional<model::timestamp>> retained;
+        auto inflight_stream = inflight.make_stream();
+        while (inflight_stream.has_next()) {
+            auto range = inflight_stream.next();
+            const auto& committed_at = range.value;
+            const bool expired
+              = committed_at.has_value()
+                && (collection_timestamp > committed_at.value());
+            if (!expired) {
+                retained.insert(
+                  range.base_offset, range.last_offset, committed_at);
+            }
+        }
+        inflight = std::move(retained);
+
         auto& info = log->leveling.info_and_ts->info;
         for (auto& range : info.ranges) {
+            // Skip any range that overlaps one already inflight; its rewrite
+            // has not yet committed, so the metastore still reports it as
+            // levelable. Inflight ranges are recorded on dequeue, not here.
+            if (inflight.overlaps(range.base_offset, range.last_offset)) {
+                continue;
+            }
             auto job = ss::make_lw_shared<leveling_job>(log, range, info.epoch);
             leveling_queue.push(job);
-            ++(log->leveling.outstanding_ranges);
         }
         info.ranges.clear();
     }

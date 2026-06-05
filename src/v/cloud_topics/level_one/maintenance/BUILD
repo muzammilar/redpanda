@@ -99,6 +99,7 @@ redpanda_cc_library(
     deps = [
         "//src/v/cloud_topics/level_one/metastore",
         "//src/v/cloud_topics/level_one/metastore:leveling_range_builder",
+        "//src/v/cloud_topics/level_one/metastore:offset_interval_map",
         "//src/v/container:chunked_hash_map",
         "//src/v/container:intrusive",
         "//src/v/model",
@@ -152,6 +153,7 @@ redpanda_cc_library(
     deps = [
         ":logger",
         ":meta",
+        "//src/v/cloud_topics/level_one/maintenance/leveling:leveling_queue",
         "//src/v/cloud_topics/level_one/metastore",
         "//src/v/cluster",
         "//src/v/cluster:fwd",

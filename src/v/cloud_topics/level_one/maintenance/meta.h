@@ -13,7 +13,7 @@
 #include "base/format_to.h"
 #include "cloud_topics/level_one/metastore/leveling_range_builder.h"
 #include "cloud_topics/level_one/metastore/metastore.h"
-#include "cloud_topics/level_one/metastore/offset_interval_set.h"
+#include "cloud_topics/level_one/metastore/offset_interval_map.h"
 #include "container/chunked_hash_map.h"
 #include "container/intrusive_list_helpers.h"
 #include "model/fundamental.h"
@@ -66,17 +66,20 @@ struct log_leveling_state {
     // `collected_at` time.
     std::optional<leveling_info_and_timestamp> info_and_ts{std::nullopt};
 
-    // Number of leveling ranges from this CTP that are currently queued or
-    // inflight.
-    //
-    // TODO: Use as a reference count for controlling `info_and_ts`'s
-    // lifetime. `info_and_ts` should be cleared when all of the outstanding
-    // ranges have been leveled (i.e. when this value reaches 0 again).
-    size_t outstanding_ranges{0};
-
     // Refcount of inflight leveling ranges per worker shard for this CTP.
-    // A shard is present iff it is currently running at least one range.
     chunked_hash_map<ss::shard_id, size_t> inflight_shards;
+
+    // Leveling ranges for this CTP that have been dequeued for leveling and are
+    // inflight (mapped to nullopt) or have since committed (mapped to their
+    // completion timestamp), keyed by offset range. The collector consults this
+    // to avoid re-queueing a range that *overlaps* one already inflight: a
+    // range stays "undersized" in the metastore until its rewrite commits, and
+    // that commit is not visible to a sample taken before it, so without this
+    // we would re-queue an overlapping replacement every tick. A committed
+    // entry is evicted once its timestamp predates a collection's snapshot, at
+    // which point the metastore is guaranteed to reflect the commit. Mutated
+    // only on `worker_manager_shard`.
+    offset_interval_map<std::optional<model::timestamp>> inflight_ranges;
 };
 
 struct log_compaction_meta {
@@ -171,11 +174,6 @@ using foreign_leveling_job_ptr = ss::foreign_ptr<leveling_job_ptr>;
 
 using leveling_cmp_t
   = std::function<bool(const leveling_job_ptr&, const leveling_job_ptr&)>;
-
-using leveling_queue = std::priority_queue<
-  leveling_job_ptr,
-  chunked_vector<leveling_job_ptr>,
-  leveling_cmp_t>;
 
 enum class compaction_job_state {
     // No compaction job is currently inflight.
