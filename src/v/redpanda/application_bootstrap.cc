@@ -225,7 +225,11 @@ void application::start_bootstrap_services() {
     storage_node.invoke_on_all(&storage::node::start).get();
     local_monitor.invoke_on_all(&cluster::node::local_monitor::start).get();
 
-    storage.invoke_on_all(&storage::api::start).get();
+    storage
+      .invoke_on_all([](storage::api& a) {
+          return a.start(storage::internal::chunk_cache::prealloc::yes);
+      })
+      .get();
 
     // As soon as storage is up, load our feature_table snapshot, if any,
     // so that all other services may rely on having features activated as soon

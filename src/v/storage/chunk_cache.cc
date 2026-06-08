@@ -21,13 +21,23 @@
 namespace storage::internal {
 
 chunk_cache::chunk_cache() noexcept
-  : _size_target(memory_groups().chunk_cache_min_memory())
-  , _size_limit(memory_groups().chunk_cache_max_memory())
-  , _chunk_size(config::shard_local_cfg().append_chunk_size()) {}
+  : _chunk_size(config::shard_local_cfg().append_chunk_size()) {}
 
-ss::future<> chunk_cache::start() {
+ss::future<> chunk_cache::start(prealloc do_prealloc) {
+    if (_started) {
+        co_return;
+    }
+
+    const auto& mem = memory_groups();
+    _size_target = mem.chunk_cache_min_memory();
+    _size_limit = mem.chunk_cache_max_memory();
     setup_metrics();
-    co_await preallocate();
+
+    _started = true;
+
+    if (do_prealloc) {
+        co_await preallocate();
+    }
 }
 
 ss::future<> chunk_cache::preallocate() {
@@ -78,6 +88,7 @@ void chunk_cache::setup_metrics() {
 }
 
 void chunk_cache::add(const chunk_ptr& chunk) {
+    assert_started();
     if (_size_available >= _size_target) {
         _size_total -= _chunk_size;
         return;
@@ -90,6 +101,7 @@ void chunk_cache::add(const chunk_ptr& chunk) {
 }
 
 ss::future<chunk_cache::chunk_ptr> chunk_cache::get() {
+    assert_started();
     // don't steal if there are waiters
     if (!_sem.waiters()) {
         return do_get();
@@ -131,9 +143,8 @@ chunk_cache::chunk_ptr chunk_cache::pop_or_allocate() {
     return nullptr;
 }
 
-chunk_cache& chunks() {
-    static thread_local chunk_cache cache;
-    return cache;
+void chunk_cache::assert_started() {
+    vassert(_started, "Need to call chunk_cache::start() before utilizing it.");
 }
 
 } // namespace storage::internal

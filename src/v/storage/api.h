@@ -14,6 +14,7 @@
 #include "base/seastarx.h"
 #include "features/feature_table.h"
 #include "model/fundamental.h"
+#include "storage/chunk_cache.h"
 #include "storage/disk.h"
 #include "storage/kvstore.h"
 #include "storage/log_manager.h"
@@ -38,7 +39,11 @@ public:
           std::make_unique<kvstore>(
             _kv_conf_cb(), ss::this_shard_id(), _resources, _feature_table)) {}
 
-    ss::future<> start() {
+    ss::future<> start(
+      internal::chunk_cache::prealloc prealloc
+      = internal::chunk_cache::prealloc::no) {
+        // Start the per-shard chunk cache before anything can write segments.
+        co_await _resources.start(prealloc);
         if (!_kvstore) {
             _kvstore = std::make_unique<kvstore>(
               _kv_conf_cb(), ss::this_shard_id(), _resources, _feature_table);
@@ -69,14 +74,14 @@ public:
 
     ss::future<> stop() {
         stop_cluster_uuid_waiters();
-        auto f = ss::now();
         if (_log_mgr) {
-            f = _log_mgr->stop();
+            co_await _log_mgr->stop();
         }
         if (_kvstore) {
-            return f.then([this] { return _kvstore->stop(); });
+            co_await _kvstore->stop();
         }
-        return f;
+
+        co_await _resources.stop();
     }
 
     void reset() {
