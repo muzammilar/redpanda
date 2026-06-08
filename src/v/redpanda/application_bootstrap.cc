@@ -258,17 +258,16 @@ void application::bootstrap_from_kvstore() {
       .get();
 }
 
-void application::start_storage_services() {
+void application::start_storage_services(test_cfg cfg) {
     syschecks::systemd_message("Starting storage services").get();
 
     // single instance
     storage_node.invoke_on_all(&storage::node::start).get();
     local_monitor.invoke_on_all(&cluster::node::local_monitor::start).get();
 
+    storage::internal::chunk_cache::prealloc prealloc{cfg.chunk_cache_prealloc};
     storage
-      .invoke_on_all([](storage::api& a) {
-          return a.start(storage::internal::chunk_cache::prealloc::yes);
-      })
+      .invoke_on_all([prealloc](storage::api& a) { return a.start(prealloc); })
       .get();
 }
 
@@ -504,9 +503,7 @@ void application::wire_up_and_start_rpc_service() {
 }
 
 void application::wire_up_and_start(
-  ::stop_signal& app_signal,
-  bool test_mode,
-  cloud_topics::test_fixture_cfg ct_test_cfg) {
+  ::stop_signal& app_signal, bool test_mode, test_cfg cfg) {
     // Setup the app level abort service
     construct_service(_as).get();
 
@@ -525,7 +522,7 @@ void application::wire_up_and_start(
 
     // Storage services.
     wire_up_storage_services();
-    start_storage_services();
+    start_storage_services(cfg);
 
     // Begin the cluster discovery manager so we can confirm our initial node
     // ID. A valid node ID is required before we can initialize the rest of our
@@ -544,7 +541,7 @@ void application::wire_up_and_start(
       "config::node().node_id() should have an assigned value at this point in "
       "the start-up process.");
     auto node_id = config::node().node_id().value();
-    wire_up_runtime_services(node_id, app_signal, ct_test_cfg);
+    wire_up_runtime_services(node_id, app_signal, cfg.ct_test_cfg);
 
     if (test_mode) {
         // When running inside a unit test fixture, we may fast-forward
@@ -580,7 +577,7 @@ void application::wire_up_and_start(
         controller->set_ready().get();
     }
 
-    start_runtime_services(app_signal, ct_test_cfg);
+    start_runtime_services(app_signal, cfg.ct_test_cfg);
 
     if (_proxy_config && !config::node().recovery_mode_enabled) {
         _proxy->start().get();

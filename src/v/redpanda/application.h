@@ -88,6 +88,18 @@ inline const auto redpanda_start_time{
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch())};
 
+// Knobs used to tweak start-up behavior, primarily for tests. In production
+// the defaults apply.
+struct test_cfg {
+    // Cloud-topics test-fixture overrides (flush loop, level-zero GC, etc.).
+    cloud_topics::test_fixture_cfg ct_test_cfg{};
+    // Whether to eagerly pre-allocate the per-shard chunk cache pool on
+    // storage start. Multi-node fixture tests that run several brokers in one
+    // reactor may want to disable it to avoid N-way memory allocations for each
+    // chunk cache.
+    bool chunk_cache_prealloc{true};
+};
+
 class application : public ssx::sharded_service_container {
 public:
     int run(int, char**);
@@ -100,9 +112,7 @@ public:
       std::optional<YAML::Node> audit_log_client_cfg = std::nullopt);
     void check_environment();
     void wire_up_and_start(
-      ::stop_signal&,
-      bool test_mode = false,
-      cloud_topics::test_fixture_cfg ct_test_cfg = {});
+      ::stop_signal&, bool test_mode = false, test_cfg cfg = {});
     void post_start_tasks();
 
     void init_crashtracker(::stop_signal& app_signal);
@@ -262,7 +272,7 @@ private:
 
     // Starts storage services across shards required early on in the
     // bootstrap process.
-    void start_storage_services();
+    void start_storage_services(test_cfg cfg);
 
     // Constructs services across shards meant for Redpanda runtime.
     void wire_up_runtime_services(

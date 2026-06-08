@@ -131,7 +131,10 @@ redpanda_thread_fixture::redpanda_thread_fixture(
         app.bootstrap_from_kvstore();
         app.establish_cluster_view();
         app.check_environment();
-        app.wire_up_and_start(*app_signal, true, ct_test_cfg);
+        app.wire_up_and_start(
+          *app_signal,
+          true,
+          test_cfg{.ct_test_cfg = ct_test_cfg, .chunk_cache_prealloc = false});
     } catch (...) {
         // shutdown half-initialized app nicely so that its destructor doesn't
         // assert and the exception bubbles up
@@ -357,7 +360,10 @@ void redpanda_thread_fixture::restart(should_wipe w) {
     app.bootstrap_from_kvstore();
     app.establish_cluster_view();
     app.check_environment();
-    app.wire_up_and_start(*app_signal, true, ct_test_cfg);
+    app.wire_up_and_start(
+      *app_signal,
+      true,
+      test_cfg{.ct_test_cfg = ct_test_cfg, .chunk_cache_prealloc = false});
 }
 
 void redpanda_thread_fixture::configure(
