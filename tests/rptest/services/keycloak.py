@@ -443,7 +443,7 @@ class KeycloakService(Service):
             try:
                 node.account.ssh(f"{KC} build", allow_fail=False)
                 node.account.ssh_capture(self._start_cmd(), allow_fail=False)
-                monitor.wait_until("(main) Profile dev activated.", timeout_sec=30)
+                monitor.wait_until("(main) Profile dev activated.", timeout_sec=60)
             except Exception:
                 self._dump_startup_failure(node)
                 raise
