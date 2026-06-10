@@ -83,8 +83,6 @@ compaction_worker::compaction_worker(
 
 ss::future<> compaction_worker::start() {
     _probe.setup_metrics();
-    resume_compaction_work_loop();
-    resume_leveling_work_loop();
     co_return;
 }
 

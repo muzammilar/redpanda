@@ -37,7 +37,10 @@ public:
           nullptr,
           ss::default_scheduling_group(),
           nullptr);
-        co_await manager._workers.invoke_on_all(&l1::compaction_worker::start);
+        co_await manager._workers.invoke_on_all(
+          &l1::compaction_worker::resume_compaction_work_loop);
+        co_await manager._workers.invoke_on_all(
+          &l1::compaction_worker::resume_leveling_work_loop);
     }
 
     ss::future<l1::compaction_worker::worker_state>
