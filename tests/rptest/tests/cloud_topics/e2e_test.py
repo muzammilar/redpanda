@@ -120,7 +120,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
                 config=config,
             )
 
-    def wait_until_reconciled(self, topic: str, partition: int):
+    def wait_until_reconciled(self, topic: str, partition: int, timeout_sec: int = 60):
         def get_offsets():
             last_record: int | None = None
             output = self.rpk.consume(
@@ -153,7 +153,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
 
         wait_until(
             condition=is_reconciled,
-            timeout_sec=60,
+            timeout_sec=timeout_sec,
             backoff_sec=5,
             err_msg=message,
             retry_on_exc=True,
@@ -307,6 +307,65 @@ class EndToEndCloudTopicsBase(EndToEndTest):
             stable_sec,
             timeout_sec,
         )
+
+    def assert_extents_well_sized(
+        self,
+        topic: str,
+        max_target_size: int,
+        min_extent_ratio: float,
+        max_size_tolerance: float = 2.0,
+    ):
+        """Assert that, after leveling, `topic`'s L1 extents reflect the
+        consolidation leveling is responsible for:
+        * no extent is grossly larger than `max_target_size` (a soft cap).
+        * no partition retains two *adjacent* extents that leveling could have
+          folded into one, i.e. a consecutive pair (in `base_offset` order)
+          that are both undersized (below `min_extent_ratio * max_target_size`,
+          the leveling-eligibility threshold) yet whose combined size still
+          fits under `max_target_size`. Such a pair is direct evidence leveling
+          left work undone.
+
+        Note we deliberately do *not* assert that every extent is well-sized:
+        a workload that fragments faster than the target can fill (e.g. a
+        trickle spread across many partitions) leaves isolated undersized
+        extents that have no foldable neighbour — a lone small extent between
+        two ~`max_target_size` extents cannot be merged without exceeding the
+        cap. Those are an expected, irreducible outcome, not a leveling defect.
+        """
+        by_partition = ct_utils.get_l1_extent_lengths_by_partition(
+            self.admin, topic=topic
+        )
+        assert by_partition, "expected at least one L1 extent to inspect"
+
+        min_healthy = int(min_extent_ratio * max_target_size)
+        max_allowed = int(max_target_size * max_size_tolerance)
+
+        for partition, lengths in sorted(by_partition.items()):
+            undersized = [length for length in lengths if length < min_healthy]
+            self.logger.info(
+                f"L1 extent sizes after leveling for partition {partition}: "
+                f"count={len(lengths)}, total={sum(lengths)}, "
+                f"undersized={len(undersized)}, lengths={lengths}"
+            )
+
+            oversized = [length for length in lengths if length > max_allowed]
+            assert not oversized, (
+                f"partition {partition}: found {len(oversized)} extents larger "
+                f"than {max_allowed}B ({max_size_tolerance}x the "
+                f"{max_target_size}B soft cap): {oversized}"
+            )
+
+            for i in range(len(lengths) - 1):
+                a, b = lengths[i], lengths[i + 1]
+                foldable = (
+                    a < min_healthy and b < min_healthy and a + b <= max_target_size
+                )
+                assert not foldable, (
+                    f"partition {partition}: adjacent undersized extents at "
+                    f"index {i} ({a}B) and {i + 1} ({b}B) sum to {a + b}B "
+                    f"(<= the {max_target_size}B target) — leveling should have "
+                    f"folded them into one well-sized extent"
+                )
 
 
 class EndToEndCloudTopicsTest(EndToEndCloudTopicsBase):
@@ -809,6 +868,14 @@ class EndToEndCloudTopicsLevelingTest(EndToEndCloudTopicsBase):
 
         # Wait for leveling to fully converge before verifying data integrity.
         self.wait_for_leveling_quiesce()
+
+        # Assert that extents are now well sized post leveling.
+        assert self.topic
+        self.assert_extents_well_sized(
+            topic=self.topic,
+            max_target_size=self.RECONCILIATION_MAX_OBJECT_SIZE,
+            min_extent_ratio=self.MIN_EXTENT_RATIO,
+        )
 
         # Read all records back to verify data integrity.
         self.consume()
