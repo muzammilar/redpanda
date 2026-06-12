@@ -2949,8 +2949,7 @@ ss::future<storage::append_result> consensus::disk_append(
     auto cfg = storage::log_append_config{
       // no fsync explicit on a per write, we verify at the end to
       // batch fsync
-      storage::log_append_config::fsync::no,
-      model::timeout_clock::now() + _disk_timeout()};
+      storage::log_append_config::fsync::no};
 
     return details::for_each_ref_extract_configuration(
              _log->offsets().dirty_offset,

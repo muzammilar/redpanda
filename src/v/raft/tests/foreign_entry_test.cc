@@ -66,15 +66,15 @@ struct foreign_entry_fixture {
 
     std::vector<storage::append_result> write_n(const std::size_t n) {
         auto cfg = storage::log_append_config{
-          storage::log_append_config::fsync::no, model::no_timeout};
+          storage::log_append_config::fsync::no};
         std::vector<storage::append_result> res;
         res.push_back(
           gen_data_record_batch_reader(n)
-            .for_each_ref(get_log()->make_appender(cfg), cfg.timeout)
+            .for_each_ref(get_log()->make_appender(cfg), model::no_timeout)
             .get());
         res.push_back(
           gen_config_record_batch_reader(n)
-            .for_each_ref(get_log()->make_appender(cfg), cfg.timeout)
+            .for_each_ref(get_log()->make_appender(cfg), model::no_timeout)
             .get());
         get_log()->flush().get();
         return res;
