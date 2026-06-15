@@ -247,7 +247,7 @@ ss::future<> replicate_batcher::flush(
         auto meta = _ptr->meta();
         const auto term = model::term_id(meta.term);
         chunked_vector<model::record_batch> data;
-        std::vector<item_ptr> notifications;
+        notifications_t notifications;
         ssx::semaphore_units item_memory_units(_max_batch_size_sem, 0);
         auto force_flush_requested = false;
         auto has_quorum_ack_requests = false;
@@ -330,7 +330,7 @@ ss::future<> replicate_batcher::flush(
 template<typename Predicate>
 static void propagate_result(
   result<replicate_result> r,
-  std::vector<replicate_batcher::item_ptr>& notifications,
+  replicate_batcher::notifications_t& notifications,
   const Predicate& pred) {
     if (r.has_error()) {
         // propagate an error
@@ -351,8 +351,8 @@ static void propagate_result(
     }
 }
 
-static void propagate_current_exception(
-  std::vector<replicate_batcher::item_ptr>& notifications) {
+static void
+propagate_current_exception(replicate_batcher::notifications_t& notifications) {
     // iterate backward to calculate last offsets
     auto e = std::current_exception();
     for (auto& n : notifications) {
@@ -361,7 +361,7 @@ static void propagate_current_exception(
 }
 
 ss::future<> replicate_batcher::do_flush(
-  std::vector<replicate_batcher::item_ptr> notifications,
+  replicate_batcher::notifications_t notifications,
   append_entries_request req,
   std::vector<ssx::semaphore_units> u,
   absl::flat_hash_map<vnode, follower_req_seq> seqs) {
