@@ -1182,6 +1182,12 @@ MANUAL_FINALIZE_MIN_OLDEST_RELEASE = (25, 3, 15)
 # incorrect advance on a subsequent gating-loop tick.
 MANUAL_FINALIZE_HOLD_DWELL_SEC = 20
 
+# Number of upgrade -> perturb -> downgrade rollback cycles to run before the
+# final upgrade is finalized. Each cycle simulates discovering a problem after
+# upgrading the binaries and rolling back to the prior release without
+# finalizing -- the core capability the unfinalized-upgrade feature provides.
+DOWNGRADE_ROLLBACK_CYCLES = 2
+
 
 class ManualFinalizationUpgradeTest(FeaturesTestBase):
     """
@@ -1211,6 +1217,7 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         # rather than hard-coded as in the synthetic test.
         self.old_logical = None
         self.new_logical = None
+        self.old_release = None
 
     def setUp(self):
         # Defer cluster start: the old release must be installed before the
@@ -1228,6 +1235,7 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
             f"features_auto_finalization backport "
             f"{MANUAL_FINALIZE_MIN_OLD_RELEASE}; cannot opt out before upgrade"
         )
+        self.old_release = old_release
         self.logger.info(f"Starting cluster on old release {old_release}")
         self.installer.install(self.redpanda.nodes, old_release)
         self.redpanda.start()
@@ -1296,6 +1304,27 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
             backoff_sec=2,
             err_msg="cluster did not become healthy after restart",
         )
+
+    def _downgrade_all_to(self, release):
+        """Roll every node back to `release` (an older binary) without
+        finalizing, then wait for the cluster to come back healthy. This is the
+        rollback the unfinalized-upgrade feature is meant to preserve: because
+        the active version was never advanced, the older binary can still run on
+        the existing on-disk data."""
+        self.installer.install(self.redpanda.nodes, release)
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+        self._wait_for_cluster_settled()
+
+    def _perturb(self, phase):
+        """Hook for stressing the cluster while it sits in a given state (e.g.
+        upgraded-but-unfinalized, or downgraded) -- produce/consume, topic and
+        config churn, leadership moves, etc. -- for a while.
+
+        Intentionally left empty for now: this commit establishes the
+        upgrade/downgrade groundwork only. The perturbation is fleshed out in a
+        later commit; until then this is a no-op so the skeleton can be exercised
+        on its own."""
+        self.logger.info(f"perturb (intentionally empty for now): phase={phase}")
 
     def _disable_auto_finalization(self):
         self.redpanda.set_cluster_config({"features_auto_finalization": False})
@@ -1532,6 +1561,113 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         )
         assert finalized.active_version == head_logical
         assert finalized.version_after_finalization == head_logical
+
+    @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    def test_downgrade_before_finalize(self):
+        """
+        Exercise the core promise of the unfinalized-upgrade feature: after
+        upgrading the binaries with auto-finalization disabled, the cluster runs
+        unfinalized (giving up post-finalization features) and can be downgraded
+        back to the prior release if a problem is found -- repeatedly -- before
+        the upgrade is eventually finalized.
+
+        Foundation only: the perturbation applied in each state is a no-op
+        placeholder (see _perturb); what we do to stress the system is defined
+        later.
+        """
+        self._start_at_old()
+        self._disable_auto_finalization()
+        old_release = self.old_release
+        old_logical = self.old_logical
+
+        for cycle in range(DOWNGRADE_ROLLBACK_CYCLES):
+            self.logger.info(f"rollback cycle {cycle}: upgrade -> perturb -> downgrade")
+
+            # Upgrade every binary to HEAD. With auto-finalization off the active
+            # version is held at the old version (READY_TO_FINALIZE), which is
+            # what keeps the downgrade available.
+            self._restart_at_new(self.redpanda.nodes)
+            status = self._wait_for_status_state(
+                features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE
+            )
+            assert self.admin.get_features()["cluster_version"] == old_logical
+            assert not status.auto_finalization_enabled
+
+            self._perturb(f"cycle{cycle}-upgraded-unfinalized")
+
+            # Roll back to the old release WITHOUT finalizing, simulating that an
+            # issue was found. The cluster must return healthy on the old binary
+            # with the active version unchanged.
+            self._downgrade_all_to(old_release)
+            assert self.admin.get_features()["cluster_version"] == old_logical
+            assert all(
+                self.admin.get_features(node=n)["node_latest_version"] == old_logical
+                for n in self.redpanda.nodes
+            ), "not all nodes report the old binary's logical version after downgrade"
+
+            self._perturb(f"cycle{cycle}-downgraded")
+
+        # Final attempt: upgrade once more, and this time complete it by
+        # finalizing. The active version advances to the head version.
+        self.logger.info("final attempt: upgrade -> finalize")
+        self._restart_at_new(self.redpanda.nodes)
+        self._wait_for_status_state(features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE)
+        self._finalize()
+        self._wait_for_version_everywhere(self.new_logical)
+        finalized = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_FINALIZED
+        )
+        assert finalized.active_version == self.new_logical
+        assert finalized.version_after_finalization == self.new_logical
+
+    @cluster(
+        num_nodes=3,
+        log_allow_list=RESTART_LOG_ALLOW_LIST
+        + [
+            # The old binary aborts via vassert when it detects the cluster
+            # advanced past the version it supports. Allow the rejection message
+            # plus the generic crash artifacts the intentional abort emits.
+            "Incompatible downgrade detected",
+            "assert - Backtrace:",
+            "Recorded crash reason to crash file",
+        ],
+    )
+    def test_downgrade_rejected_after_finalize(self):
+        """
+        The flip side of test_downgrade_before_finalize: once the upgrade is
+        finalized the active version has advanced to the new version, so the old
+        binary can no longer run on the (now finalized) data. Rolling a node back
+        must fail at startup with the "Incompatible downgrade detected" guard --
+        this is what makes finalization the point of no return.
+        """
+        self._start_at_old()
+        self._disable_auto_finalization()
+        old_release = self.old_release
+
+        # Upgrade and this time finalize, advancing the active version past what
+        # the old binary supports.
+        self._restart_at_new(self.redpanda.nodes)
+        self._wait_for_status_state(features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE)
+        self._finalize()
+        self._wait_for_version_everywhere(self.new_logical)
+        self._wait_for_status_state(features_pb2.FINALIZATION_STATE_FINALIZED)
+
+        # Attempt to roll a single node back to the old release. The old binary
+        # reads the persisted feature table, sees the cluster advanced past the
+        # version it supports, and aborts startup rather than corrupt state.
+        victim = self.redpanda.nodes[-1]
+        self.redpanda.stop_node(victim)
+        self.installer.install([victim], old_release)
+        self.redpanda.start_node(victim, expect_fail=True)
+        assert self.redpanda.search_log_node(
+            victim, "Incompatible downgrade detected"
+        ), "old binary should refuse to start after finalization"
+
+        # The data is intact and only the too-old binary was rejected: restoring
+        # HEAD lets the node rejoin healthy, leaving a clean cluster for teardown.
+        self.redpanda.stop_node(victim, forced=True)
+        self.installer.install([victim], RedpandaInstaller.HEAD)
+        self.redpanda.start_node(victim)
 
 
 class ManualFinalizationLicenseTest(RedpandaTest):
