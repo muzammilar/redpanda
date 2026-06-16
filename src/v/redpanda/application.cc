@@ -535,7 +535,8 @@ void application::setup_public_metrics() {
       {{"io_queue_total_read_ops", metrics::public_metrics_handle},
        {"io_queue_total_write_ops", metrics::public_metrics_handle},
        {"memory_allocated_memory", metrics::public_metrics_handle},
-       {"memory_free_memory", metrics::public_metrics_handle}})
+       {"memory_free_memory", metrics::public_metrics_handle},
+       {"io_queue_consumption", metrics::public_metrics_handle}})
       .get();
 
     _public_metrics.start().get();
