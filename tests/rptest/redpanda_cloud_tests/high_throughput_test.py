@@ -484,7 +484,6 @@ class HighThroughputTest(PreallocNodesMixin, RedpandaCloudTest):
             )
         finally:
             producer.stop()
-            producer.wait(timeout_sec=600)
 
         # Once some segments are generated, configure the topic to use more
         # realistic sizes.
@@ -1277,7 +1276,6 @@ class HighThroughputTest(PreallocNodesMixin, RedpandaCloudTest):
 
         finally:
             producer.stop()
-            producer.wait(timeout_sec=600)
 
         self.redpanda.assert_cluster_is_reusable()
 
@@ -1387,7 +1385,6 @@ class HighThroughputTest(PreallocNodesMixin, RedpandaCloudTest):
 
         finally:
             producer.stop()
-            producer.wait(timeout_sec=600)
 
         self.redpanda.assert_cluster_is_reusable()
 
@@ -1496,7 +1493,6 @@ class HighThroughputTest(PreallocNodesMixin, RedpandaCloudTest):
             finally:
                 self.logger.info("Stopping thrashing consumers")
                 consumer.stop()
-                consumer.wait(timeout_sec=600)
 
             final_cloud_storage_cache_op_put = self.redpanda.metric_sum(
                 "redpanda_cloud_storage_cache_op_put_total",
@@ -1554,7 +1550,6 @@ class HighThroughputTest(PreallocNodesMixin, RedpandaCloudTest):
 
         finally:
             producer.stop()
-            producer.wait(timeout_sec=600)
             self.free_preallocated_nodes()
 
         self.redpanda.assert_cluster_is_reusable()
@@ -1681,7 +1676,6 @@ class HighThroughputTest(PreallocNodesMixin, RedpandaCloudTest):
 
         finally:
             producer.stop()
-            producer.wait(timeout_sec=600)
             self.free_preallocated_nodes()
 
         self.redpanda.assert_cluster_is_reusable()
