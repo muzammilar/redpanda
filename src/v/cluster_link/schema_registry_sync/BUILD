@@ -17,3 +17,27 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "mirroring_task",
+    srcs = [
+        "mirroring_task.cc",
+    ],
+    hdrs = [
+        "mirroring_task.h",
+    ],
+    implementation_deps = [
+        "//src/v/container:chunked_hash_map",
+        "//src/v/container:chunked_vector",
+        "//src/v/pandaproxy/schema_registry:types",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":source_reader",
+        "//src/v/cluster_link:impl",
+        "//src/v/cluster_link/model",
+        "//src/v/model",
+        "//src/v/schema:registry",
+        "@seastar",
+    ],
+)
