@@ -5100,6 +5100,18 @@ configuration::configuration()
       {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
       3,
       {.min = 1})
+  , cloud_topics_metastore_sst_chunk_size(
+      *this,
+      "cloud_topics_metastore_sst_chunk_size",
+      "Size of the byte ranges used to read metastore LSM SST files from "
+      "object storage into the local cache. Reads hydrate only the chunks they "
+      "cover, and a read spanning several uncached chunks fetches them in "
+      "parallel. Smaller chunks reduce read and cache amplification for point "
+      "reads; larger chunks reduce request count for scans. Changing the value "
+      "invalidates previously cached chunks.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      24_MiB,
+      {.min = 1_MiB})
   , cloud_topics_produce_write_inflight_limit(
       *this,
       "cloud_topics_produce_write_inflight_limit",
