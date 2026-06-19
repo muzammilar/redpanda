@@ -80,8 +80,9 @@ public:
       ss::abort_source& as);
 
     /// Replicate a set_min_allowed_local_threshold_cmd to advance the
-    /// compaction floor used by prefix_truncate_below_lro. The floor is
-    /// monotonic; replication is skipped when `value` does not advance it.
+    /// compaction floor consumed by the prefix-truncate loop (the tiered_cloud
+    /// retention path). The floor is monotonic; replication is skipped when
+    /// `value` does not advance it.
     ss::future<std::expected<std::monostate, ctp_stm_api_errc>>
     set_min_allowed_local_threshold(
       kafka::offset value,

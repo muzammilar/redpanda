@@ -56,8 +56,8 @@ struct ctp_stm_accessor {
         return stm.max_removable_local_log_offset();
     }
 
-    ss::future<model::offset> prefix_truncate_target(ctp_stm& stm) {
-        return stm.prefix_truncate_target();
+    ss::future<model::offset> compute_local_retention_offset(ctp_stm& stm) {
+        return stm.compute_local_retention_offset();
     }
 };
 } // namespace cloud_topics
@@ -1433,7 +1433,7 @@ TEST_F_CORO(
       stm->state().get_min_allowed_local_threshold(), kafka::offset{50});
 }
 
-TEST_F_CORO(ctp_stm_fixture, prefix_truncate_target_no_signal_no_trim) {
+TEST_F_CORO(ctp_stm_fixture, compute_local_retention_offset_no_signal_no_trim) {
     // Under floor semantics, an unset min allowed local threshold + no
     // retention policy means no trim.
     // The target collapses to model::offset::min(), even when LRLO has
@@ -1456,13 +1456,14 @@ TEST_F_CORO(ctp_stm_fixture, prefix_truncate_target_no_signal_no_trim) {
     // no retention config the target is min (no signal to trim).
     ASSERT_NE_CORO(lrlo, model::offset::min());
     ASSERT_EQ_CORO(
-      co_await accessor.prefix_truncate_target(*stm), model::offset::min());
+      co_await accessor.compute_local_retention_offset(*stm),
+      model::offset::min());
     ASSERT_EQ_CORO(
       stm->state().get_min_allowed_local_threshold(), kafka::offset::min());
 }
 
 TEST_F_CORO(
-  ctp_stm_fixture, prefix_truncate_target_clamped_when_hint_below_lro) {
+  ctp_stm_fixture, compute_local_retention_offset_clamped_when_hint_below_lro) {
     co_await start();
     co_await wait_for_leader(raft::default_timeout());
     auto& leader = node(*get_leader());
@@ -1485,7 +1486,7 @@ TEST_F_CORO(
       leader, kafka::offset{60});
     ASSERT_TRUE_CORO(res.has_value());
 
-    auto target = co_await accessor.prefix_truncate_target(*stm);
+    auto target = co_await accessor.compute_local_retention_offset(*stm);
     auto expected = leader.raft()->log()->to_log_offset(
       kafka::offset_cast(kafka::offset{60}));
     ASSERT_EQ_CORO(target, expected);
@@ -1494,7 +1495,8 @@ TEST_F_CORO(
 }
 
 TEST_F_CORO(
-  ctp_stm_fixture, prefix_truncate_target_uses_lrlo_when_hint_above_lro) {
+  ctp_stm_fixture,
+  compute_local_retention_offset_uses_lrlo_when_hint_above_lro) {
     co_await start();
     co_await wait_for_leader(raft::default_timeout());
     auto& leader = node(*get_leader());
@@ -1516,12 +1518,13 @@ TEST_F_CORO(
       leader, kafka::offset{40});
     ASSERT_TRUE_CORO(res.has_value());
 
-    ASSERT_EQ_CORO(co_await accessor.prefix_truncate_target(*stm), lrlo);
+    ASSERT_EQ_CORO(
+      co_await accessor.compute_local_retention_offset(*stm), lrlo);
 }
 
 TEST_F_CORO(
   ctp_stm_fixture,
-  prefix_truncate_target_driven_by_min_allowed_local_threshold) {
+  compute_local_retention_offset_driven_by_min_allowed_local_threshold) {
     // Under floor semantics, a min allowed local threshold below LRLO drives
     // the prefix-truncate target (no retention config in this fixture).
     co_await start();
@@ -1547,5 +1550,6 @@ TEST_F_CORO(
     // min_allowed_local_threshold=50 is below LRLO, so it drives the target.
     auto expected = leader.raft()->log()->to_log_offset(
       kafka::offset_cast(kafka::offset{50}));
-    ASSERT_EQ_CORO(co_await accessor.prefix_truncate_target(*stm), expected);
+    ASSERT_EQ_CORO(
+      co_await accessor.compute_local_retention_offset(*stm), expected);
 }
