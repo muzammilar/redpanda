@@ -12,6 +12,7 @@
 
 #include "bytes/iobuf.h"
 #include "http/request_builder.h"
+#include "http/utils.h"
 #include "pandaproxy/logger.h"
 #include "pandaproxy/schema_registry/rest_client/parse.h"
 #include "ssx/future-util.h"
@@ -20,8 +21,10 @@
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/as_future.hh>
 
+#include <boost/beast/http/status.hpp>
 #include <boost/beast/http/verb.hpp>
 
+#include <optional>
 #include <utility>
 #include <variant>
 
@@ -30,6 +33,39 @@ namespace pandaproxy::schema_registry::rest_client {
 namespace {
 
 constexpr std::string_view accept_json = "application/json";
+
+// Schema Registry error_code for the subject-not-found condition.
+constexpr int32_t error_code_subject_not_found = 40401;
+
+// Percent-encode a subject for use as a single path segment. The qualified wire
+// form ":.ctx:sub" contains ':' which must be encoded ("%3A"); uri_encode also
+// encodes an interior '/' ("%2F") so the subject stays within one segment.
+// request_builder/ada leave the resulting "%XX" intact (verified), so the
+// subject is encoded exactly once.
+ss::sstring encode_subject(const context_subject& subject) {
+    return http::uri_encode(subject.to_string(), http::uri_encode_slash::yes);
+}
+
+// Translate a terminal 404 into subject_not_found using the error_code that
+// perform_request attached. Anything else (other statuses, unrecognized codes)
+// passes through unchanged.
+domain_error
+translate_not_found(domain_error err, const context_subject& subject) {
+    auto* call = std::get_if<http_call_error>(&err);
+    if (call == nullptr) {
+        return err;
+    }
+    auto* status = std::get_if<http_status_error>(call);
+    if (status == nullptr) {
+        return err;
+    }
+    if (
+      status->status == boost::beast::http::status::not_found
+      && status->error_code == error_code_subject_not_found) {
+        return domain_error{subject_not_found{subject}};
+    }
+    return err;
+}
 
 // If the terminal error carries an http_status_error, parse its (already
 // collected) response body for the Schema Registry error_code and attach it.
@@ -185,6 +221,35 @@ client::list_subjects(retry_chain_node& rtc) {
     }
     auto parsed = co_await parse_subjects(
       std::move(response.value()), _qualified);
+    if (!parsed.has_value()) {
+        co_return std::unexpected(domain_error{std::move(parsed.error())});
+    }
+    co_return std::move(parsed.value());
+}
+
+ss::future<expected<chunked_vector<schema_version>>>
+client::list_subject_versions(
+  const context_subject& subject, retry_chain_node& rtc) {
+    auto gate = maybe_gate();
+    if (!gate.has_value()) {
+        co_return std::unexpected(std::move(gate.error()));
+    }
+    // TODO: support query params for filtering (deleted/deletedOnly,
+    // deletedAsNegative) and pagination (offset/limit); v1 lists live versions
+    // only.
+    auto request
+      = http::request_builder{}
+          .method(boost::beast::http::verb::get)
+          .path(fmt::format("/subjects/{}/versions", encode_subject(subject)))
+          .header("accept", accept_json);
+    maybe_add_basic_auth(request);
+
+    auto response = co_await perform_request(rtc, std::move(request));
+    if (!response.has_value()) {
+        co_return std::unexpected(
+          translate_not_found(std::move(response.error()), subject));
+    }
+    auto parsed = co_await parse_subject_versions(std::move(response.value()));
     if (!parsed.has_value()) {
         co_return std::unexpected(domain_error{std::move(parsed.error())});
     }

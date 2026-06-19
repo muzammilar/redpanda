@@ -77,6 +77,7 @@ redpanda_cc_library(
     implementation_deps = [
         ":parse",
         "//src/v/http:request_builder",
+        "//src/v/http:utils",
         "//src/v/pandaproxy:logger",
         "//src/v/ssx:future_util",
         "@boost//:beast",

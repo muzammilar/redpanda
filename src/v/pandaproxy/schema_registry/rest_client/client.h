@@ -67,6 +67,11 @@ public:
     ss::future<expected<chunked_vector<context_subject>>>
     list_subjects(retry_chain_node& rtc);
 
+    /// GET /subjects/{subject}/versions — list the (live) version numbers
+    /// registered under \p subject. A missing subject yields subject_not_found.
+    ss::future<expected<chunked_vector<schema_version>>> list_subject_versions(
+      const context_subject& subject, retry_chain_node& rtc);
+
     /// Stops the transport and drains in-flight requests. Must be called before
     /// destroying the client.
     ss::future<> shutdown();

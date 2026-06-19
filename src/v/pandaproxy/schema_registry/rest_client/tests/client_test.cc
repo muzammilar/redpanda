@@ -255,3 +255,60 @@ TEST(rest_client, list_subjects_after_shutdown_is_aborted) {
     ASSERT_FALSE(res.has_value());
     EXPECT_TRUE(std::holds_alternative<rc::aborted_error>(res.error()));
 }
+
+TEST(rest_client, list_subject_versions_success_and_encodes_subject) {
+    rc::client client{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _))
+            .WillOnce([](
+                        bh::request_header<>&& r,
+                        std::optional<iobuf>,
+                        ss::lowres_clock::duration) {
+                EXPECT_EQ(r.method(), bh::verb::get);
+                // ":.ctx:orders" must be percent-encoded exactly once.
+                EXPECT_EQ(r.target(), "/subjects/%3A.ctx%3Aorders/versions");
+                return ss::make_ready_future<http::downloaded_response>(
+                  http::downloaded_response{
+                    .status = bh::status::ok,
+                    .body = iobuf::from("[1, 2, 3]")});
+            });
+      }),
+      endpoint,
+      std::nullopt,
+      pps::qualified_subjects_enabled::yes};
+
+    pps::context_subject subject{pps::context{".ctx"}, pps::subject{"orders"}};
+    ss::abort_source as;
+    retry_chain_node rtc(as, 5s, 100ms);
+    auto res = client.list_subject_versions(subject, rtc).get();
+    client.shutdown().get();
+
+    ASSERT_TRUE(res.has_value());
+    EXPECT_THAT(
+      *res,
+      ElementsAre(
+        pps::schema_version{1},
+        pps::schema_version{2},
+        pps::schema_version{3}));
+}
+
+TEST(rest_client, list_subject_versions_subject_not_found) {
+    rc::client client{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _))
+            .WillOnce(respond(
+              bh::status::not_found,
+              R"({"error_code": 40401, "message": "Subject 'orders' not found."})"));
+      }),
+      endpoint};
+
+    auto subject = pps::context_subject::unqualified("orders");
+    ss::abort_source as;
+    retry_chain_node rtc(as, 5s, 100ms);
+    auto res = client.list_subject_versions(subject, rtc).get();
+    client.shutdown().get();
+
+    ASSERT_FALSE(res.has_value());
+    ASSERT_TRUE(std::holds_alternative<rc::subject_not_found>(res.error()));
+    EXPECT_EQ(std::get<rc::subject_not_found>(res.error()).subject, subject);
+}
