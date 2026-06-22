@@ -24,6 +24,7 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/verb.hpp>
 
+#include <chrono>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -197,6 +198,12 @@ ss::future<std::expected<iobuf, domain_error>> client::perform_request(
               co_await attach_error_code(domain_error{std::move(error.err)}));
         }
 
+        vlog(
+          srlog.trace,
+          "schema registry request failed, retrying in {}ms: {}",
+          std::chrono::duration_cast<std::chrono::milliseconds>(permit.delay)
+            .count(),
+          error.err);
         retriable_errors.push_back(error.kind);
         last_error.emplace(std::move(error.err));
         auto sleep_fut = co_await ss::coroutine::as_future(
