@@ -11,17 +11,7 @@
 
 namespace datalake {
 
-iceberg::struct_type schemaless_struct_type() {
-    return schemaless_desc::build();
-}
-
-iceberg::schema default_schema() {
-    return iceberg::schema{
-      .schema_struct = schemaless_struct_type(),
-      .schema_id = iceberg::schema::default_id,
-      .identifier_field_ids = {},
-    };
-}
+iceberg::struct_type rp_base_struct_type() { return rp_base_desc::build(); }
 
 namespace {
 
