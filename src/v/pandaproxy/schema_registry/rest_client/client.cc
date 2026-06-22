@@ -93,6 +93,9 @@ ss::future<domain_error> attach_error_code(domain_error err) {
     auto parsed = co_await parse_error_body(iobuf::from(status->body));
     if (parsed.has_value()) {
         status->error_code = parsed->error_code;
+        if (!parsed->message.empty()) {
+            status->message = std::move(parsed->message);
+        }
     }
     co_return std::move(err);
 }

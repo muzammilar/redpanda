@@ -220,6 +220,8 @@ TEST(rest_client, list_subjects_http_error_attaches_error_code) {
     EXPECT_EQ(status.status, bh::status::not_found);
     ASSERT_TRUE(status.error_code.has_value());
     EXPECT_EQ(*status.error_code, 40401);
+    ASSERT_TRUE(status.message.has_value());
+    EXPECT_EQ(*status.message, "not found");
 }
 
 TEST(rest_client, list_subjects_parse_error_surfaced) {

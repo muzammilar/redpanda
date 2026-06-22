@@ -39,6 +39,13 @@ struct http_status_error {
     // 40401 (subject not found) or 40402 (version not found). Left empty when
     // there is no parseable body.
     std::optional<int32_t> error_code;
+    // The human-readable `message` from the Schema Registry error body, when
+    // one was present (typically a fixed string templated on the
+    // subject/context/version/id). Captured so the available detail is
+    // discoverable from the interface; note the raw `body` above is what
+    // currently gets logged. Empty when there is no parseable body or no
+    // `message` field.
+    std::optional<ss::sstring> message;
 
     fmt::iterator format_to(fmt::iterator it) const {
         it = fmt::format_to(it, "{}", status);
