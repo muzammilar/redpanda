@@ -109,6 +109,30 @@ TEST(rest_client, list_subjects_request_shape_and_success) {
         pps::context_subject(pps::context{".ctx"}, pps::subject{"s2"})));
 }
 
+TEST(rest_client, list_subjects_deleted_adds_query_param) {
+    rc::client client{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _))
+            .WillOnce([](
+                        bh::request_header<>&& r,
+                        std::optional<iobuf>,
+                        ss::lowres_clock::duration) {
+                EXPECT_EQ(r.target(), "/subjects?deleted=true");
+                return ss::make_ready_future<http::downloaded_response>(
+                  http::downloaded_response{
+                    .status = bh::status::ok, .body = iobuf::from("[]")});
+            });
+      }),
+      endpoint};
+
+    ss::abort_source as;
+    retry_chain_node rtc(as, 5s, 100ms);
+    auto res = client.list_subjects(rtc, pps::include_deleted::yes).get();
+    client.shutdown().get();
+
+    ASSERT_TRUE(res.has_value());
+}
+
 TEST(rest_client, list_subjects_no_credentials_omits_auth_header) {
     rc::client client{
       make_http_client([](mock_client& m) {
@@ -294,6 +318,33 @@ TEST(rest_client, list_subject_versions_success_and_encodes_subject) {
         pps::schema_version{3}));
 }
 
+TEST(rest_client, list_subject_versions_deleted_adds_query_param) {
+    rc::client client{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _))
+            .WillOnce([](
+                        bh::request_header<>&& r,
+                        std::optional<iobuf>,
+                        ss::lowres_clock::duration) {
+                EXPECT_EQ(r.target(), "/subjects/orders/versions?deleted=true");
+                return ss::make_ready_future<http::downloaded_response>(
+                  http::downloaded_response{
+                    .status = bh::status::ok, .body = iobuf::from("[1]")});
+            });
+      }),
+      endpoint};
+
+    auto subject = pps::context_subject::unqualified("orders");
+    ss::abort_source as;
+    retry_chain_node rtc(as, 5s, 100ms);
+    auto res = client
+                 .list_subject_versions(subject, rtc, pps::include_deleted::yes)
+                 .get();
+    client.shutdown().get();
+
+    ASSERT_TRUE(res.has_value());
+}
+
 TEST(rest_client, list_subject_versions_subject_not_found) {
     rc::client client{
       make_http_client([](mock_client& m) {
@@ -346,6 +397,38 @@ TEST(rest_client, get_schema_by_version_success) {
     EXPECT_EQ(res->schema.sub(), subject);
     EXPECT_EQ(res->version, pps::schema_version{3});
     EXPECT_EQ(res->id, pps::schema_id{100001});
+}
+
+TEST(rest_client, get_schema_by_version_deleted_adds_query_param) {
+    constexpr std::string_view body
+      = R"({"subject":"User","version":3,"id":100001,"schemaType":"AVRO",)"
+        R"("schema":"{\"type\":\"record\",\"name\":\"User\"}"})";
+    rc::client client{
+      make_http_client([body](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _))
+            .WillOnce([body](
+                        bh::request_header<>&& r,
+                        std::optional<iobuf>,
+                        ss::lowres_clock::duration) {
+                EXPECT_EQ(r.target(), "/subjects/User/versions/3?deleted=true");
+                return ss::make_ready_future<http::downloaded_response>(
+                  http::downloaded_response{
+                    .status = bh::status::ok, .body = iobuf::from(body)});
+            });
+      }),
+      endpoint};
+
+    auto subject = pps::context_subject::unqualified("User");
+    ss::abort_source as;
+    retry_chain_node rtc(as, 5s, 100ms);
+    auto res
+      = client
+          .get_schema_by_version(
+            subject, pps::schema_version{3}, rtc, pps::include_deleted::yes)
+          .get();
+    client.shutdown().get();
+
+    ASSERT_TRUE(res.has_value());
 }
 
 TEST(rest_client, get_schema_by_version_subject_not_found) {

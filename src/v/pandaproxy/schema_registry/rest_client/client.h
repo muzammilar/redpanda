@@ -64,24 +64,31 @@ public:
     client& operator=(client&&) = delete;
     ~client() = default;
 
-    /// GET /subjects — list all subjects across all contexts.
+    /// GET /subjects — list all subjects across all contexts. With \p deleted
+    /// set to yes, soft-deleted subjects are included in the listing.
     ss::future<std::expected<chunked_vector<context_subject>, domain_error>>
-    list_subjects(retry_chain_node& rtc);
+    list_subjects(
+      retry_chain_node& rtc, include_deleted deleted = include_deleted::no);
 
-    /// GET /subjects/{subject}/versions — list the (live) version numbers
-    /// registered under \p subject. A missing subject yields subject_not_found.
+    /// GET /subjects/{subject}/versions — list the version numbers registered
+    /// under \p subject. With \p deleted set to yes, soft-deleted versions are
+    /// included. A missing subject yields subject_not_found.
     ss::future<std::expected<chunked_vector<schema_version>, domain_error>>
     list_subject_versions(
-      const context_subject& subject, retry_chain_node& rtc);
+      const context_subject& subject,
+      retry_chain_node& rtc,
+      include_deleted deleted = include_deleted::no);
 
     /// GET /subjects/{subject}/versions/{version} — fetch one version of a
-    /// subject's schema. A missing subject yields subject_not_found; a missing
+    /// subject's schema. With \p deleted set to yes, a soft-deleted version can
+    /// be fetched. A missing subject yields subject_not_found; a missing
     /// version (of an existing subject) yields version_not_found.
     ss::future<std::expected<stored_schema, domain_error>>
     get_schema_by_version(
       const context_subject& subject,
       schema_version version,
-      retry_chain_node& rtc);
+      retry_chain_node& rtc,
+      include_deleted deleted = include_deleted::no);
 
     /// Stops the transport and drains in-flight requests. Must be called before
     /// destroying the client.

@@ -48,6 +48,16 @@ ss::sstring encode_subject(const context_subject& subject) {
     return http::uri_encode(subject.to_string(), http::uri_encode_slash::yes);
 }
 
+// Append ?deleted=true when soft-deleted entries should be included. Omitted
+// otherwise, so the default request shape and behavior are unchanged. The
+// Schema Registry parses the value as true when it equals "true" or "1".
+void add_deleted_param(
+  http::request_builder& request, include_deleted deleted) {
+    if (deleted) {
+        request.query_param_kv("deleted", "true");
+    }
+}
+
 // Translate a terminal 404 into a typed not-found error using the error_code
 // that perform_request attached. Anything else (other statuses, unrecognized
 // codes) passes through unchanged. version is set only for
@@ -221,18 +231,19 @@ ss::future<std::expected<iobuf, domain_error>> client::perform_request(
 }
 
 ss::future<std::expected<chunked_vector<context_subject>, domain_error>>
-client::list_subjects(retry_chain_node& rtc) {
+client::list_subjects(retry_chain_node& rtc, include_deleted deleted) {
     auto gate = maybe_gate();
     if (!gate.has_value()) {
         co_return std::unexpected(std::move(gate.error()));
     }
-    // TODO: support query params for pagination (offset/limit) and filtering
-    // (deleted/deletedOnly, subjectPrefix); v1 lists all live subjects across
-    // all contexts.
+    // TODO: offset/limit pagination, deletedOnly, and subjectPrefix filtering
+    // are unimplemented. Redpanda SR doesn't support deletedOnly/offset/limit;
+    // subjectPrefix is a deferred source-filtering optimization.
     auto request = http::request_builder{}
                      .method(boost::beast::http::verb::get)
                      .path("/subjects")
                      .header("accept", accept_json);
+    add_deleted_param(request, deleted);
     maybe_add_basic_auth(request);
 
     auto response = co_await perform_request(rtc, std::move(request));
@@ -249,19 +260,21 @@ client::list_subjects(retry_chain_node& rtc) {
 
 ss::future<std::expected<chunked_vector<schema_version>, domain_error>>
 client::list_subject_versions(
-  const context_subject& subject, retry_chain_node& rtc) {
+  const context_subject& subject,
+  retry_chain_node& rtc,
+  include_deleted deleted) {
     auto gate = maybe_gate();
     if (!gate.has_value()) {
         co_return std::unexpected(std::move(gate.error()));
     }
-    // TODO: support query params for filtering (deleted/deletedOnly,
-    // deletedAsNegative) and pagination (offset/limit); v1 lists live versions
-    // only.
+    // TODO: offset/limit pagination, deletedOnly, and deletedAsNegative are
+    // unimplemented (Redpanda SR doesn't support them).
     auto request
       = http::request_builder{}
           .method(boost::beast::http::verb::get)
           .path(fmt::format("/subjects/{}/versions", encode_subject(subject)))
           .header("accept", accept_json);
+    add_deleted_param(request, deleted);
     maybe_add_basic_auth(request);
 
     auto response = co_await perform_request(rtc, std::move(request));
@@ -280,7 +293,8 @@ ss::future<std::expected<stored_schema, domain_error>>
 client::get_schema_by_version(
   const context_subject& subject,
   schema_version version,
-  retry_chain_node& rtc) {
+  retry_chain_node& rtc,
+  include_deleted deleted) {
     auto gate = maybe_gate();
     if (!gate.has_value()) {
         co_return std::unexpected(std::move(gate.error()));
@@ -292,6 +306,7 @@ client::get_schema_by_version(
             fmt::format(
               "/subjects/{}/versions/{}", encode_subject(subject), version()))
           .header("accept", accept_json);
+    add_deleted_param(request, deleted);
     maybe_add_basic_auth(request);
 
     auto response = co_await perform_request(rtc, std::move(request));

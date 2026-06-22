@@ -68,6 +68,17 @@ void register_schema(
     BOOST_REQUIRE_EQUAL(res.headers.result(), bh::status::ok);
 }
 
+// Issue a soft (impermanent) DELETE against subject_path via the seed client.
+void soft_delete(http::client& client, std::string_view subject_path) {
+    auto res = http_request(
+      client,
+      fmt::format("/subjects/{}", subject_path),
+      bh::verb::delete_,
+      serialization_format::schema_registry_v1_json,
+      serialization_format::schema_registry_v1_json);
+    BOOST_REQUIRE_EQUAL(res.headers.result(), bh::status::ok);
+}
+
 } // namespace
 
 // Drives the rest_client against the in-tree Schema Registry server: seeds
@@ -164,6 +175,71 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
         BOOST_REQUIRE(!res.has_value());
         BOOST_REQUIRE(
           std::holds_alternative<rc::version_not_found>(res.error()));
+    }
+
+    info("deleted=true surfaces soft-deleted versions and subjects");
+    {
+        // Soft-delete version 1 of "multi" (v2 remains, so the subject stays
+        // live) and the whole single-version "solo" subject.
+        soft_delete(seed, "multi/versions/1");
+        soft_delete(seed, "solo");
+
+        auto contains = [](const auto& range, const pps::context_subject& s) {
+            return std::ranges::find(range, s) != range.end();
+        };
+
+        info(
+          "list_subject_versions hides v1 by default, shows it with deleted");
+        {
+            auto live = sut.list_subject_versions(multi, rtc).get();
+            BOOST_REQUIRE(live.has_value());
+            BOOST_REQUIRE_EQUAL(live->size(), 1U);
+            BOOST_REQUIRE_EQUAL((*live)[0], pps::schema_version{2});
+
+            auto all
+              = sut.list_subject_versions(multi, rtc, pps::include_deleted::yes)
+                  .get();
+            BOOST_REQUIRE(all.has_value());
+            BOOST_REQUIRE_EQUAL(all->size(), 2U);
+            BOOST_REQUIRE_EQUAL((*all)[0], pps::schema_version{1});
+            BOOST_REQUIRE_EQUAL((*all)[1], pps::schema_version{2});
+        }
+
+        info(
+          "get_schema_by_version reaches a soft-deleted version with deleted");
+        {
+            auto missing
+              = sut.get_schema_by_version(multi, pps::schema_version{1}, rtc)
+                  .get();
+            BOOST_REQUIRE(!missing.has_value());
+            BOOST_REQUIRE(
+              std::holds_alternative<rc::version_not_found>(missing.error()));
+
+            auto found = sut
+                           .get_schema_by_version(
+                             multi,
+                             pps::schema_version{1},
+                             rtc,
+                             pps::include_deleted::yes)
+                           .get();
+            BOOST_REQUIRE(found.has_value());
+            BOOST_REQUIRE_EQUAL(found->version, pps::schema_version{1});
+            // Only the per-version response carries an explicit deleted flag;
+            // confirm it round-trips into stored_schema.
+            BOOST_REQUIRE(found->deleted == pps::is_deleted::yes);
+        }
+
+        info("list_subjects hides a fully-deleted subject without deleted");
+        {
+            auto live = sut.list_subjects(rtc).get();
+            BOOST_REQUIRE(live.has_value());
+            BOOST_REQUIRE(!contains(live.value(), solo));
+            BOOST_REQUIRE(contains(live.value(), multi));
+
+            auto all = sut.list_subjects(rtc, pps::include_deleted::yes).get();
+            BOOST_REQUIRE(all.has_value());
+            BOOST_REQUIRE(contains(all.value(), solo));
+        }
     }
 
     sut.shutdown().get();
