@@ -44,6 +44,11 @@ constexpr std::string_view schema_v1
   = R"({"schema": "{\"type\": \"record\", \"name\": \"r1\", \"fields\": [{\"name\": \"f1\", \"type\": \"string\"}]}", "schemaType": "AVRO"})";
 constexpr std::string_view schema_v2
   = R"({"schema": "{\"type\": \"record\", \"name\": \"r1\", \"fields\": [{\"name\": \"f1\", \"type\": \"string\"}, {\"name\": \"f2\", \"type\": \"string\", \"default\": \"\"}]}", "schemaType": "AVRO"})";
+// Same shape as schema_v1 but carries metadata.properties. Redpanda's SR models
+// only metadata.properties (not e.g. tags), so the read path parses it back and
+// reports nothing as unknown.
+constexpr std::string_view schema_with_metadata
+  = R"({"schema": "{\"type\": \"record\", \"name\": \"r1\", \"fields\": [{\"name\": \"f1\", \"type\": \"string\"}]}", "schemaType": "AVRO", "metadata": {"properties": {"owner": "team-a", "tier": "gold"}}})";
 
 rc::client make_rest_client(uint16_t port) {
     net::base_transport::configuration cfg;
@@ -94,6 +99,7 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
     register_schema(seed, "multi", schema_v1);
     register_schema(seed, "multi", schema_v2);
     register_schema(seed, "solo", schema_v1);
+    register_schema(seed, "withmeta", schema_with_metadata);
     // Qualified subjects are enabled by default; this exercises the client's
     // %3A path encoding end-to-end against the real server.
     register_schema(seed, ":.myctx:ctx-sub", schema_v1);
@@ -104,6 +110,7 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
 
     const auto multi = pps::context_subject::unqualified("multi");
     const auto solo = pps::context_subject::unqualified("solo");
+    const auto withmeta = pps::context_subject::unqualified("withmeta");
     const auto ctx_sub = pps::context_subject{
       pps::context{".myctx"}, pps::subject{"ctx-sub"}};
 
@@ -142,6 +149,24 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
         BOOST_REQUIRE_GE(s.id(), 1);
         BOOST_REQUIRE(s.schema.def().type() == pps::schema_type::avro);
         BOOST_REQUIRE(!s.schema.def().raw()().linearize_to_string().empty());
+    }
+
+    info("get_schema_by_version round-trips metadata.properties");
+    {
+        auto res
+          = sut.get_schema_by_version(withmeta, pps::schema_version{1}, rtc)
+              .get();
+        BOOST_REQUIRE(res.has_value());
+        // metadata.properties is modeled, so it parses back in full and nothing
+        // is reported as unknown.
+        BOOST_REQUIRE(res->unknown_fields.empty());
+        const auto& def = res->schema.schema.def();
+        BOOST_REQUIRE(def.meta().has_value());
+        BOOST_REQUIRE(def.meta()->properties.has_value());
+        const auto& props = def.meta()->properties.value();
+        BOOST_REQUIRE_EQUAL(props.size(), 2U);
+        BOOST_REQUIRE_EQUAL(props.at("owner"), "team-a");
+        BOOST_REQUIRE_EQUAL(props.at("tier"), "gold");
     }
 
     info("get_schema_by_version reaches a context-qualified subject (%3A)");

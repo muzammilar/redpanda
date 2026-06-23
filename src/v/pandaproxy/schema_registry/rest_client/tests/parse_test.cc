@@ -383,10 +383,12 @@ TEST_CORO(parse_subject_version_test, reference_subject_honors_policy) {
 }
 
 TEST_CORO(parse_subject_version_test, records_unmodeled_fields) {
-    // guid/ts/ruleSet/schemaTags/metadata (and a future field) are not mapped
-    // into the schema, but their top-level names are recorded so the caller can
-    // decide whether dropping them is acceptable. A nested object/array is
-    // skipped without descending into it.
+    // guid/ts/ruleSet/schemaTags (and a future field) are not mapped into the
+    // schema, but their top-level names are recorded so the caller can decide
+    // whether dropping them is acceptable. A nested object/array under such a
+    // field is skipped without descending into it. metadata is special: its
+    // modeled `properties` is captured, while an unmodeled sub-key
+    // (`sensitive`) is reported under a `metadata.` prefix.
     auto res = co_await parse_subject_version(
       iobuf::from(
         R"({"guid":"abc","ts":1715000000000,"subject":"User","version":1,)"
@@ -401,18 +403,92 @@ TEST_CORO(parse_subject_version_test, records_unmodeled_fields) {
       s.schema.sub(), (context_subject{default_context, subject{"User"}}));
     ASSERT_EQ_CORO(s.version, schema_version{1});
     ASSERT_EQ_CORO(s.id, schema_id{7});
-    // metadata is not mapped into the schema in v1.
-    ASSERT_FALSE_CORO(s.schema.def().meta().has_value());
-    // The unmodeled top-level keys are reported, in encounter order; nested
-    // keys (metadata.properties, ruleSet.domainRules, ...) are not.
+    // metadata.properties is captured into the schema.
+    ASSERT_TRUE_CORO(s.schema.def().meta().has_value());
+    ASSERT_TRUE_CORO(s.schema.def().meta()->properties.has_value());
+    const auto& props = *s.schema.def().meta()->properties;
+    ASSERT_EQ_CORO(props.size(), size_t{1});
+    ASSERT_EQ_CORO(props.at("owner"), "team-a");
+    // The unmodeled keys are reported, in encounter order; modeled nested keys
+    // (metadata.properties, ruleSet.domainRules, ...) are not. metadata's
+    // unmodeled `sensitive` sub-key is reported under a `metadata.` prefix.
     const auto& unknown = res.value().unknown_fields;
     ASSERT_EQ_CORO(unknown.size(), size_t{6});
     ASSERT_EQ_CORO(unknown[0], "guid");
     ASSERT_EQ_CORO(unknown[1], "ts");
     ASSERT_EQ_CORO(unknown[2], "ruleSet");
-    ASSERT_EQ_CORO(unknown[3], "metadata");
+    ASSERT_EQ_CORO(unknown[3], "metadata.sensitive");
     ASSERT_EQ_CORO(unknown[4], "schemaTags");
     ASSERT_EQ_CORO(unknown[5], "futureField");
+}
+
+TEST_CORO(parse_subject_version_test, metadata_properties_coercion) {
+    // metadata.properties is a string map; numbers and booleans are coerced to
+    // strings (matching the write path), and key order is normalized by the
+    // underlying btree_map.
+    auto res = co_await parse_subject_version(
+      iobuf::from(
+        R"({"subject":"r","version":1,"id":2,"schema":"x","metadata":)"
+        R"({"properties":{"owner":"team-a","count":3,"ratio":1.5,)"
+        R"("enabled":true,"hidden":false}}})"),
+      qualified_subjects_enabled::yes);
+    ASSERT_TRUE_CORO(res.has_value());
+    ASSERT_TRUE_CORO(res.value().unknown_fields.empty());
+    const auto& meta = res.value().schema.schema.def().meta();
+    ASSERT_TRUE_CORO(meta.has_value());
+    ASSERT_TRUE_CORO(meta->properties.has_value());
+    const auto& props = *meta->properties;
+    ASSERT_EQ_CORO(props.size(), size_t{5});
+    ASSERT_EQ_CORO(props.at("owner"), "team-a");
+    ASSERT_EQ_CORO(props.at("count"), "3");
+    ASSERT_EQ_CORO(props.at("ratio"), "1.5");
+    ASSERT_EQ_CORO(props.at("enabled"), "true");
+    ASSERT_EQ_CORO(props.at("hidden"), "false");
+}
+
+TEST_CORO(parse_subject_version_test, metadata_present_without_properties) {
+    // metadata carrying only unmodeled sub-keys still yields a present (but
+    // empty) schema_metadata; each unmodeled sub-key is reported with a prefix.
+    auto res = co_await parse_subject_version(
+      iobuf::from(
+        R"({"subject":"r","version":1,"id":2,"schema":"x","metadata":)"
+        R"({"tags":{"f":["PII"]},"sensitive":["ssn"]}})"),
+      qualified_subjects_enabled::yes);
+    ASSERT_TRUE_CORO(res.has_value());
+    const auto& meta = res.value().schema.schema.def().meta();
+    ASSERT_TRUE_CORO(meta.has_value());
+    ASSERT_FALSE_CORO(meta->properties.has_value());
+    const auto& unknown = res.value().unknown_fields;
+    ASSERT_EQ_CORO(unknown.size(), size_t{2});
+    ASSERT_EQ_CORO(unknown[0], "metadata.tags");
+    ASSERT_EQ_CORO(unknown[1], "metadata.sensitive");
+}
+
+TEST_CORO(parse_subject_version_test, metadata_empty_and_null) {
+    // metadata: {} is present-but-empty; metadata: null is treated as absent.
+    auto empty_obj = co_await parse_subject_version(
+      iobuf::from(R"({"subject":"r","version":1,"id":2,"metadata":{}})"),
+      qualified_subjects_enabled::yes);
+    ASSERT_TRUE_CORO(empty_obj.has_value());
+    ASSERT_TRUE_CORO(empty_obj.value().unknown_fields.empty());
+    ASSERT_TRUE_CORO(empty_obj.value().schema.schema.def().meta().has_value());
+
+    auto null_meta = co_await parse_subject_version(
+      iobuf::from(R"({"subject":"r","version":1,"id":2,"metadata":null})"),
+      qualified_subjects_enabled::yes);
+    ASSERT_TRUE_CORO(null_meta.has_value());
+    ASSERT_TRUE_CORO(null_meta.value().unknown_fields.empty());
+    ASSERT_FALSE_CORO(null_meta.value().schema.schema.def().meta().has_value());
+
+    // metadata.properties: null leaves properties absent (metadata present).
+    auto null_props = co_await parse_subject_version(
+      iobuf::from(
+        R"({"subject":"r","version":1,"metadata":{"properties":null}})"),
+      qualified_subjects_enabled::yes);
+    ASSERT_TRUE_CORO(null_props.has_value());
+    const auto& meta = null_props.value().schema.schema.def().meta();
+    ASSERT_TRUE_CORO(meta.has_value());
+    ASSERT_FALSE_CORO(meta->properties.has_value());
 }
 
 TEST_CORO(parse_subject_version_test, absent_fields_use_sentinels_not_error) {
@@ -455,9 +531,13 @@ TEST_CORO(parse_subject_version_test, rejects_unrepresentable) {
           R"({"id":2147483648,"subject":"r"})",  // > INT32_MAX
           R"({"references":[{"version":"x"}]})", // bad reference element
           R"({"references":5})",                 // references not an array
-          "[1,2,3]",                             // not an object
-          R"({"subject":"r")",                   // truncated
-          R"({"subject":"r"}garbage)",           // trailing content after }
+          R"({"metadata":5,"subject":"r"})",     // metadata not an object
+          R"({"metadata":{"properties":5}})",    // properties not an object
+          R"({"metadata":{"properties":{"k":["x"]}}})", // value not a scalar
+          R"({"metadata":{"properties":{"k":null}}})",  // value null
+          "[1,2,3]",                                    // not an object
+          R"({"subject":"r")",                          // truncated
+          R"({"subject":"r"}garbage)", // trailing content after }
           "not json"}) {
         SCOPED_TRACE(body);
         auto res = co_await parse_subject_version(

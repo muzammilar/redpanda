@@ -226,6 +226,89 @@ parse_references(serde::json::parser& p, qualified_subjects_enabled qualified) {
       parse_error{.reason = "truncated or malformed references array"});
 }
 
+// The result of parsing a metadata object: the modeled portion plus the names
+// of any sub-keys we don't model.
+struct parsed_metadata {
+    schema_metadata metadata;
+    // Unmodeled keys found directly inside `metadata` (e.g. `tags`,
+    // `sensitive`), unqualified; the caller qualifies and propagates them.
+    chunked_vector<ss::sstring> unknown_fields;
+};
+
+// Parse a metadata object of the form {"properties": {<str>: <str>}, ...}.
+// Entered with the current token at the object start; leaves the parser at the
+// end_object token. Only `properties` is modeled; its values are stored as
+// strings, with numbers and booleans coerced to strings to match the write
+// path. Any other key (e.g. `tags`, `sensitive`) is returned, unqualified, in
+// parsed_metadata::unknown_fields for the caller to record.
+ss::future<std::expected<parsed_metadata, parse_error>>
+parse_metadata(serde::json::parser& p) {
+    using token = serde::json::token;
+    parsed_metadata result;
+    while (co_await p.next()) {
+        if (p.token() == token::end_object) {
+            co_return result;
+        }
+        auto key = p.value_string().linearize_to_string();
+        if (!co_await p.next()) {
+            co_return std::unexpected(
+              parse_error{.reason = "truncated JSON in schema metadata"});
+        }
+        if (key != "properties") {
+            result.unknown_fields.push_back(std::move(key));
+            co_await p.skip_value();
+            continue;
+        }
+        if (p.token() == token::value_null) {
+            continue;
+        }
+        if (p.token() != token::start_object) {
+            co_return std::unexpected(
+              parse_error{
+                .reason = "schema metadata properties must be an object"});
+        }
+        auto& props = result.metadata.properties.emplace();
+        while (co_await p.next()) {
+            if (p.token() == token::end_object) {
+                break;
+            }
+            auto prop_key = p.value_string().linearize_to_string();
+            if (!co_await p.next()) {
+                co_return std::unexpected(
+                  parse_error{
+                    .reason = "truncated JSON in schema metadata properties"});
+            }
+            switch (p.token()) {
+            case token::value_string:
+                props.insert_or_assign(
+                  std::move(prop_key), p.value_string().linearize_to_string());
+                break;
+            case token::value_int:
+                props.insert_or_assign(
+                  std::move(prop_key), ssx::sformat("{}", p.value_int()));
+                break;
+            case token::value_double:
+                props.insert_or_assign(
+                  std::move(prop_key), ssx::sformat("{}", p.value_double()));
+                break;
+            case token::value_true:
+                props.insert_or_assign(std::move(prop_key), "true");
+                break;
+            case token::value_false:
+                props.insert_or_assign(std::move(prop_key), "false");
+                break;
+            default:
+                co_return std::unexpected(
+                  parse_error{
+                    .reason = "schema metadata property value must be a "
+                              "string, number, or boolean"});
+            }
+        }
+    }
+    co_return std::unexpected(
+      parse_error{.reason = "truncated or malformed schema metadata object"});
+}
+
 } // namespace
 
 ss::future<std::expected<parsed_schema, parse_error>>
@@ -248,6 +331,7 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
         schema_type type{schema_type::avro};
         schema_definition::references refs;
         is_deleted deleted{false};
+        std::optional<schema_metadata> metadata;
         chunked_vector<ss::sstring> unknown_fields;
 
         while (co_await p.next()) {
@@ -272,7 +356,7 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
                           std::move(schema).value_or(iobuf{})},
                         type,
                         std::move(refs),
-                        std::nullopt}},
+                        std::move(metadata)}},
                     .version = version.value_or(invalid_schema_version),
                     .id = id.value_or(invalid_schema_id),
                     .deleted = deleted},
@@ -353,10 +437,30 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
                     co_return std::unexpected(std::move(r.error()));
                 }
                 refs = std::move(*r);
+            } else if (key == "metadata") {
+                // Partially modeled: parse_metadata captures `properties` and
+                // returns any other sub-key (e.g. `tags`), which we qualify
+                // with a `metadata.` prefix into unknown_fields. A null
+                // metadata is treated as absent; any other non-object is
+                // unrepresentable.
+                if (p.token() == token::start_object) {
+                    auto m = co_await parse_metadata(p);
+                    if (!m) {
+                        co_return std::unexpected(std::move(m.error()));
+                    }
+                    metadata = std::move(m->metadata);
+                    for (const auto& sub : m->unknown_fields) {
+                        unknown_fields.push_back(
+                          ssx::sformat("metadata.{}", sub));
+                    }
+                } else if (p.token() != token::value_null) {
+                    co_return std::unexpected(
+                      parse_error{.reason = "metadata must be an object"});
+                }
             } else {
                 // Unknown / not-yet-modeled field (guid, ts, ruleSet,
-                // schemaTags, metadata, ...): skip its value, but record the
-                // top-level key so the caller can decide whether dropping it is
+                // schemaTags, ...): skip its value, but record the top-level
+                // key so the caller can decide whether dropping it is
                 // acceptable.
                 unknown_fields.push_back(std::move(key));
                 co_await p.skip_value();
