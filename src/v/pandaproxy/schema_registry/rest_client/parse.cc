@@ -22,6 +22,29 @@
 
 namespace pandaproxy::schema_registry::rest_client {
 
+namespace {
+
+// A present version must be a positive value representable as int32; this also
+// keeps a present value from aliasing invalid_schema_version (-1).
+std::optional<int32_t> checked_positive_i32(int64_t v) {
+    if (v < 1 || v > std::numeric_limits<int32_t>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<int32_t>(v);
+}
+
+// A present id may be 0 (upstream permits id 0 on import), so it must be a
+// non-negative value representable as int32; this keeps a present value from
+// aliasing invalid_schema_id (-1).
+std::optional<int32_t> checked_nonnegative_i32(int64_t v) {
+    if (v < 0 || v > std::numeric_limits<int32_t>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<int32_t>(v);
+}
+
+} // namespace
+
 ss::future<std::expected<chunked_vector<context_subject>, parse_error>>
 parse_subjects(iobuf body, qualified_subjects_enabled qualified) {
     using token = serde::json::token;
@@ -97,8 +120,8 @@ parse_subject_versions(iobuf body) {
                 }
                 co_return std::move(versions);
             case token::value_int: {
-                auto v = p.value_int();
-                if (v < 0) {
+                auto raw = p.value_int();
+                if (raw < 0) {
                     // Only the deletedAsNegative mode produces negatives, which
                     // this client does not request; modeling soft-deleted
                     // versions is future work.
@@ -107,11 +130,12 @@ parse_subject_versions(iobuf body) {
                         .reason = "negative version number; deletedAsNegative "
                                   "mode is not supported"});
                 }
-                if (v < 1 || v > std::numeric_limits<int32_t>::max()) {
+                auto v = checked_positive_i32(raw);
+                if (!v) {
                     co_return std::unexpected(
                       parse_error{.reason = "version number out of range"});
                 }
-                versions.push_back(schema_version{static_cast<int32_t>(v)});
+                versions.push_back(schema_version{*v});
                 break;
             }
             default:
@@ -132,25 +156,6 @@ parse_subject_versions(iobuf body) {
 }
 
 namespace {
-
-// A present version must be a positive value representable as int32; this also
-// keeps a present value from aliasing invalid_schema_version (-1).
-std::optional<int32_t> checked_positive_i32(int64_t v) {
-    if (v < 1 || v > std::numeric_limits<int32_t>::max()) {
-        return std::nullopt;
-    }
-    return static_cast<int32_t>(v);
-}
-
-// A present id may be 0 (upstream permits id 0 on import), so it must be a
-// non-negative value representable as int32; this keeps a present value from
-// aliasing invalid_schema_id (-1).
-std::optional<int32_t> checked_nonnegative_i32(int64_t v) {
-    if (v < 0 || v > std::numeric_limits<int32_t>::max()) {
-        return std::nullopt;
-    }
-    return static_cast<int32_t>(v);
-}
 
 // Parse a JSON array of {name, subject, version} reference objects. Entered
 // with the current token at the array start; leaves the parser at the end_array
