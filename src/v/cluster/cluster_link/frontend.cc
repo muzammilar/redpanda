@@ -27,6 +27,7 @@
 #include "ssx/when_all.h"
 
 #include <algorithm>
+#include <variant>
 
 namespace cluster::cluster_link {
 
@@ -331,6 +332,70 @@ bool link_shadows_schema_registry_topic(
     }
     // Topic mode owns _schemas even before the mirror topic appears.
     return md.configuration.schema_registry_sync_cfg.is_topic_mode();
+}
+
+bool link_shadows_schema_registry(const ::cluster_link::model::metadata& md) {
+    return link_shadows_schema_registry_topic(md)
+           || md.configuration.schema_registry_sync_cfg.api_mode() != nullptr;
+}
+
+bool filter_selects_source_context(
+  const ::cluster_link::model::schema_registry_sync_config::source_filter&
+    filter,
+  std::string_view source_context) {
+    if (
+      std::ranges::find(filter.contexts, source_context)
+      != filter.contexts.end()) {
+        return true;
+    }
+    return std::ranges::any_of(
+      filter.subjects, [source_context](const auto& subject) {
+          const auto parsed = ppsr::context_subject::from_string(
+            subject, ppsr::qualified_subjects_enabled::yes);
+          return std::string_view{parsed.ctx()} == source_context;
+      });
+}
+
+bool api_mode_shadows_context(
+  const ::cluster_link::model::schema_registry_sync_config::
+    shadow_schema_registry_api& api,
+  std::string_view dest_context) {
+    // No filters
+    if (api.filter.contexts.empty() && api.filter.subjects.empty()) {
+        return true;
+    }
+
+    // Identity mapping: the destination context name equals the source name.
+    if (!api.destination) {
+        return filter_selects_source_context(api.filter, dest_context);
+    }
+
+    return ss::visit(
+      *api.destination,
+      [&api, dest_context](
+        const ::cluster_link::model::schema_registry_sync_config::
+          identity_context_mapping&) {
+          // Identity mapping: the destination context name equals the source
+          // name.
+          return filter_selects_source_context(api.filter, dest_context);
+      },
+      [&api, dest_context](
+        const ::cluster_link::model::schema_registry_sync_config::
+          exact_context_mapping& destination) {
+          // Exact mapping: a destination context is owned only when some
+          // filter-selected source maps to it. Both conditions matter -- a
+          // mapping whose source is not selected by the filter is inert
+          // (nothing is mirrored into its destination), so matching the
+          // destination name alone would over-block.
+          for (const auto& [src_ctx, dst_ctx] : destination.mappings) {
+              if (
+                dst_ctx == dest_context
+                && filter_selects_source_context(api.filter, src_ctx)) {
+                  return true;
+              }
+          }
+          return false;
+      });
 }
 
 bool link_disables_schema_registry_writes(
