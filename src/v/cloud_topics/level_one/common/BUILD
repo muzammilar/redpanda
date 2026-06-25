@@ -120,7 +120,6 @@ redpanda_cc_library(
         ":object_id",
         ":object_utils",
         ":single_flight",
-        "//src/v/base",
         "//src/v/cloud_io:cache",
         "//src/v/cloud_io:io_result",
         "//src/v/cloud_io:remote",
