@@ -143,6 +143,8 @@ std::string_view to_string_view(feature f) {
         return "cloud_topics";
     case feature::tiered_cloud_topics:
         return "tiered_cloud_topics";
+    case feature::fetch_controller_snapshot_rpc:
+        return "fetch_controller_snapshot_rpc";
 
     /*
      * testing features

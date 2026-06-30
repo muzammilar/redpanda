@@ -456,7 +456,7 @@ raft_node_instance::initialise(std::vector<raft::vnode> initial_nodes) {
       },
       [this] { return storage::log_config(_base_directory, 8_MiB); },
       std::ref(_features));
-    co_await _storage.invoke_on_all(&storage::api::start);
+    co_await _storage.invoke_on_all([](storage::api& a) { return a.start(); });
     storage::ntp_config ntp_cfg(ntp(), _base_directory);
 
     _underlying_log = co_await _storage.local().log_mgr().manage(
