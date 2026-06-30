@@ -828,6 +828,7 @@ public:
     property<bool> cloud_topics_compaction_disabled;
     property<bool> cloud_topics_leveling_disabled;
     bounded_property<uint64_t> cloud_topics_compaction_key_map_memory;
+    bounded_property<size_t> cloud_topics_l1_streaming_read_chunk_size;
     property<std::chrono::milliseconds>
       cloud_topics_long_term_garbage_collection_interval;
     property<std::chrono::milliseconds> cloud_topics_long_term_flush_interval;

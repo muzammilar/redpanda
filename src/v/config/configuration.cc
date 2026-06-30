@@ -4955,6 +4955,19 @@ configuration::configuration()
        .visibility = visibility::tunable},
       128_MiB,
       {.min = 16_MiB, .max = 100_GiB})
+  , cloud_topics_l1_streaming_read_chunk_size(
+      *this,
+      "cloud_topics_l1_streaming_read_chunk_size",
+      "Maximum number of object-storage bytes that a cache-bypassing L1 "
+      "streaming read (used by leveling and compaction) buffers in memory at "
+      "once before serving them to the reader. Bounds both peak per-read "
+      "memory and how much of an object is downloaded under a single held "
+      "cloud storage client connection.",
+      {.needs_restart = needs_restart::no,
+       .example = "16777216",
+       .visibility = visibility::tunable},
+      32_MiB,
+      {.min = 1_MiB, .max = 128_MiB})
   , cloud_topics_long_term_garbage_collection_interval(
       *this,
       "cloud_topics_long_term_garbage_collection_interval",
