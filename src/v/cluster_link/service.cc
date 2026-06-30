@@ -29,6 +29,7 @@
 #include "cluster_link/replication/deps.h"
 #include "cluster_link/replication/mux_remote_consumer.h"
 #include "cluster_link/replication/types.h"
+#include "cluster_link/roles_migrator.h"
 #include "cluster_link/schema_registry_sync/mirroring_task.h"
 #include "cluster_link/schema_registry_sync/unavailable_source_reader.h"
 #include "cluster_link/security_migrator.h"
@@ -1279,7 +1280,10 @@ ss::future<> service::maybe_start_manager() {
         _shard_table, _partition_manager, _smp_group),
       topic_metadata_cache::make_default(_metadata_cache),
       topic_creator::make_default(_controller),
-      security_service::make_default(_security_fe),
+      security_service::make_default(
+        _security_fe,
+        &_controller->get_role_store(),
+        &_controller->get_feature_table()),
       std::make_unique<link_registry_adapter>(&_plf->local(), this),
       std::make_unique<default_link_factory>(
         _partition_manager,
@@ -1298,6 +1302,7 @@ ss::future<> service::maybe_start_manager() {
     co_await _manager->register_task_factory<source_topic_syncer_factory>();
     co_await _manager->register_task_factory<group_mirroring_task_factory>();
     co_await _manager->register_task_factory<security_migrator_factory>();
+    co_await _manager->register_task_factory<roles_migrator_factory>();
 
     // The destination Schema Registry and source reader factory are owned by
     // the service so they outlive the tasks. The source reader is unavailable
